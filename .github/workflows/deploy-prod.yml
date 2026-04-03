@@ -1,0 +1,2 @@
+# TODO: GitHub Actions — deploy to AWS on push to main
+# Steps: checkout → install → typecheck → lint → build → ssh deploy to EC2
