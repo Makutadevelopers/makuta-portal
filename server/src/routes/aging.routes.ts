@@ -1,14 +1,14 @@
-// audit.routes.ts
-// GET /api/audit — ho only
+// aging.routes.ts
+// GET /api/aging — ho + mgmt only
 
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requireRole } from '../middleware/rbac';
-import { getAuditLogs } from '../controllers/audit.controller';
+import { getAging } from '../controllers/aging.controller';
 
 const router = Router();
 
 router.use(authenticate);
-router.get('/', requireRole(['ho']), getAuditLogs);
+router.get('/', requireRole(['ho', 'mgmt']), getAging);
 
 export default router;
