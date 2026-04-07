@@ -127,7 +127,7 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
 
 export async function getPayments(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { id: invoiceId } = req.params;
+    const invoiceId = req.params.id as string;
 
     const payments = await query<PaymentRow>(
       'SELECT * FROM payments WHERE invoice_id = $1 ORDER BY payment_date',

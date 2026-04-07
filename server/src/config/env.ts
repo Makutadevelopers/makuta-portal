@@ -38,6 +38,9 @@ const envSchema = z.object({
   SMTP_PASS: z.string().default(''),
   SMTP_FROM: z.string().default('noreply@makutadevelopers.com'),
 
+  // CORS
+  ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
+
   // AWS S3
   AWS_REGION: z.string().min(1, 'AWS_REGION is required'),
   AWS_ACCESS_KEY_ID: z.string().min(1, 'AWS_ACCESS_KEY_ID is required'),

@@ -91,12 +91,17 @@ export async function updateVendor(
   data: UpdateVendorInput,
   _userId: string
 ): Promise<VendorRow | null> {
+  const ALLOWED_FIELDS = [
+    'name', 'payment_terms', 'category', 'gstin',
+    'contact_name', 'phone', 'email', 'notes',
+  ];
+
   const fields: string[] = [];
   const values: unknown[] = [];
   let paramIndex = 1;
 
   for (const [column, value] of Object.entries(data)) {
-    if (value !== undefined) {
+    if (value !== undefined && ALLOWED_FIELDS.includes(column)) {
       fields.push(`${column} = $${paramIndex}`);
       values.push(value);
       paramIndex++;

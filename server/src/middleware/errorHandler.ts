@@ -5,6 +5,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import multer from 'multer';
+import { env } from '../config/env';
 
 export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
   // Multer file upload errors
@@ -34,9 +35,12 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
   }
 
   // Known operational errors with a status code
-  const status = (err as any).status;
+  const status = (err as unknown as Record<string, unknown>).status;
   if (typeof status === 'number') {
-    res.status(status).json({ error: err.name || 'Error', message: err.message });
+    const message = env.NODE_ENV === 'production' && status >= 500
+      ? 'An unexpected error occurred'
+      : err.message;
+    res.status(status).json({ error: err.name || 'Error', message });
     return;
   }
 

@@ -372,6 +372,12 @@ export async function importPayments(req: Request, res: Response, next: NextFunc
           invoicesCreated++;
         }
 
+        if (!invoice) {
+          errors.push(`Row ${rowNum}: could not find or create invoice`);
+          skipped++;
+          continue;
+        }
+
         await queryOne(
           `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by)
            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -419,7 +425,7 @@ export async function importPayments(req: Request, res: Response, next: NextFunc
 }
 
 export function downloadTemplate(req: Request, res: Response): void {
-  const type = req.params.type;
+  const type = req.params.type as string;
 
   const templates: Record<string, { filename: string; content: string }> = {
     invoices: {

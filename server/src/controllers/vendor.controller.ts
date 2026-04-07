@@ -48,7 +48,7 @@ export async function getVendor(
   next: NextFunction
 ): Promise<void> {
   try {
-    const vendor = await getVendorById(req.params.id);
+    const vendor = await getVendorById(req.params.id as string);
     if (!vendor) {
       res.status(404).json({ error: 'Not Found', message: 'Vendor not found' });
       return;
@@ -95,7 +95,7 @@ export async function updateVendor(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const data = updateVendorSchema.parse(req.body);
 
     if (Object.keys(data).length === 0) {
@@ -138,7 +138,7 @@ export async function deleteVendor(
   next: NextFunction
 ): Promise<void> {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const vendor = await deleteVendorService(id);
 
     if (!vendor) {

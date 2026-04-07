@@ -11,6 +11,8 @@
     "build:server": "cd server && npm run build",
     "start": "cd server && npm start",
     "typecheck": "cd client && npm run typecheck && cd ../server && npm run typecheck",
+    "lint": "cd client && npm run lint && cd ../server && npm run lint",
+    "test": "cd server && npm test",
     "db:migrate": "cd server && npm run db:migrate",
     "db:seed": "cd server && npm run db:seed",
     "db:reset": "cd server && npm run db:reset",

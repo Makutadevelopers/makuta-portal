@@ -176,7 +176,7 @@ export default function InvoiceList() {
       {/* Filters */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendor, invoice no, PO..."
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-56 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-blue-200" />
         <select value={fSite} onChange={e => setFSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
           <option value="All">All Sites</option>
           {SITES.map(s => <option key={s}>{s}</option>)}
@@ -487,7 +487,7 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
         </div>
 
         {/* Payment details */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Payment Type</label>
             <select value={paymentType} onChange={e => setPaymentType(e.target.value)}
@@ -502,7 +502,7 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Payment Date</label>
             <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)}
@@ -549,7 +549,7 @@ function InvoiceInfoPanel({ invoice, history, loading, onClose }: {
         </div>
 
         {/* Invoice summary */}
-        <div className="grid grid-cols-2 gap-3 mb-5 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5 text-sm">
           <div className="bg-gray-50 rounded-lg p-3">
             <div className="text-xs text-gray-500">Internal No</div>
             <div className="font-mono font-medium text-purple-700">{invoice.internal_no ?? '—'}</div>
@@ -762,7 +762,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
       {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
 
       <form onSubmit={handleSubmit}>
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Month</label>
             <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 bg-gray-50">
@@ -804,7 +804,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Invoice No *</label>
             <input value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} placeholder="Invoice number"
@@ -824,7 +824,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Site Location</label>
             <select value={site} onChange={e => setSite(e.target.value)}

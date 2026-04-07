@@ -112,7 +112,7 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
 
 export async function updateInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const data = updateInvoiceSchema.parse(req.body);
     const { role, site } = req.user!;
 
@@ -137,12 +137,17 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
       return;
     }
 
+    const ALLOWED_UPDATE_FIELDS = [
+      'month', 'invoice_date', 'vendor_id', 'vendor_name', 'invoice_no',
+      'po_number', 'purpose', 'site', 'invoice_amount', 'remarks',
+    ];
+
     const fields: string[] = [];
     const values: unknown[] = [];
     let idx = 1;
 
     for (const [key, value] of Object.entries(data)) {
-      if (value !== undefined) {
+      if (value !== undefined && ALLOWED_UPDATE_FIELDS.includes(key)) {
         fields.push(`${key} = $${idx}`);
         values.push(value);
         idx++;
@@ -177,7 +182,7 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
 
 export async function pushInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const userId = req.user!.id;
 
     const invoice = await queryOne<InvoiceRow>(
@@ -216,13 +221,9 @@ export async function pushInvoice(req: Request, res: Response, next: NextFunctio
 
 export async function bulkPushInvoices(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { ids } = req.body as { ids: string[] };
+    const bulkSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) });
+    const { ids } = bulkSchema.parse(req.body);
     const userId = req.user!.id;
-
-    if (!Array.isArray(ids) || ids.length === 0) {
-      res.status(400).json({ error: 'Bad Request', message: 'ids array is required' });
-      return;
-    }
 
     const result = await query<InvoiceRow>(
       `UPDATE invoices
@@ -245,7 +246,7 @@ export async function bulkPushInvoices(req: Request, res: Response, next: NextFu
 
 export async function deleteInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const userId = req.user!.id;
 
     const existing = await queryOne<InvoiceRow>(
@@ -298,7 +299,7 @@ export async function getBinInvoices(req: Request, res: Response, next: NextFunc
 
 export async function restoreInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const userId = req.user!.id;
 
     const invoice = await queryOne<InvoiceRow>(
@@ -325,7 +326,7 @@ export async function restoreInvoice(req: Request, res: Response, next: NextFunc
 
 export async function permanentDeleteInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const userId = req.user!.id;
 
     const existing = await queryOne<InvoiceRow>(
@@ -376,7 +377,7 @@ export async function purgeOldBinInvoices(_req: Request, res: Response, next: Ne
 
 export async function undoPushInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const userId = req.user!.id;
 
     const invoice = await queryOne<InvoiceRow>(

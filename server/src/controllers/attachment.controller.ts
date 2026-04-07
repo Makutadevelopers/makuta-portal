@@ -36,7 +36,7 @@ interface AttachmentRow {
 
 export async function uploadAttachment(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { id: invoiceId } = req.params;
+    const invoiceId = req.params.id as string;
     const file = req.file;
 
     if (!file) {
@@ -54,13 +54,15 @@ export async function uploadAttachment(req: Request, res: Response, next: NextFu
       return;
     }
 
-    const s3Key = `invoices/${invoiceId}/${file.originalname}`;
+    // Sanitize filename to prevent path traversal
+    const sanitizedName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 255);
+    const s3Key = `invoices/${invoiceId}/${Date.now()}_${sanitizedName}`;
 
     if (isLocalDev) {
       // Save to local disk
       const dir = path.join(UPLOADS_DIR, 'invoices', invoiceId);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, file.originalname), file.buffer);
+      fs.writeFileSync(path.join(dir, sanitizedName), file.buffer);
     } else {
       // Upload to S3
       await s3.send(
@@ -88,7 +90,7 @@ export async function uploadAttachment(req: Request, res: Response, next: NextFu
 
 export async function getAttachments(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { id: invoiceId } = req.params;
+    const invoiceId = req.params.id as string;
 
     const attachments = await query<AttachmentRow>(
       'SELECT * FROM attachments WHERE invoice_id = $1 ORDER BY uploaded_at',
@@ -119,7 +121,8 @@ export async function getAttachments(req: Request, res: Response, next: NextFunc
 
 export async function downloadAttachment(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { id: invoiceId, attachmentId } = req.params;
+    const invoiceId = req.params.id as string;
+    const attachmentId = req.params.attachmentId as string;
 
     const att = await queryOne<AttachmentRow>(
       'SELECT * FROM attachments WHERE id = $1 AND invoice_id = $2',
@@ -138,7 +141,7 @@ export async function downloadAttachment(req: Request, res: Response, next: Next
     }
 
     res.setHeader('Content-Type', att.mime_type ?? 'application/octet-stream');
-    res.setHeader('Content-Disposition', `inline; filename="${att.file_name}"`);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(att.file_name)}`);
     fs.createReadStream(filePath).pipe(res);
   } catch (err) {
     next(err);

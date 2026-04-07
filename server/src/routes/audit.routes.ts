@@ -10,6 +10,6 @@ const router = Router();
 
 router.use(authenticate);
 router.get('/', requireRole(['ho']), getAuditLogs);
-router.get('/invoice/:invoiceId', getInvoiceHistory);
+router.get('/invoice/:invoiceId', requireRole(['ho']), getInvoiceHistory);
 
 export default router;

@@ -21,12 +21,14 @@ export interface Invoice {
   created_at: string;
   updated_at: string;
   attachment_count?: number;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
 }
 
 export interface CreateInvoiceData {
   month: string;
   invoice_date: string;
-  vendor_id: string;
+  vendor_id?: string;
   vendor_name: string;
   invoice_no: string;
   po_number?: string | null;

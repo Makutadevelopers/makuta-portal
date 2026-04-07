@@ -15,9 +15,9 @@ export default function MgmtOverview() {
   return (
     <AppShell>
       <div className="max-w-[1100px]">
-        <div className="mb-7">
-          <div className="text-xl font-medium text-gray-900">Overview</div>
-          <div className="text-xs text-gray-500 mt-1">{todayStr} · Accounting Module · All Sites</div>
+        <div className="mb-5 sm:mb-7">
+          <div className="text-lg sm:text-xl font-medium text-gray-900">Overview</div>
+          <div className="text-[11px] sm:text-xs text-gray-500 mt-1 truncate">{todayStr} · Accounting Module · All Sites</div>
         </div>
 
         {data.loading ? (
@@ -27,7 +27,7 @@ export default function MgmtOverview() {
         ) : (
           <div className="space-y-6">
             {/* KPI Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               {[
                 { label: 'Total Invoiced', value: formatINR(data.kpis.totalInvoiced), sub: 'all time · all sites', accent: '#1a3c5e', bg: '#e8eef5' },
                 { label: 'Total Paid', value: formatINR(data.kpis.totalPaid), sub: 'payments made to date', accent: '#15803d', bg: '#dcfce7' },
@@ -35,16 +35,16 @@ export default function MgmtOverview() {
                 { label: 'Overdue', value: formatINR(data.kpis.overdueAmount), sub: `${data.kpis.overdueCount} invoices past due`, accent: '#dc2626', bg: '#fef2f2' },
                 { label: 'Part-Paid Invoices', value: String(data.kpis.partPaidCount), sub: 'invoices with partial payment', accent: '#c2410c', bg: '#fff7ed' },
               ].map(c => (
-                <div key={c.label} className="rounded-xl p-5" style={{ background: c.bg, border: `1px solid ${c.accent}22` }}>
-                  <div className="text-[11px] font-medium uppercase tracking-wider mb-2.5" style={{ color: c.accent }}>{c.label}</div>
-                  <div className="text-[22px] font-semibold leading-none mb-1.5" style={{ color: c.accent }}>{c.value}</div>
-                  <div className="text-[11px]" style={{ color: c.accent, opacity: 0.7 }}>{c.sub}</div>
+                <div key={c.label} className="rounded-xl p-3 sm:p-5" style={{ background: c.bg, border: `1px solid ${c.accent}22` }}>
+                  <div className="text-[10px] sm:text-[11px] font-medium uppercase tracking-wider mb-1.5 sm:mb-2.5" style={{ color: c.accent }}>{c.label}</div>
+                  <div className="text-base sm:text-[22px] font-semibold leading-none mb-1 sm:mb-1.5 truncate" style={{ color: c.accent }}>{c.value}</div>
+                  <div className="text-[10px] sm:text-[11px] truncate" style={{ color: c.accent, opacity: 0.7 }}>{c.sub}</div>
                 </div>
               ))}
             </div>
 
             {/* Site-wise Position */}
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+            <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
               <div className="px-5 py-4 border-b border-gray-100">
                 <div className="text-sm font-medium text-gray-900">Site-wise Position</div>
                 <div className="text-[11px] text-gray-500 mt-0.5">Invoiced, paid and outstanding balance per project site</div>

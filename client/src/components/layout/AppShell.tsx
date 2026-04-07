@@ -45,8 +45,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="w-8 h-8 rounded-lg bg-[#1a3c5e] flex items-center justify-center flex-shrink-0">
             <span className="text-white text-sm font-medium">M</span>
           </div>
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-gray-900 truncate">Accounting Module</div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-gray-900 truncate">
+              <span className="sm:hidden">Makuta</span>
+              <span className="hidden sm:inline">Accounting Module</span>
+            </div>
             <div className="text-xs text-gray-500 truncate hidden sm:block">{subtitle}</div>
           </div>
         </div>

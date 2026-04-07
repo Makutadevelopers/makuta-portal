@@ -75,7 +75,7 @@ export default function MyInvoices() {
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Search vendor, invoice no, PO..."
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-56 focus:outline-none focus:ring-2 focus:ring-blue-200"
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-blue-200"
         />
         <select value={fPurpose} onChange={e => setFPurpose(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
           <option value="All">All Categories</option>
@@ -255,7 +255,7 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
 
       <form onSubmit={handleSubmit}>
         {/* Row 1: Month + Invoice Date */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Month</label>
             <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 bg-gray-50">
@@ -338,7 +338,7 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
         </div>
 
         {/* Row 3: Invoice No + PO + Category */}
-        <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Invoice No *</label>
             <input
@@ -370,7 +370,7 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
         </div>
 
         {/* Row 4: Site + Amount */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Site Location</label>
             <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 bg-gray-50">

@@ -18,13 +18,13 @@ export default function Dashboard() {
     <AppShell>
       <div className="max-w-[1100px]">
         {/* Page heading */}
-        <div className="flex items-center justify-between mb-7 flex-wrap gap-3">
-          <div>
-            <div className="text-xl font-medium text-gray-900">Management Dashboard</div>
-            <div className="text-xs text-gray-500 mt-1">{todayStr} · Accounting Module</div>
+        <div className="flex items-start justify-between mb-5 sm:mb-7 flex-wrap gap-3">
+          <div className="min-w-0">
+            <div className="text-lg sm:text-xl font-medium text-gray-900 truncate">Invoice Dashboard</div>
+            <div className="text-[11px] sm:text-xs text-gray-500 mt-1 truncate">{todayStr} · summary across all sites</div>
           </div>
           <button onClick={() => navigate('/invoices')}
-            className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
+            className="px-3 sm:px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d] flex-shrink-0">
             + New Invoice
           </button>
         </div>
@@ -63,20 +63,20 @@ function KpiCards({ kpis }: { kpis: Kpis }) {
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
       {cards.map(c => (
         <div
           key={c.label}
-          className="rounded-xl p-5"
+          className="rounded-xl p-3 sm:p-5"
           style={{ background: c.bg, border: `1px solid ${c.accent}22` }}
         >
-          <div className="text-[11px] font-medium uppercase tracking-wider mb-2.5" style={{ color: c.accent }}>
+          <div className="text-[10px] sm:text-[11px] font-medium uppercase tracking-wider mb-1.5 sm:mb-2.5" style={{ color: c.accent }}>
             {c.label}
           </div>
-          <div className="text-[22px] font-semibold leading-none mb-1.5" style={{ color: c.accent }}>
+          <div className="text-base sm:text-[22px] font-semibold leading-none mb-1 sm:mb-1.5 truncate" style={{ color: c.accent }}>
             {c.value}
           </div>
-          <div className="text-[11px]" style={{ color: c.accent, opacity: 0.7 }}>
+          <div className="text-[10px] sm:text-[11px] truncate" style={{ color: c.accent, opacity: 0.7 }}>
             {c.sub}
           </div>
         </div>
@@ -88,7 +88,7 @@ function KpiCards({ kpis }: { kpis: Kpis }) {
 // ── Section 2: Site-wise Expenditure Table ──────────────────────────────────
 function SiteExpenditureTable({ rows, kpis }: { rows: SiteRow[]; kpis: Kpis }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+    <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
       <div className="px-5 py-4 border-b border-gray-100">
         <div className="text-sm font-medium text-gray-900">Site-wise Expenditure</div>
         <div className="text-[11px] text-gray-500 mt-0.5">Invoiced, paid and outstanding balance per project site</div>

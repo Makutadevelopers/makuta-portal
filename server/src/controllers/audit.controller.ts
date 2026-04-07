@@ -33,7 +33,7 @@ export async function getAuditLogs(_req: Request, res: Response, next: NextFunct
 
 export async function getInvoiceHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { invoiceId } = req.params;
+    const invoiceId = req.params.invoiceId as string;
     const logs = await query<AuditRow>(
       `SELECT
          a.id, a.user_id, u.name AS user_name,

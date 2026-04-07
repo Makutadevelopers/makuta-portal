@@ -16,7 +16,6 @@ const ALLOWED_MIMES = [
   'application/csv',
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/octet-stream',
 ];
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB

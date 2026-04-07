@@ -88,7 +88,7 @@ export default function VendorMaster() {
 
       <div className="flex items-center gap-3 mb-4">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendors..."
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-56 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-blue-200" />
         <span className="text-xs text-gray-400 ml-auto">{filtered.length} vendors in master</span>
       </div>
 
@@ -200,7 +200,7 @@ function VendorForm({ vendor, onCancel, onSaved }: {
       {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
 
       <form onSubmit={handleSubmit}>
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Vendor Name *</label>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Company name"
@@ -226,7 +226,7 @@ function VendorForm({ vendor, onCancel, onSaved }: {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Category</label>
             <select value={category} onChange={e => setCategory(e.target.value)}
@@ -247,7 +247,7 @@ function VendorForm({ vendor, onCancel, onSaved }: {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Phone</label>
             <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="9848012345"

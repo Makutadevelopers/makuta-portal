@@ -12,12 +12,10 @@ import { uploadAttachment, getAttachments, downloadAttachment } from '../control
 
 const router = Router({ mergeParams: true });
 
-// Download is before auth — uses UUID-based unguessable URLs
-router.get('/:attachmentId/download', downloadAttachment);
-
 router.use(authenticate);
 
 router.post('/', requireRole(['ho', 'site']), upload.single('file'), uploadAttachment);
 router.get('/', getAttachments);
+router.get('/:attachmentId/download', downloadAttachment);
 
 export default router;
