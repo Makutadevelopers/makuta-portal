@@ -7,6 +7,7 @@ interface ImportResult {
   imported: number;
   skipped: number;
   total: number;
+  duplicates?: Array<{ row: number; invoiceNo: string; vendorName: string }>;
   errors?: string[];
 }
 
@@ -115,18 +116,40 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
 
         {/* Result */}
         {result && (
-          <div className={`mb-4 p-3 rounded-lg text-sm ${result.imported > 0 ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
-            <div className="font-medium">{result.message}</div>
-            {result.imported > 0 && (
-              <div className="text-xs mt-1">
-                Total rows: {result.total} · Imported: {result.imported} · Skipped: {result.skipped}
-              </div>
-            )}
-            {result.errors && result.errors.length > 0 && (
-              <div className="mt-2 text-xs space-y-0.5 max-h-32 overflow-y-auto">
-                {result.errors.map((err, i) => (
-                  <div key={i} className="text-red-600">{err}</div>
-                ))}
+          <div className="mb-4 space-y-3">
+            <div className={`p-3 rounded-lg text-sm ${result.imported > 0 ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+              <div className="font-medium">{result.message}</div>
+              {result.total > 0 && (
+                <div className="text-xs mt-1">
+                  Total rows: {result.total} · Imported: {result.imported} · Skipped: {result.skipped}
+                </div>
+              )}
+              {result.errors && result.errors.length > 0 && (
+                <div className="mt-2 text-xs space-y-0.5 max-h-32 overflow-y-auto">
+                  {result.errors.map((err, i) => (
+                    <div key={i} className="text-red-600">{err}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Duplicates found */}
+            {result.duplicates && result.duplicates.length > 0 && (
+              <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm">
+                <div className="font-medium text-amber-800 mb-2">
+                  {result.duplicates.length} duplicate{result.duplicates.length > 1 ? 's' : ''} already in system — skipped:
+                </div>
+                <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                  {result.duplicates.map((d, i) => (
+                    <div key={i} className="flex items-center justify-between text-xs bg-white rounded px-2.5 py-1.5 border border-amber-100">
+                      <div>
+                        <span className="font-medium text-gray-900">#{d.invoiceNo}</span>
+                        <span className="text-gray-500 ml-2">{d.vendorName}</span>
+                      </div>
+                      <span className="text-amber-600 text-[10px]">Row {d.row}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

@@ -41,6 +41,9 @@ const envSchema = z.object({
   // CORS
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
 
+  // Cron secret for internal scheduled endpoints
+  CRON_SECRET: z.string().default(''),
+
   // AWS S3
   AWS_REGION: z.string().min(1, 'AWS_REGION is required'),
   AWS_ACCESS_KEY_ID: z.string().min(1, 'AWS_ACCESS_KEY_ID is required'),

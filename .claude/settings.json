@@ -7,7 +7,17 @@
       "Bash(chmod +x /Users/sohailshaik/Desktop/makuta-portal/scripts/backup-db.sh /Users/sohailshaik/Desktop/makuta-portal/scripts/restore-db.sh)",
       "Bash(curl -s http://localhost:3002)",
       "Bash(curl -s -X POST http://localhost:4000/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"rajesh@makuta.in\",\"password\":\"ho123\"}')",
-      "Bash(kill -9 29231 29864 30161 30162 30176 30190 30405)"
+      "Bash(kill -9 29231 29864 30161 30162 30176 30190 30405)",
+      "Bash(chmod +x /Users/sohailshaik/Desktop/makuta-portal/scripts/daily-overdue-alert.sh)",
+      "Bash(ls /Users/sohailshaik/Desktop/makuta-portal/client/.env*)",
+      "Bash(pkill -f \"npm run dev\")",
+      "Bash(pkill -f \"vite\")",
+      "Bash(pkill -f \"tsx watch\")",
+      "Bash(curl -s http://localhost:3000/login)",
+      "Bash(curl -s http://localhost:4000/api/auth/login -X POST -H \"Content-Type: application/json\" -d '{\"email\":\"rajesh@makuta.in\",\"password\":\"ho123\"}')",
+      "Bash(python3 -c ':*)",
+      "Bash(psql -h localhost -p 5433 -U makuta_admin -d makuta_portal -c ':*)",
+      "Bash(brew list:*)"
     ]
   }
 }

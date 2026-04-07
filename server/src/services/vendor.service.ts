@@ -132,3 +132,175 @@ export async function deleteVendor(id: string): Promise<VendorRow | null> {
     [id]
   );
 }
+
+// ── Fuzzy vendor matching ──────────────────────────────────────────────────
+
+export interface SimilarVendorMatch {
+  id: string;
+  name: string;
+  similarity: 'exact' | 'similar';
+}
+
+const COMMON_SUFFIXES = [
+  'pvt', 'ltd', 'limited', 'private', 'enterprises', 'traders', 'india',
+];
+
+function normalizeVendorName(raw: string): string {
+  let name = raw.toLowerCase().trim();
+  for (const suffix of COMMON_SUFFIXES) {
+    // Remove suffix with optional preceding dot/space
+    name = name.replace(new RegExp(`[\\s.]*\\b${suffix}\\b[\\s.]*`, 'g'), ' ');
+  }
+  return name.replace(/\s+/g, ' ').trim();
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array.from({ length: n + 1 }, () => 0));
+
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1];
+      } else {
+        dp[i][j] = 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      }
+    }
+  }
+  return dp[m][n];
+}
+
+function charOverlapRatio(a: string, b: string): number {
+  const charsA = new Map<string, number>();
+  for (const c of a) charsA.set(c, (charsA.get(c) ?? 0) + 1);
+
+  let shared = 0;
+  for (const c of b) {
+    const count = charsA.get(c) ?? 0;
+    if (count > 0) {
+      shared++;
+      charsA.set(c, count - 1);
+    }
+  }
+  const total = Math.max(a.length, b.length);
+  return total === 0 ? 0 : shared / total;
+}
+
+export async function findSimilarVendors(inputName: string): Promise<SimilarVendorMatch[]> {
+  const vendors = await getAllVendors();
+  const results: SimilarVendorMatch[] = [];
+  const inputLower = inputName.toLowerCase().trim();
+  const inputNorm = normalizeVendorName(inputName);
+
+  for (const v of vendors) {
+    const vLower = v.name.toLowerCase().trim();
+    const vNorm = normalizeVendorName(v.name);
+
+    // Exact match (case-insensitive)
+    if (vLower === inputLower) {
+      results.push({ id: v.id, name: v.name, similarity: 'exact' });
+      continue;
+    }
+
+    // Substring containment
+    if (vLower.includes(inputLower) || inputLower.includes(vLower)) {
+      results.push({ id: v.id, name: v.name, similarity: 'similar' });
+      continue;
+    }
+
+    // Normalized Levenshtein distance <= 3
+    const dist = levenshteinDistance(inputNorm, vNorm);
+    if (dist <= 3) {
+      results.push({ id: v.id, name: v.name, similarity: dist === 0 ? 'exact' : 'similar' });
+      continue;
+    }
+
+    // Character overlap > 80%
+    if (charOverlapRatio(inputNorm, vNorm) > 0.8) {
+      results.push({ id: v.id, name: v.name, similarity: 'similar' });
+    }
+  }
+
+  return results.slice(0, 5);
+}
+
+export interface DuplicatePair {
+  vendorA: { id: string; name: string };
+  vendorB: { id: string; name: string };
+  reason: string;
+}
+
+export async function findAllDuplicatePairs(): Promise<DuplicatePair[]> {
+  const vendors = await getAllVendors();
+  const pairs: DuplicatePair[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 0; i < vendors.length; i++) {
+    for (let j = i + 1; j < vendors.length; j++) {
+      const a = vendors[i];
+      const b = vendors[j];
+      const normA = normalizeVendorName(a.name);
+      const normB = normalizeVendorName(b.name);
+
+      const pairKey = [a.id, b.id].sort().join(':');
+      if (seen.has(pairKey)) continue;
+
+      // Normalized exact match
+      if (normA === normB) {
+        seen.add(pairKey);
+        pairs.push({ vendorA: { id: a.id, name: a.name }, vendorB: { id: b.id, name: b.name }, reason: 'Same name (different capitalization/suffixes)' });
+        continue;
+      }
+
+      // Levenshtein distance <= 2 on normalized names (stricter for bulk scan)
+      const dist = levenshteinDistance(normA, normB);
+      if (dist > 0 && dist <= 2) {
+        seen.add(pairKey);
+        pairs.push({ vendorA: { id: a.id, name: a.name }, vendorB: { id: b.id, name: b.name }, reason: `Spelling differs by ${dist} character${dist > 1 ? 's' : ''}` });
+        continue;
+      }
+
+      // High character overlap on short normalized names (>85%)
+      if (normA.length >= 5 && normB.length >= 5) {
+        const overlap = charOverlapRatio(normA, normB);
+        if (overlap > 0.85 && Math.abs(normA.length - normB.length) <= 3) {
+          seen.add(pairKey);
+          pairs.push({ vendorA: { id: a.id, name: a.name }, vendorB: { id: b.id, name: b.name }, reason: `${Math.round(overlap * 100)}% name similarity` });
+        }
+      }
+    }
+  }
+
+  return pairs;
+}
+
+// ── Vendor merge ───────────────────────────────────────────────────────────
+
+export async function mergeVendors(keepId: string, removeId: string): Promise<VendorRow | null> {
+  const keepVendor = await getVendorById(keepId);
+  const removeVendor = await getVendorById(removeId);
+
+  if (!keepVendor || !removeVendor) return null;
+
+  // Reassign invoices: update vendor_id for linked invoices
+  await query(
+    'UPDATE invoices SET vendor_id = $1 WHERE vendor_id = $2',
+    [keepId, removeId]
+  );
+
+  // Reassign invoices: update vendor_name AND link unlinked invoices
+  // This also catches invoices with vendor_id = NULL that match by name
+  await query(
+    'UPDATE invoices SET vendor_name = $1, vendor_id = $2 WHERE LOWER(vendor_name) = LOWER($3)',
+    [keepVendor.name, keepId, removeVendor.name]
+  );
+
+  // Delete the removed vendor
+  await query('DELETE FROM vendors WHERE id = $1', [removeId]);
+
+  return keepVendor;
+}

@@ -13,6 +13,9 @@ import {
   createVendor as createVendorService,
   updateVendor as updateVendorService,
   deleteVendor as deleteVendorService,
+  findSimilarVendors,
+  findAllDuplicatePairs,
+  mergeVendors as mergeVendorsService,
 } from '../services/vendor.service';
 import { logAudit } from '../services/audit.service';
 
@@ -152,6 +155,72 @@ export async function deleteVendor(
     });
 
     res.json({ message: 'Vendor deleted', vendor });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getSimilar(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const name = req.query.name;
+    if (typeof name !== 'string' || !name.trim()) {
+      res.status(400).json({ error: 'Bad Request', message: 'Query parameter "name" is required' });
+      return;
+    }
+    const matches = await findSimilarVendors(name);
+    res.json(matches);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getDuplicates(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const pairs = await findAllDuplicatePairs();
+    res.json(pairs);
+  } catch (err) {
+    next(err);
+  }
+}
+
+const mergeBodySchema = z.object({
+  keepId: z.string().uuid(),
+  removeId: z.string().uuid(),
+});
+
+export async function mergeVendors(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { keepId, removeId } = mergeBodySchema.parse(req.body);
+
+    if (keepId === removeId) {
+      res.status(400).json({ error: 'Bad Request', message: 'Cannot merge a vendor with itself' });
+      return;
+    }
+
+    const kept = await mergeVendorsService(keepId, removeId);
+    if (!kept) {
+      res.status(404).json({ error: 'Not Found', message: 'One or both vendors not found' });
+      return;
+    }
+
+    await logAudit({
+      userId: req.user!.id,
+      action: `Merged duplicate vendor into "${kept.name}"`,
+    });
+
+    res.json(kept);
   } catch (err) {
     next(err);
   }

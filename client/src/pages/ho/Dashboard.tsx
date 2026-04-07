@@ -1,11 +1,56 @@
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { useDashboardData, Kpis, SiteRow, DueSoonRow, VendorOverdue, CategorySpend, MonthTrend } from '../../hooks/useDashboardData';
+import { getDuplicateVendors, mergeVendors, DuplicatePair } from '../../api/vendors';
 import { formatINR, formatDate } from '../../utils/formatters';
 import AppShell from '../../components/layout/AppShell';
+import { useToast } from '../../context/ToastContext';
+
+function getTimelineRange(tl: string, dateFrom: string, dateTo: string): { from: string; to: string } | null {
+  if (tl === 'all') return null;
+  if (tl === 'custom') {
+    if (dateFrom || dateTo) return { from: dateFrom, to: dateTo };
+    return null;
+  }
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const today = `${yyyy}-${mm}-${dd}`;
+  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  if (tl === 'today') return { from: today, to: today };
+  if (tl === 'week') {
+    const day = now.getDay();
+    const mon = new Date(now);
+    mon.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+    const sun = new Date(mon);
+    sun.setDate(mon.getDate() + 6);
+    return { from: fmt(mon), to: fmt(sun) };
+  }
+  if (tl === 'month') {
+    const lastDay = new Date(yyyy, now.getMonth() + 1, 0).getDate();
+    return { from: `${yyyy}-${mm}-01`, to: `${yyyy}-${mm}-${String(lastDay).padStart(2, '0')}` };
+  }
+  if (tl === 'quarter') {
+    const qStart = new Date(yyyy, Math.floor(now.getMonth() / 3) * 3, 1);
+    const qEnd = new Date(yyyy, Math.floor(now.getMonth() / 3) * 3 + 3, 0);
+    return { from: fmt(qStart), to: fmt(qEnd) };
+  }
+  if (tl === 'year') {
+    return { from: `${yyyy}-01-01`, to: `${yyyy}-12-31` };
+  }
+  return null;
+}
 
 export default function Dashboard() {
-  const data = useDashboardData();
   const navigate = useNavigate();
+  const [timeline, setTimeline] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  const range = useMemo(() => getTimelineRange(timeline, dateFrom, dateTo), [timeline, dateFrom, dateTo]);
+  const data = useDashboardData(range);
 
   const todayStr = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',
@@ -14,6 +59,14 @@ export default function Dashboard() {
     year: 'numeric',
   });
 
+  const timelineLabel = timeline === 'all' ? '' :
+    timeline === 'today' ? ' · today' :
+    timeline === 'week' ? ' · this week' :
+    timeline === 'month' ? ' · this month' :
+    timeline === 'quarter' ? ' · this quarter' :
+    timeline === 'year' ? ' · this year' :
+    timeline === 'custom' && (dateFrom || dateTo) ? ` · ${dateFrom || '...'} to ${dateTo || '...'}` : '';
+
   return (
     <AppShell>
       <div className="max-w-[1100px]">
@@ -21,12 +74,38 @@ export default function Dashboard() {
         <div className="flex items-start justify-between mb-5 sm:mb-7 flex-wrap gap-3">
           <div className="min-w-0">
             <div className="text-lg sm:text-xl font-medium text-gray-900 truncate">Invoice Dashboard</div>
-            <div className="text-[11px] sm:text-xs text-gray-500 mt-1 truncate">{todayStr} · summary across all sites</div>
+            <div className="text-[11px] sm:text-xs text-gray-500 mt-1 truncate">{todayStr} · summary across all sites{timelineLabel}</div>
           </div>
-          <button onClick={() => navigate('/invoices')}
-            className="px-3 sm:px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d] flex-shrink-0">
-            + New Invoice
-          </button>
+          <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
+            <select value={timeline} onChange={e => { setTimeline(e.target.value); if (e.target.value !== 'custom') { setDateFrom(''); setDateTo(''); } }}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+              <option value="all">All Time</option>
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="quarter">This Quarter</option>
+              <option value="year">This Year</option>
+              <option value="custom">Custom Range</option>
+            </select>
+            {timeline === 'custom' && (
+              <>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-500">From</span>
+                  <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                    className="px-2 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600" />
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-500">To</span>
+                  <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                    className="px-2 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600" />
+                </div>
+              </>
+            )}
+            <button onClick={() => navigate('/invoices')}
+              className="px-3 sm:px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
+              + New Invoice
+            </button>
+          </div>
         </div>
 
         {data.loading ? (
@@ -35,7 +114,8 @@ export default function Dashboard() {
           <div className="text-red-600 text-sm py-12 text-center">{data.error}</div>
         ) : (
           <div className="space-y-6">
-            <KpiCards kpis={data.kpis} />
+            <KpiCards kpis={data.kpis} periodLabel={timelineLabel ? timelineLabel.replace(' · ', '') : 'all time'} />
+            <VendorDedupPanel />
             <SiteExpenditureTable rows={data.siteRows} kpis={data.kpis} />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               <DueSoonPanel rows={data.dueSoon} />
@@ -53,9 +133,9 @@ export default function Dashboard() {
 }
 
 // ── Section 1: KPI Cards ────────────────────────────────────────────────────
-function KpiCards({ kpis }: { kpis: Kpis }) {
+function KpiCards({ kpis, periodLabel }: { kpis: Kpis; periodLabel: string }) {
   const cards = [
-    { label: 'Total Invoiced', value: formatINR(kpis.totalInvoiced), sub: `all time · all sites`, accent: '#1a3c5e', bg: '#e8eef5' },
+    { label: 'Total Invoiced', value: formatINR(kpis.totalInvoiced), sub: `${periodLabel} · all sites`, accent: '#1a3c5e', bg: '#e8eef5' },
     { label: 'Total Paid', value: formatINR(kpis.totalPaid), sub: 'payments made to date', accent: '#15803d', bg: '#dcfce7' },
     { label: 'Outstanding', value: formatINR(kpis.outstanding), sub: 'balance owed to vendors', accent: '#1a3c5e', bg: '#eff6ff' },
     { label: 'Overdue', value: formatINR(kpis.overdueAmount), sub: `${kpis.overdueCount} invoices past due`, accent: '#dc2626', bg: '#fef2f2' },
@@ -81,6 +161,109 @@ function KpiCards({ kpis }: { kpis: Kpis }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── Vendor Dedup Alert Panel ────────────────────────────────────────────────
+function VendorDedupPanel() {
+  const [pairs, setPairs] = useState<DuplicatePair[]>([]);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [merging, setMerging] = useState<string | null>(null);
+  const { notify } = useToast();
+
+  const loadPairs = useCallback(async () => {
+    try {
+      const data = await getDuplicateVendors();
+      setPairs(data);
+    } catch {
+      // silently ignore
+    }
+  }, []);
+
+  useEffect(() => { loadPairs(); }, [loadPairs]);
+
+  const visible = pairs.filter(p => {
+    const key = [p.vendorA.id, p.vendorB.id].sort().join(':');
+    return !dismissed.has(key);
+  });
+
+  if (visible.length === 0) return null;
+
+  function dismiss(pair: DuplicatePair) {
+    const key = [pair.vendorA.id, pair.vendorB.id].sort().join(':');
+    setDismissed(prev => new Set(prev).add(key));
+  }
+
+  async function handleMerge(keepId: string, removeId: string, keepName: string, pair: DuplicatePair) {
+    const key = [pair.vendorA.id, pair.vendorB.id].sort().join(':');
+    setMerging(key);
+    try {
+      await mergeVendors(keepId, removeId);
+      notify(`Merged into "${keepName}"`);
+      setPairs(prev => prev.filter(p => {
+        const k = [p.vendorA.id, p.vendorB.id].sort().join(':');
+        return k !== key;
+      }));
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Merge failed');
+    } finally {
+      setMerging(null);
+    }
+  }
+
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-3 border-b border-amber-200">
+        <div className="text-sm font-medium text-amber-800">Possible Duplicate Vendors</div>
+        <div className="text-[11px] text-amber-700 mt-0.5">
+          {visible.length} pair{visible.length !== 1 ? 's' : ''} detected — review and merge if they are the same vendor
+        </div>
+      </div>
+      <div className="divide-y divide-amber-100">
+        {visible.map(pair => {
+          const key = [pair.vendorA.id, pair.vendorB.id].sort().join(':');
+          const isMerging = merging === key;
+
+          return (
+            <div key={key} className="px-5 py-3.5">
+              <div className="flex items-start justify-between gap-3 flex-wrap">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-gray-900">
+                    <span className="font-medium">{pair.vendorA.name}</span>
+                    <span className="text-amber-600 mx-2">↔</span>
+                    <span className="font-medium">{pair.vendorB.name}</span>
+                  </div>
+                  <div className="text-[11px] text-amber-700 mt-0.5">{pair.reason}</div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    disabled={isMerging}
+                    onClick={() => handleMerge(pair.vendorA.id, pair.vendorB.id, pair.vendorA.name, pair)}
+                    className="px-2.5 py-1.5 text-xs font-medium bg-white border border-amber-300 rounded-lg text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    {isMerging ? 'Merging...' : `Keep "${pair.vendorA.name.slice(0, 20)}"`}
+                  </button>
+                  <button
+                    disabled={isMerging}
+                    onClick={() => handleMerge(pair.vendorB.id, pair.vendorA.id, pair.vendorB.name, pair)}
+                    className="px-2.5 py-1.5 text-xs font-medium bg-white border border-amber-300 rounded-lg text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    {isMerging ? 'Merging...' : `Keep "${pair.vendorB.name.slice(0, 20)}"`}
+                  </button>
+                  <button
+                    onClick={() => dismiss(pair)}
+                    className="px-2.5 py-1.5 text-xs text-gray-500 hover:text-gray-700"
+                    title="Not duplicates — dismiss"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -211,7 +394,7 @@ function OverduePanel({ rows, totalOverdue, overdueCount }: { rows: VendorOverdu
           ))}
           {rows.length > 6 && (
             <div className="px-5 py-3 border-t border-gray-100 text-center">
-              <a href="/payment-aging" className="text-xs text-blue-600 hover:underline">+{rows.length - 6} more — see Payment Aging tab</a>
+              <Link to="/payment-aging" className="text-xs text-blue-600 hover:underline">+{rows.length - 6} more — see Payment Aging tab</Link>
             </div>
           )}
         </>

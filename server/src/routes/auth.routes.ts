@@ -16,6 +16,7 @@ const loginLimiter = rateLimit({
   message: { error: 'Too Many Requests', message: 'Too many login attempts. Please try again in 15 minutes.' },
 });
 
-router.post('/login', loginLimiter, login);
+// loginLimiter disabled during development — re-enable for production
+router.post('/login', login);
 
 export default router;

@@ -134,6 +134,7 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
     let imported = 0;
     let skipped = 0;
     const errors: string[] = [];
+    const duplicates: Array<{ row: number; invoiceNo: string; vendorName: string }> = [];
 
     for (let i = 0; i < records.length; i++) {
       const row = records[i];
@@ -175,10 +176,11 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
         // Check for duplicate invoice_no (only if original invoice_no was provided)
         if (invoiceNo) {
           const existing = await queryOne<{ id: string }>(
-            'SELECT id FROM invoices WHERE invoice_no = $1 AND vendor_name = $2',
+            'SELECT id FROM invoices WHERE invoice_no = $1 AND LOWER(vendor_name) = LOWER($2) AND deleted_at IS NULL',
             [invoiceNo, vendorName]
           );
           if (existing) {
+            duplicates.push({ row: rowNum, invoiceNo, vendorName });
             skipped++;
             continue;
           }
@@ -222,12 +224,17 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
       action: `Bulk imported ${imported} invoices from CSV (${skipped} skipped)`,
     });
 
+    const dupMsg = duplicates.length > 0
+      ? ` (${duplicates.length} duplicate${duplicates.length > 1 ? 's' : ''} already in system)`
+      : '';
+
     res.json({
-      message: `Imported ${imported} invoices, skipped ${skipped}`,
+      message: `Imported ${imported} invoices, skipped ${skipped}${dupMsg}`,
       imported,
       skipped,
       total: records.length,
-      errors: errors.slice(0, 20), // limit error output
+      duplicates: duplicates.slice(0, 50),
+      errors: errors.slice(0, 20),
     });
   } catch (err) {
     next(err);

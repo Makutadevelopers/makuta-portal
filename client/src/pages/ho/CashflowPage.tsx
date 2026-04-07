@@ -13,6 +13,7 @@ export default function CashflowPage() {
   const { vendors } = useVendors();
   const { invoices } = useInvoices();
 
+  const [activeTab, setActiveTab] = useState<'expenditure' | 'cashflow'>('expenditure');
   const [fSite, setFSite] = useState('All');
   const [fCategory, setFCategory] = useState('All');
   const [fVendor, setFVendor] = useState('');
@@ -23,47 +24,68 @@ export default function CashflowPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Months sorted chronologically
   const months = useMemo(() => {
     const set = new Set(rows.map(r => r.month));
     return Array.from(set).sort();
   }, [rows]);
 
-  // Categories present in data
   const categories = useMemo(() => {
     const set = new Set(rows.map(r => r.purpose));
     return Array.from(set).sort();
   }, [rows]);
 
-  // Filter and pivot: category → month → value
   const filtered = useMemo(() => {
     let data = rows;
     if (fCategory !== 'All') data = data.filter(r => r.purpose === fCategory);
     return data;
   }, [rows, fCategory]);
 
+  // When a specific category is selected, pivot by vendor; otherwise by category
+  const drillByVendor = fCategory !== 'All';
+
   // Expenditure pivot
   const expPivot = useMemo(() => {
     const map = new Map<string, Map<string, number>>();
-    for (const r of filtered) {
-      if (!map.has(r.purpose)) map.set(r.purpose, new Map());
-      const m = map.get(r.purpose)!;
-      m.set(r.month, (m.get(r.month) ?? 0) + Number(r.total_invoiced));
+    if (drillByVendor) {
+      // Pivot by vendor using invoice data filtered to the selected category
+      const catInvoices = invoices.filter(i => i.purpose === fCategory);
+      for (const inv of catInvoices) {
+        const key = inv.vendor_name;
+        const m = inv.month?.slice(0, 7) ?? '';
+        if (!m) continue;
+        if (!map.has(key)) map.set(key, new Map());
+        map.get(key)!.set(m, (map.get(key)!.get(m) ?? 0) + Number(inv.invoice_amount));
+      }
+    } else {
+      for (const r of filtered) {
+        if (!map.has(r.purpose)) map.set(r.purpose, new Map());
+        map.get(r.purpose)!.set(r.month, (map.get(r.purpose)!.get(r.month) ?? 0) + Number(r.total_invoiced));
+      }
     }
     return map;
-  }, [filtered]);
+  }, [filtered, drillByVendor, fCategory, invoices]);
 
   // Cashflow pivot (payments)
   const cfPivot = useMemo(() => {
     const map = new Map<string, Map<string, number>>();
-    for (const r of filtered) {
-      if (Number(r.total_paid) === 0) continue;
-      if (!map.has(r.purpose)) map.set(r.purpose, new Map());
-      const m = map.get(r.purpose)!;
-      m.set(r.month, (m.get(r.month) ?? 0) + Number(r.total_paid));
+    if (drillByVendor) {
+      const catInvoices = invoices.filter(i => i.purpose === fCategory && i.payment_status === 'Paid');
+      for (const inv of catInvoices) {
+        const key = inv.vendor_name;
+        const m = inv.month?.slice(0, 7) ?? '';
+        if (!m) continue;
+        if (!map.has(key)) map.set(key, new Map());
+        map.get(key)!.set(m, (map.get(key)!.get(m) ?? 0) + Number(inv.invoice_amount));
+      }
+    } else {
+      for (const r of filtered) {
+        if (Number(r.total_paid) === 0) continue;
+        if (!map.has(r.purpose)) map.set(r.purpose, new Map());
+        map.get(r.purpose)!.set(r.month, (map.get(r.purpose)!.get(r.month) ?? 0) + Number(r.total_paid));
+      }
     }
     return map;
-  }, [filtered]);
+  }, [filtered, drillByVendor, fCategory, invoices]);
 
   function monthLabel(ym: string): string {
     const [y, m] = ym.split('-');
@@ -71,75 +93,18 @@ export default function CashflowPage() {
     return `${names[parseInt(m, 10) - 1]} ${y.slice(2)}`;
   }
 
-  function renderPivotTable(
-    pivot: Map<string, Map<string, number>>,
-    title: string,
-    subtitle: string,
-  ) {
-    const cats = Array.from(pivot.keys()).sort();
-    const totals = months.map(m => cats.reduce((s, c) => s + (pivot.get(c)?.get(m) ?? 0), 0));
-    const grandTotal = totals.reduce((s, v) => s + v, 0);
-    const isEmpty = cats.length === 0 || grandTotal === 0;
-
-    return (
-      <div className="mb-8">
-        <div className="mb-3">
-          <span className="text-sm font-medium text-gray-900">{title}</span>
-          <span className="text-xs text-gray-400 ml-2">{subtitle}</span>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-2.5 text-left font-medium text-gray-500 sticky left-0 bg-gray-50 z-10">Category</th>
-                {months.map(m => (
-                  <th key={m} className="px-4 py-2.5 text-right font-medium text-gray-500 whitespace-nowrap">{monthLabel(m)}</th>
-                ))}
-                <th className="px-4 py-2.5 text-right font-medium text-gray-900">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isEmpty ? (
-                <tr><td colSpan={months.length + 2} className="px-4 py-10 text-center text-gray-400 text-sm">No payments recorded yet for selected filters.</td></tr>
-              ) : (
-                cats.map(c => {
-                  const row = pivot.get(c)!;
-                  const rowTotal = months.reduce((s, m) => s + (row.get(m) ?? 0), 0);
-                  return (
-                    <tr key={c} className="border-t border-gray-50 hover:bg-gray-50/50">
-                      <td className="px-4 py-3 font-medium text-gray-900 sticky left-0 bg-white z-10">{c}</td>
-                      {months.map(m => {
-                        const v = row.get(m) ?? 0;
-                        return <td key={m} className="px-4 py-3 text-right text-gray-700">{v > 0 ? formatINR(v) : '—'}</td>;
-                      })}
-                      <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatINR(rowTotal)}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-            {!isEmpty && (
-              <tfoot className="border-t-2 border-gray-200 bg-gray-50">
-                <tr>
-                  <td className="px-4 py-2.5 font-medium text-gray-900 sticky left-0 bg-gray-50 z-10">Total</td>
-                  {totals.map((t, i) => (
-                    <td key={months[i]} className="px-4 py-2.5 text-right font-semibold text-gray-900">{formatINR(t)}</td>
-                  ))}
-                  <td className="px-4 py-2.5 text-right font-bold text-gray-900">{formatINR(grandTotal)}</td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
-    );
-  }
+  const pivot = activeTab === 'expenditure' ? expPivot : cfPivot;
+  const cats = Array.from(pivot.keys()).sort();
+  const totals = months.map(m => cats.reduce((s, c) => s + (pivot.get(c)?.get(m) ?? 0), 0));
+  const grandTotal = totals.reduce((s, v) => s + v, 0);
+  const isEmpty = cats.length === 0 || grandTotal === 0;
 
   return (
     <AppShell>
-      <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
+      <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
         <div>
           <div className="text-lg font-medium text-gray-900">Cashflow & Expenditure</div>
+          <div className="text-xs text-gray-500 mt-1">Monthly breakdown of invoices raised and payments made</div>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <select value={fSite} onChange={e => setFSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
@@ -214,8 +179,87 @@ export default function CashflowPage() {
             );
           })()}
 
-          {renderPivotTable(expPivot, 'Expenditure', `Invoice amounts · ${fSite === 'All' ? 'All Sites' : fSite}`)}
-          {renderPivotTable(cfPivot, 'Cashflow', `Payments made · ${fSite === 'All' ? 'All Sites' : fSite}`)}
+          {/* Tab switcher */}
+          <div className="flex items-center gap-1 mb-4">
+            <button
+              onClick={() => setActiveTab('expenditure')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg ${
+                activeTab === 'expenditure'
+                  ? 'bg-[#1a3c5e] text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              Expenditure
+            </button>
+            <button
+              onClick={() => setActiveTab('cashflow')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg ${
+                activeTab === 'cashflow'
+                  ? 'bg-[#1a3c5e] text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              Cashflow (Payments)
+            </button>
+          </div>
+
+          {/* Pivot table with sticky header */}
+          <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto max-h-[70vh] overflow-y-auto relative">
+            <table className="w-full text-[13px]">
+              <thead className="bg-gray-50 sticky top-0 z-20">
+                <tr>
+                  <th className="px-4 py-2.5 text-left font-medium text-gray-500 sticky left-0 bg-gray-50 z-30">{drillByVendor ? 'Vendor' : 'Category'}</th>
+                  {months.map(m => (
+                    <th key={m} className="px-4 py-2.5 text-right font-medium text-gray-500 whitespace-nowrap">{monthLabel(m)}</th>
+                  ))}
+                  <th className="px-4 py-2.5 text-right font-medium text-gray-900 sticky right-0 bg-gray-50 z-30">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {isEmpty ? (
+                  <tr>
+                    <td colSpan={months.length + 2} className="px-4 py-10 text-center text-gray-400 text-sm">
+                      {activeTab === 'cashflow' ? 'No payments recorded yet for selected filters.' : 'No data for selected filters.'}
+                    </td>
+                  </tr>
+                ) : (
+                  cats.map(c => {
+                    const row = pivot.get(c)!;
+                    const rowTotal = months.reduce((s, m) => s + (row.get(m) ?? 0), 0);
+                    return (
+                      <tr key={c} className="border-t border-gray-50 hover:bg-gray-50/50">
+                        <td className="px-4 py-3 font-medium text-gray-900 sticky left-0 bg-white z-10 whitespace-nowrap">{c}</td>
+                        {months.map(m => {
+                          const v = row.get(m) ?? 0;
+                          return <td key={m} className="px-4 py-3 text-right text-gray-700 whitespace-nowrap">{v > 0 ? formatINR(v) : '—'}</td>;
+                        })}
+                        <td className="px-4 py-3 text-right font-semibold text-gray-900 whitespace-nowrap sticky right-0 bg-white z-10">{formatINR(rowTotal)}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+              {!isEmpty && (
+                <tfoot className="border-t-2 border-gray-200 bg-gray-50 sticky bottom-0 z-20">
+                  <tr>
+                    <td className="px-4 py-2.5 font-medium text-gray-900 sticky left-0 bg-gray-50 z-30">Total</td>
+                    {totals.map((t, i) => (
+                      <td key={months[i]} className="px-4 py-2.5 text-right font-semibold text-gray-900 whitespace-nowrap">{formatINR(t)}</td>
+                    ))}
+                    <td className="px-4 py-2.5 text-right font-bold text-gray-900 whitespace-nowrap sticky right-0 bg-gray-50 z-30">{formatINR(grandTotal)}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+
+          {/* Tab description */}
+          <div className="mt-3 text-xs text-gray-400">
+            {activeTab === 'expenditure'
+              ? `Invoice amounts · ${fSite === 'All' ? 'All Sites' : fSite}`
+              : `Payments made · ${fSite === 'All' ? 'All Sites' : fSite}`
+            }
+          </div>
         </>
       )}
     </AppShell>

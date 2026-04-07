@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect, useRef, FormEvent, ChangeEvent, DragEvent } from 'react';
+import { useState, useMemo, useEffect, useRef, Fragment, FormEvent, ChangeEvent, DragEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { useVendors } from '../../hooks/useVendors';
@@ -18,15 +19,26 @@ export default function InvoiceList() {
   const { invoices, loading, refresh } = useInvoices();
   const { withinTerms, overdue } = useAgingCalc();
   const { vendors } = useVendors();
+  const [searchParams] = useSearchParams();
 
   const [showForm, setShowForm] = useState(false);
   const [editInv, setEditInv] = useState<Invoice | null>(null);
 
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(searchParams.get('search') ?? '');
   const [fSite, setFSite] = useState('All');
   const [fStatus, setFStatus] = useState('All');
   const [fPurpose, setFPurpose] = useState('All');
   const [fMonth, setFMonth] = useState('');
+  const [timeline, setTimeline] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [expandedEditId, setExpandedEditId] = useState<string | null>(null);
+
+  // Sync search from URL query param
+  useEffect(() => {
+    const q = searchParams.get('search');
+    if (q) setSearch(q);
+  }, [searchParams]);
 
   // Selection state for bulk actions
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -47,6 +59,37 @@ export default function InvoiceList() {
   const [infoLoading, setInfoLoading] = useState(false);
   const { notify } = useToast();
 
+  function getTimelineRange(tl: string): { from: string; to: string } | null {
+    if (tl === 'all') return null;
+    if (tl === 'custom') {
+      if (dateFrom || dateTo) return { from: dateFrom, to: dateTo };
+      return null;
+    }
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const today = `${yyyy}-${mm}-${dd}`;
+    if (tl === 'today') return { from: today, to: today };
+    if (tl === 'week') {
+      const day = now.getDay();
+      const diffToMon = day === 0 ? -6 : 1 - day;
+      const mon = new Date(now);
+      mon.setDate(now.getDate() + diffToMon);
+      const sun = new Date(mon);
+      sun.setDate(mon.getDate() + 6);
+      const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      return { from: fmt(mon), to: fmt(sun) };
+    }
+    if (tl === 'month') {
+      const first = `${yyyy}-${mm}-01`;
+      const lastDay = new Date(yyyy, now.getMonth() + 1, 0).getDate();
+      const last = `${yyyy}-${mm}-${String(lastDay).padStart(2, '0')}`;
+      return { from: first, to: last };
+    }
+    return null;
+  }
+
   const agingMap = useMemo(() => {
     const map = new Map<string, { balance: number; daysLabel: string; daysNum: number }>();
     for (const r of overdue) {
@@ -58,20 +101,27 @@ export default function InvoiceList() {
     return map;
   }, [withinTerms, overdue]);
 
-  const filtered = useMemo(() => invoices.filter(i => {
-    if (fSite !== 'All' && i.site !== fSite) return false;
-    if (fStatus !== 'All' && i.payment_status !== fStatus) return false;
-    if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
-    if (fMonth) {
-      const invMonth = (i.month || i.invoice_date || '').slice(0, 7);
-      if (invMonth !== fMonth) return false;
-    }
-    if (search) {
-      const q = search.toLowerCase();
-      if (!`${i.vendor_name} ${i.invoice_no} ${i.po_number ?? ''}`.toLowerCase().includes(q)) return false;
-    }
-    return true;
-  }), [invoices, fSite, fStatus, fPurpose, fMonth, search]);
+  const filtered = useMemo(() => {
+    const range = getTimelineRange(timeline);
+    return invoices.filter(i => {
+      if (fSite !== 'All' && i.site !== fSite) return false;
+      if (fStatus !== 'All' && i.payment_status !== fStatus) return false;
+      if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
+      if (range) {
+        const invDate = (i.invoice_date || '').slice(0, 10);
+        if (range.from && invDate < range.from) return false;
+        if (range.to && invDate > range.to) return false;
+      } else if (fMonth) {
+        const invMonth = (i.month || i.invoice_date || '').slice(0, 7);
+        if (invMonth !== fMonth) return false;
+      }
+      if (search) {
+        const q = search.toLowerCase();
+        if (!`${i.vendor_name} ${i.invoice_no} ${i.po_number ?? ''}`.toLowerCase().includes(q)) return false;
+      }
+      return true;
+    });
+  }, [invoices, fSite, fStatus, fPurpose, fMonth, search, timeline, dateFrom, dateTo]);
 
   // Selectable = filtered invoices that are not yet finalized (draft)
   const selectableIds = useMemo(() => filtered.filter(i => !i.pushed).map(i => i.id), [filtered]);
@@ -166,7 +216,7 @@ export default function InvoiceList() {
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
             Export PDF
           </a>
-          <button onClick={() => { setEditInv(null); setShowForm(true); }}
+          <button onClick={() => { setEditInv(null); setExpandedEditId(null); setShowForm(true); }}
             className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
             + New Invoice
           </button>
@@ -177,6 +227,28 @@ export default function InvoiceList() {
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendor, invoice no, PO..."
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        <select value={timeline} onChange={e => { setTimeline(e.target.value); if (e.target.value !== 'custom') { setDateFrom(''); setDateTo(''); } }}
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+          <option value="all">All Time</option>
+          <option value="today">Today</option>
+          <option value="week">This Week</option>
+          <option value="month">This Month</option>
+          <option value="custom">Custom</option>
+        </select>
+        {timeline === 'custom' && (
+          <>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-500">From</span>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-gray-500">To</span>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            </div>
+          </>
+        )}
         <select value={fSite} onChange={e => setFSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
           <option value="All">All Sites</option>
           {SITES.map(s => <option key={s}>{s}</option>)}
@@ -206,14 +278,14 @@ export default function InvoiceList() {
         </div>
       )}
 
-      {/* Invoice Form */}
-      {showForm && (
+      {/* New Invoice Form (above table) */}
+      {showForm && !editInv && (
         <HOInvoiceForm
-          key={editInv?.id ?? 'new'}
+          key="new"
           vendors={vendors}
-          editInvoice={editInv}
-          onCancel={() => { setShowForm(false); setEditInv(null); }}
-          onSaved={() => { setShowForm(false); setEditInv(null); notify(editInv ? 'Invoice updated' : 'Invoice added'); refresh(); }}
+          editInvoice={null}
+          onCancel={() => { setShowForm(false); }}
+          onSaved={() => { setShowForm(false); notify('Invoice added'); refresh(); }}
         />
       )}
 
@@ -293,76 +365,91 @@ export default function InvoiceList() {
                 const isOverdue = aging && aging.daysNum > 0;
 
                 return (
-                  <tr key={inv.id} className={`border-t border-gray-50 hover:bg-gray-50/50 ${selected.has(inv.id) ? 'bg-blue-50/50' : ''}`}>
-                    <td className="px-4 py-3">
-                      {!inv.pushed ? (
-                        <input type="checkbox" checked={selected.has(inv.id)} onChange={() => toggleSelect(inv.id)}
-                          className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200" />
-                      ) : <span className="text-gray-300">—</span>}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
-                    <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={inv.vendor_name}>{inv.vendor_name}</td>
-                    <td className="px-4 py-3">{inv.invoice_no}</td>
-                    <td className="px-4 py-3 text-gray-500 max-w-[120px] truncate" title={inv.po_number ?? ''}>{inv.po_number ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-500">{inv.purpose}</td>
-                    <td className="px-4 py-3">{inv.site}</td>
-                    <td className="px-4 py-3 text-right font-medium">{formatINR(Number(inv.invoice_amount))}</td>
-                    <td className="px-4 py-3 text-right">
-                      {isPaid ? <span className="text-green-600">—</span>
-                        : aging ? <span className="font-medium text-red-600">{formatINR(aging.balance)}</span>
-                          : '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      {isPaid ? <span className="text-green-600">—</span>
-                        : aging ? <span className={`text-xs font-medium ${isOverdue ? 'text-red-600' : 'text-green-600'}`}>{aging.daysLabel}</span>
-                          : '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1 flex-wrap">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          isPaid ? 'bg-green-50 text-green-700' : isPartial ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
-                        }`}>{inv.payment_status}</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                          inv.pushed ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
-                        }`}>{inv.pushed ? 'Master' : 'Draft'}</span>
-                        {inv.minor_payment && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-50 text-orange-600">site</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {(inv.attachment_count ?? 0) > 0
-                        ? <button onClick={() => setDocsInvoice(inv)} className="text-xs font-medium text-blue-600 hover:underline" title={`${inv.attachment_count} file(s) — click to view`}>{inv.attachment_count} file{(inv.attachment_count ?? 0) > 1 ? 's' : ''}</button>
-                        : <span className="text-xs font-medium text-red-500">N/A</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        {!inv.pushed && (
-                          <>
-                            <button onClick={() => { setEditInv(inv); setShowForm(true); }} className="text-xs text-gray-600 hover:underline">Edit</button>
-                            <button onClick={() => handlePush(inv.id)} className="text-xs text-blue-600 hover:underline">Final</button>
-                            <button onClick={() => handleDelete(inv)} className="text-xs text-red-500 hover:underline">Del</button>
-                          </>
-                        )}
-                        {inv.pushed && (
-                          <button onClick={() => handleUndo(inv.id)} className="text-xs text-orange-600 hover:underline">Undo</button>
-                        )}
-                        {isNotPaid && (
-                          <button onClick={() => setPayInvoice(inv)} className="text-xs text-green-600 hover:underline">Mark Paid</button>
-                        )}
-                        {isPartial && (
-                          <>
-                            <button onClick={() => setPayInvoice(inv)} className="text-xs text-green-600 hover:underline">Add Payment</button>
+                  <Fragment key={inv.id}>
+                    <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${selected.has(inv.id) ? 'bg-blue-50/50' : ''}`}>
+                      <td className="px-4 py-3">
+                        {!inv.pushed ? (
+                          <input type="checkbox" checked={selected.has(inv.id)} onChange={() => toggleSelect(inv.id)}
+                            className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200" />
+                        ) : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={inv.vendor_name}>{inv.vendor_name}</td>
+                      <td className="px-4 py-3">{inv.invoice_no}</td>
+                      <td className="px-4 py-3 text-gray-500 max-w-[120px] truncate" title={inv.po_number ?? ''}>{inv.po_number ?? '—'}</td>
+                      <td className="px-4 py-3 text-gray-500">{inv.purpose}</td>
+                      <td className="px-4 py-3">{inv.site}</td>
+                      <td className="px-4 py-3 text-right font-medium">{formatINR(Number(inv.invoice_amount))}</td>
+                      <td className="px-4 py-3 text-right">
+                        {isPaid ? <span className="text-green-600">—</span>
+                          : aging ? <span className="font-medium text-red-600">{formatINR(aging.balance)}</span>
+                            : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        {isPaid ? <span className="text-green-600">—</span>
+                          : aging ? <span className={`text-xs font-medium ${isOverdue ? 'text-red-600' : 'text-green-600'}`}>{aging.daysLabel}</span>
+                            : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            isPaid ? 'bg-green-50 text-green-700' : isPartial ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
+                          }`}>{inv.payment_status}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                            inv.pushed ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
+                          }`}>{inv.pushed ? 'Master' : 'Draft'}</span>
+                          {inv.minor_payment && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-50 text-orange-600">site</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {(inv.attachment_count ?? 0) > 0
+                          ? <button onClick={() => setDocsInvoice(inv)} className="text-xs font-medium text-blue-600 hover:underline" title={`${inv.attachment_count} file(s) — click to view`}>{inv.attachment_count} file{(inv.attachment_count ?? 0) > 1 ? 's' : ''}</button>
+                          : <span className="text-xs font-medium text-red-500">N/A</span>}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          {!inv.pushed && (
+                            <>
+                              <button onClick={() => setExpandedEditId(expandedEditId === inv.id ? null : inv.id)} className="text-xs text-gray-600 hover:underline">Edit</button>
+                              <button onClick={() => handlePush(inv.id)} className="text-xs text-blue-600 hover:underline">Final</button>
+                              <button onClick={() => handleDelete(inv)} className="text-xs text-red-500 hover:underline">Del</button>
+                            </>
+                          )}
+                          {inv.pushed && (
+                            <button onClick={() => handleUndo(inv.id)} className="text-xs text-orange-600 hover:underline">Undo</button>
+                          )}
+                          {isNotPaid && (
+                            <button onClick={() => setPayInvoice(inv)} className="text-xs text-green-600 hover:underline">Mark Paid</button>
+                          )}
+                          {isPartial && (
+                            <>
+                              <button onClick={() => setPayInvoice(inv)} className="text-xs text-green-600 hover:underline">Add Payment</button>
+                              <button onClick={() => openHistory(inv)} className="text-xs text-gray-500 hover:underline">History</button>
+                            </>
+                          )}
+                          {isPaid && (
                             <button onClick={() => openHistory(inv)} className="text-xs text-gray-500 hover:underline">History</button>
-                          </>
-                        )}
-                        {isPaid && (
-                          <button onClick={() => openHistory(inv)} className="text-xs text-gray-500 hover:underline">History</button>
-                        )}
-                        <button onClick={() => openInfo(inv)} className="text-xs text-purple-600 hover:underline">Info</button>
-                      </div>
-                    </td>
-                  </tr>
+                          )}
+                          <button onClick={() => openInfo(inv)} className="text-xs text-purple-600 hover:underline">Info</button>
+                        </div>
+                      </td>
+                    </tr>
+                    {expandedEditId === inv.id && (
+                      <tr className="border-t border-blue-100 bg-blue-50/30">
+                        <td colSpan={14} className="px-2 py-4">
+                          <HOInvoiceForm
+                            key={inv.id}
+                            vendors={vendors}
+                            editInvoice={inv}
+                            onCancel={() => setExpandedEditId(null)}
+                            onSaved={() => { setExpandedEditId(null); notify('Invoice updated'); refresh(); }}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
               {filtered.length === 0 && (
@@ -408,6 +495,7 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
   async function handleSubmit() {
     if (numAmount <= 0) { setError('Enter a valid amount'); return; }
     if (isOverpay) { setError('Amount exceeds balance'); return; }
+    if (!paymentRef.trim()) { setError('Reference / TXN number is required'); return; }
 
     setSaving(true);
     setError('');
@@ -415,7 +503,7 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
       await createPayment(invoice.id, {
         amount: numAmount,
         payment_type: paymentType,
-        payment_ref: paymentRef.trim() || null,
+        payment_ref: paymentRef.trim(),
         payment_date: paymentDate,
         bank: bank || null,
       });
@@ -496,7 +584,7 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Reference / TXN No</label>
+            <label className="block text-xs text-gray-500 mb-1">Reference / TXN No *</label>
             <input value={paymentRef} onChange={e => setPaymentRef(e.target.value)} placeholder="Cheque / TXN number"
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
           </div>
@@ -780,12 +868,14 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
           <label className="block text-xs text-gray-500 mb-1">
             Vendor Name *
             {vendorId && <span className="text-green-600 ml-2">&#10003; {vendorName}</span>}
+            {!vendorId && vendorName && <span className="text-amber-600 ml-2">(not in vendor master)</span>}
           </label>
           <div className="relative">
-            <input value={vendorSearch} onChange={e => { setVendorSearch(e.target.value); if (!e.target.value) { setVendorId(''); setVendorName(''); } }}
-              placeholder={vendorId ? vendorName : 'Type to search vendor...'}
+            <input value={vendorSearch}
+              onChange={e => { setVendorSearch(e.target.value); if (!e.target.value) { setVendorId(''); setVendorName(''); } else { setVendorName(e.target.value); } }}
+              placeholder={vendorName || 'Type to search vendor...'}
               onFocus={() => setVendorSearch(vendorSearch || vendorName)}
-              onBlur={() => setTimeout(() => setVendorSearch(''), 200)}
+              onBlur={() => setTimeout(() => { if (vendorSearch && !vendorId) setVendorName(vendorSearch); setVendorSearch(''); }, 200)}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
             {vendorSearch && (
               <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">

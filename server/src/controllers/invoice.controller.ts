@@ -81,6 +81,25 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
       return;
     }
 
+    // Check for duplicate invoice (same invoice_no + vendor_name)
+    const duplicate = await queryOne<{ id: string; invoice_no: string }>(
+      `SELECT id, invoice_no FROM invoices
+       WHERE invoice_no = $1 AND LOWER(vendor_name) = LOWER($2) AND deleted_at IS NULL`,
+      [data.invoice_no, data.vendor_name]
+    );
+    if (duplicate) {
+      // Create alert but still allow creation
+      await queryOne(
+        `INSERT INTO alerts (alert_type, title, message, metadata)
+         VALUES ('duplicate_invoice', $1, $2, $3)`,
+        [
+          `Duplicate invoice #${data.invoice_no}`,
+          `Invoice #${data.invoice_no} from "${data.vendor_name}" may be a duplicate — an invoice with the same number already exists.`,
+          JSON.stringify({ existingInvoiceId: duplicate.id, invoiceNo: data.invoice_no, vendorName: data.vendor_name }),
+        ]
+      );
+    }
+
     // Generate internal tracking number
     const seqResult = await queryOne<{ nextval: string }>("SELECT nextval('invoice_internal_seq')");
     const internalNo = `MKT-${String(seqResult!.nextval).padStart(5, '0')}`;

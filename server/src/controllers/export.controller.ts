@@ -24,7 +24,8 @@ export async function exportAging(req: Request, res: Response, next: NextFunctio
 
     const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 40 });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="payment-aging-${site}.pdf"`);
+    const safeSite = site.replace(/[^a-zA-Z0-9_-]/g, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="payment-aging-${safeSite}.pdf"`);
     doc.pipe(res);
 
     // Title

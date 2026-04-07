@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { loginApi } from '../../api/auth';
 import { useAuth } from '../../hooks/useAuth';
 
+const SHOW_DEMO = import.meta.env.VITE_DEMO_MODE === 'true';
+
 const DEMO_USERS = [
   { label: 'Rajesh', tag: '(HO)', email: 'rajesh@makuta.in', password: 'ho123' },
   { label: 'Arun', tag: '(MD)', email: 'arun@makuta.in', password: 'md123' },
@@ -83,7 +85,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
-              placeholder="rajesh@makuta.in"
+              placeholder="you@makuta.in"
             />
           </div>
 
@@ -109,25 +111,27 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Demo credentials */}
-        <div className="mt-6 pt-5 border-t border-gray-100">
-          <div className="text-xs font-medium text-gray-500 mb-3">Demo credentials — click to autofill</div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            {DEMO_USERS.map(u => (
-              <div
-                key={u.email}
-                onClick={() => autofill(u)}
-                className="flex items-center justify-between py-1.5 border-b border-gray-50 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1"
-              >
-                <span className="text-xs text-gray-900">
-                  {u.label}
-                  <span className="text-gray-400 ml-1">{u.tag}</span>
-                </span>
-                <code className="text-[10px] text-gray-400">{u.password}</code>
-              </div>
-            ))}
+        {/* Demo credentials — only visible in development when VITE_DEMO_MODE=true */}
+        {SHOW_DEMO && (
+          <div className="mt-6 pt-5 border-t border-gray-100">
+            <div className="text-xs font-medium text-gray-500 mb-3">Demo credentials — click to autofill</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+              {DEMO_USERS.map(u => (
+                <div
+                  key={u.email}
+                  onClick={() => autofill(u)}
+                  className="flex items-center justify-between py-1.5 border-b border-gray-50 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1"
+                >
+                  <span className="text-xs text-gray-900">
+                    {u.label}
+                    <span className="text-gray-400 ml-1">{u.tag}</span>
+                  </span>
+                  <code className="text-[10px] text-gray-400">{u.password}</code>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { apiFetch } from '../api/client';
 import { Invoice } from '../types/invoice';
 import { CashflowRow } from '../types/cashflow';
@@ -108,21 +108,27 @@ function derive(
   aging: AgingData,
   cashflow: CashflowRow[],
   invoices: Invoice[],
+  allAging?: AgingData,
 ): Omit<DashboardData, 'loading' | 'error'> {
+  // Use full aging for outstanding/overdue KPIs (never filtered)
+  const fullAging = allAging ?? aging;
+  const fullAgingRows = [...fullAging.withinTerms, ...fullAging.overdue];
   const allAgingRows = [...aging.withinTerms, ...aging.overdue];
 
   // ── KPIs ────────────────────────────────────────────────────────────────
+  // Total invoiced / paid: from filtered invoices
   const totalInvoiced = invoices.reduce((s, i) => s + n(i.invoice_amount), 0);
-  // total_paid = sum of paid invoice amounts + sum of total_paid from aging (unpaid/partial)
   const paidInvoiceTotal = invoices
     .filter(i => i.payment_status === 'Paid')
     .reduce((s, i) => s + n(i.invoice_amount), 0);
-  const agingPaidTotal = allAgingRows.reduce((s, r) => s + n(r.total_paid), 0);
+  const agingPaidTotal = fullAgingRows.reduce((s, r) => s + n(r.total_paid), 0);
   const totalPaid = paidInvoiceTotal + agingPaidTotal;
-  const outstanding = totalInvoiced - totalPaid;
-  const overdueAmount = aging.overdue.reduce((s, r) => s + n(r.balance), 0);
-  const overdueCount = aging.overdue.length;
-  const partPaidCount = allAgingRows.filter(r => r.payment_status === 'Partial').length;
+
+  // Outstanding / overdue: always from full (unfiltered) aging — live operational metrics
+  const outstanding = fullAgingRows.reduce((s, r) => s + n(r.balance), 0);
+  const overdueAmount = fullAging.overdue.reduce((s, r) => s + n(r.balance), 0);
+  const overdueCount = fullAging.overdue.length;
+  const partPaidCount = fullAgingRows.filter(r => r.payment_status === 'Partial').length;
 
   const kpis: Kpis = {
     totalInvoiced,
@@ -244,9 +250,18 @@ function derive(
   return { kpis, siteRows, dueSoon, overdueByVendor, spendByCategory, monthlyTrend };
 }
 
-export function useDashboardData(): DashboardData {
-  const [data, setData] = useState<DashboardData>(EMPTY);
+interface RawData {
+  aging: AgingData;
+  cashflow: CashflowRow[];
+  invoices: Invoice[];
+}
 
+export function useDashboardData(dateRange?: { from: string; to: string } | null): DashboardData {
+  const [raw, setRaw] = useState<RawData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch once on mount
   useEffect(() => {
     let cancelled = false;
 
@@ -257,18 +272,14 @@ export function useDashboardData(): DashboardData {
           apiFetch<CashflowRow[]>('/cashflow'),
           apiFetch<Invoice[]>('/invoices'),
         ]);
-
-        if (cancelled) return;
-
-        const derived = derive(aging, cashflow, invoices);
-        setData({ ...derived, loading: false, error: null });
+        if (!cancelled) {
+          setRaw({ aging, cashflow, invoices });
+          setLoading(false);
+        }
       } catch (err) {
         if (!cancelled) {
-          setData(prev => ({
-            ...prev,
-            loading: false,
-            error: err instanceof Error ? err.message : 'Failed to load dashboard data',
-          }));
+          setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
+          setLoading(false);
         }
       }
     }
@@ -276,6 +287,36 @@ export function useDashboardData(): DashboardData {
     load();
     return () => { cancelled = true; };
   }, []);
+
+  // Derive from raw data, filtering by date range
+  const data = useMemo<DashboardData>(() => {
+    if (loading || !raw) return { ...EMPTY, loading, error };
+
+    let { aging, cashflow, invoices } = raw;
+
+    if (dateRange && (dateRange.from || dateRange.to)) {
+      const inRange = (d: string) => {
+        const ds = (d || '').slice(0, 10);
+        if (dateRange.from && ds < dateRange.from) return false;
+        if (dateRange.to && ds > dateRange.to) return false;
+        return true;
+      };
+
+      // Filter invoices by invoice_date (what was raised in this period)
+      invoices = invoices.filter(i => inRange(i.invoice_date));
+
+      // Cashflow by month
+      cashflow = cashflow.filter(r => inRange(r.month));
+
+      // IMPORTANT: Aging (outstanding/overdue/due soon) is NOT filtered
+      // It always shows the current live state regardless of date filter.
+      // This is because outstanding/overdue are real-time operational metrics.
+    }
+
+    // Pass full (unfiltered) aging as 4th arg so outstanding/overdue KPIs always show live state
+    const derived = derive(aging, cashflow, invoices, raw.aging);
+    return { ...derived, loading: false, error: null };
+  }, [raw, loading, error, dateRange?.from, dateRange?.to]);
 
   return data;
 }

@@ -20,6 +20,8 @@ import attachmentRoutes from './routes/attachment.routes';
 import exportRoutes from './routes/export.routes';
 import tallyRoutes from './routes/tally.routes';
 import importRoutes from './routes/import.routes';
+import cronRoutes from './routes/cron.routes';
+import alertsRoutes from './routes/alerts.routes';
 
 console.log('Imported routes:', { authRoutes, vendorRoutes });
 
@@ -71,6 +73,8 @@ app.use('/api/audit', auditRoutes);
 app.use('/api/export', exportRoutes);
 app.use('/api/tally', tallyRoutes);
 app.use('/api/import', importRoutes);
+app.use('/api/alerts', alertsRoutes);
+app.use('/api/cron', cronRoutes);
 
 // Error handler (must be after all routes)
 app.use(errorHandler);

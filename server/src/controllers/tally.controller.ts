@@ -4,6 +4,7 @@
 // One-way sync: Makuta → Tally (no write-back).
 
 import { Request, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import { query } from '../db/query';
 
 interface VoucherRow {
@@ -21,8 +22,11 @@ interface VoucherRow {
 
 export async function getTallyVouchers(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const from = (req.query.from as string) || '2000-01-01';
-    const to = (req.query.to as string) || '2099-12-31';
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    const fromRaw = (req.query.from as string) || '2000-01-01';
+    const toRaw = (req.query.to as string) || '2099-12-31';
+    const from = dateRegex.test(fromRaw) ? fromRaw : '2000-01-01';
+    const to = dateRegex.test(toRaw) ? toRaw : '2099-12-31';
 
     const vouchers = await query<VoucherRow>(
       `SELECT
@@ -54,7 +58,7 @@ export async function getTallyVouchers(req: Request, res: Response, next: NextFu
     const xmlVouchers = vouchers.map(v => `
     <VOUCHER VCHTYPE="Payment" ACTION="Create">
       <DATE>${new Date(v.payment_date).toISOString().split('T')[0].replace(/-/g, '')}</DATE>
-      <VOUCHERNUMBER>${v.payment_ref || v.payment_id}</VOUCHERNUMBER>
+      <VOUCHERNUMBER>${escapeXml(String(v.payment_ref || v.payment_id))}</VOUCHERNUMBER>
       <NARRATION>Payment to ${escapeXml(v.vendor_name)} for Inv #${escapeXml(v.invoice_no)} - ${escapeXml(v.site)} ${escapeXml(v.purpose)}</NARRATION>
       <ALLLEDGERENTRIES.LIST>
         <LEDGERNAME>${escapeXml(v.vendor_name)}</LEDGERNAME>
@@ -88,7 +92,7 @@ ${xmlVouchers}
 </ENVELOPE>`;
 
     res.setHeader('Content-Type', 'application/xml');
-    res.setHeader('Content-Disposition', `attachment; filename="tally-vouchers-${from}-to-${to}.xml"`);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''tally-vouchers-${encodeURIComponent(from)}-to-${encodeURIComponent(to)}.xml`);
     res.send(xml);
   } catch (err) {
     next(err);

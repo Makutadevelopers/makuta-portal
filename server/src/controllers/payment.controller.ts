@@ -19,7 +19,7 @@ const MINOR_LIMIT = 50000;
 const createPaymentSchema = z.object({
   amount: z.number().positive('Amount must be positive'),
   payment_type: z.string().min(1, 'Payment type is required'),
-  payment_ref: z.string().nullable().optional(),
+  payment_ref: z.string().min(1, 'Reference / TXN number is required'),
   payment_date: z.string().min(1, 'Payment date is required'),
   bank: z.string().nullable().optional(),
 });

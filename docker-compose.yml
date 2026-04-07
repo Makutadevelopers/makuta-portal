@@ -44,6 +44,8 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@makutadevelopers.com}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      CRON_SECRET: ${CRON_SECRET:-}
     ports:
       - "4000:4000"
     volumes:

@@ -1,7 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { useVendors } from '../../hooks/useVendors';
 import { useInvoices } from '../../hooks/useInvoices';
-import { createVendor, updateVendor, deleteVendor } from '../../api/vendors';
+import { createVendor, updateVendor, deleteVendor, getSimilarVendors } from '../../api/vendors';
 import { formatINR } from '../../utils/formatters';
 import { PURPOSES } from '../../utils/constants';
 import { Vendor } from '../../types/vendor';
@@ -14,8 +14,11 @@ export default function VendorMaster() {
   const { vendors, loading, refresh } = useVendors();
   const { invoices } = useInvoices();
   const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editVendor, setEditVendor] = useState<Vendor | null>(null);
+  const [initialName, setInitialName] = useState('');
+  const [showUnmastered, setShowUnmastered] = useState(true);
   const { notify } = useToast();
 
   const vendorStats = new Map<string, number>();
@@ -25,7 +28,10 @@ export default function VendorMaster() {
     }
   }
 
-  const filtered = vendors.filter(v => !search || v.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = vendors.filter(v =>
+    (!search || v.name.toLowerCase().includes(search.toLowerCase())) &&
+    (!categoryFilter || v.category === categoryFilter)
+  );
 
   // Find vendor names in invoices that aren't in vendor master
   const vendorNames = new Set(vendors.map(v => v.name.toLowerCase()));
@@ -54,23 +60,24 @@ export default function VendorMaster() {
           <div className="text-lg font-medium text-gray-900">Vendor Master</div>
           <div className="text-xs text-gray-500 mt-1">Set payment terms per vendor — used to calculate due dates in Payment Aging</div>
         </div>
-        <button onClick={() => { setEditVendor(null); setShowForm(true); }}
+        <button onClick={() => { setEditVendor(null); setInitialName(''); setShowForm(true); }}
           className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
           + Add Vendor
         </button>
       </div>
 
       {/* Unmastered vendor alert */}
-      {unmasteredVendors.length > 0 && !showForm && (
-        <div className="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">
-          <div className="text-xs text-amber-800">
+      {unmasteredVendors.length > 0 && !showForm && showUnmastered && (
+        <div className="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg relative">
+          <button onClick={() => setShowUnmastered(false)} className="absolute top-2 right-2 text-amber-400 hover:text-amber-600 text-lg leading-none" title="Dismiss">&#10005;</button>
+          <div className="text-xs text-amber-800 pr-6">
             <strong>{unmasteredVendors.length}</strong> vendor{unmasteredVendors.length !== 1 ? 's' : ''} in invoices not yet in Vendor Master — defaulting to 30-day terms:
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
-            {unmasteredVendors.map(name => (
-              <button key={name} onClick={() => { setEditVendor(null); setShowForm(true); }}
+            {unmasteredVendors.map(uName => (
+              <button key={uName} onClick={() => { setEditVendor(null); setInitialName(uName); setShowForm(true); }}
                 className="text-xs px-2.5 py-1 bg-white border border-amber-300 rounded-md text-amber-800 hover:bg-amber-100">
-                + {name}
+                + {uName}
               </button>
             ))}
           </div>
@@ -79,16 +86,23 @@ export default function VendorMaster() {
 
       {showForm && (
         <VendorForm
-          key={editVendor?.id ?? 'new'}
+          key={editVendor?.id ?? `new-${initialName}`}
           vendor={editVendor}
-          onCancel={() => { setShowForm(false); setEditVendor(null); }}
-          onSaved={() => { setShowForm(false); setEditVendor(null); notify(editVendor ? 'Vendor updated' : 'Vendor added'); refresh(); }}
+          initialName={initialName}
+          onCancel={() => { setShowForm(false); setEditVendor(null); setInitialName(''); }}
+          onSaved={() => { setShowForm(false); setEditVendor(null); setInitialName(''); notify(editVendor ? 'Vendor updated' : 'Vendor added'); refresh(); }}
+          onMerged={() => { setShowForm(false); setEditVendor(null); setInitialName(''); notify('Vendors merged'); refresh(); }}
         />
       )}
 
       <div className="flex items-center gap-3 mb-4">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendors..."
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200">
+          <option value="">All Categories</option>
+          {[...PURPOSES].sort((a, b) => a.localeCompare(b)).map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
         <span className="text-xs text-gray-400 ml-auto">{filtered.length} vendors in master</span>
       </div>
 
@@ -147,11 +161,15 @@ export default function VendorMaster() {
 }
 
 // ── Vendor Form ─────────────────────────────────────────────────────────────
-function VendorForm({ vendor, onCancel, onSaved }: {
-  vendor: Vendor | null; onCancel: () => void; onSaved: () => void;
+function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
+  vendor: Vendor | null;
+  initialName?: string;
+  onCancel: () => void;
+  onSaved: () => void;
+  onMerged: () => void;
 }) {
   const isEdit = !!vendor;
-  const [name, setName] = useState(vendor?.name ?? '');
+  const [name, setName] = useState(vendor?.name ?? initialName ?? '');
   const [terms, setTerms] = useState(String(vendor?.payment_terms ?? 30));
   const [customTerms, setCustomTerms] = useState(false);
   const [category, setCategory] = useState(vendor?.category ?? '');
@@ -162,6 +180,35 @@ function VendorForm({ vendor, onCancel, onSaved }: {
   const [notes, setNotes] = useState(vendor?.notes ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [similarVendors, setSimilarVendors] = useState<{ id: string; name: string; similarity: string }[]>([]);
+  const [merging, setMerging] = useState(false);
+
+  async function handleNameBlur() {
+    const trimmed = name.trim();
+    if (!trimmed || isEdit) {
+      setSimilarVendors([]);
+      return;
+    }
+    try {
+      const matches = await getSimilarVendors(trimmed);
+      setSimilarVendors(matches);
+    } catch {
+      setSimilarVendors([]);
+    }
+  }
+
+  async function handleMerge(_keepId: string) {
+    // In the add-new-vendor flow, "Yes, use existing" means the user acknowledges
+    // the similar vendor already exists, so we skip creation and close the form.
+    setMerging(true);
+    try {
+      onMerged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Merge failed');
+    } finally {
+      setMerging(false);
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -203,8 +250,27 @@ function VendorForm({ vendor, onCancel, onSaved }: {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Vendor Name *</label>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Company name"
+            <input value={name} onChange={e => { setName(e.target.value); setSimilarVendors([]); }} onBlur={handleNameBlur} placeholder="Company name"
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            {similarVendors.length > 0 && !isEdit && (
+              <div className="mt-2 space-y-1.5">
+                {similarVendors.map(sv => (
+                  <div key={sv.id} className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+                    <span className="flex-1">
+                      Similar vendor found: &quot;{sv.name}&quot; — Is this the same vendor?
+                    </span>
+                    <button type="button" disabled={merging} onClick={() => handleMerge(sv.id)}
+                      className="px-2 py-1 bg-amber-600 text-white rounded text-xs hover:bg-amber-700 disabled:opacity-50">
+                      Yes, use existing
+                    </button>
+                    <button type="button" onClick={() => setSimilarVendors(prev => prev.filter(s => s.id !== sv.id))}
+                      className="px-2 py-1 bg-white border border-amber-300 rounded text-xs hover:bg-amber-100">
+                      No, keep separate
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Payment Terms (days)</label>
