@@ -1,6 +1,7 @@
 export interface Invoice {
   id: string;
   sl_no: number;
+  internal_no: string | null;
   month: string;
   invoice_date: string;
   vendor_id: string;
@@ -19,6 +20,7 @@ export interface Invoice {
   created_by: string;
   created_at: string;
   updated_at: string;
+  attachment_count?: number;
 }
 
 export interface CreateInvoiceData {

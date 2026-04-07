@@ -11,7 +11,7 @@ export const PURPOSES = [
   'Advertisement', 'Water Proofing', 'Consultant', 'Fire Fighting',
   'Contractor', 'Machinery', 'Loan', 'Miwan Shuttering', 'Tax',
   'Sales Refund', 'Lifts', 'Security Service', 'Diesel',
-  'Ms Sections & Tubes & Pipes',
+  'Ms Sections & Tubes & Pipes', 'CP & Sanitary', 'Windows',
 ];
 
 export const PAYMENT_TYPES = ['Cheque', 'NEFT', 'RTGS', 'UPI', 'Cash'];

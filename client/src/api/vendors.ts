@@ -18,3 +18,7 @@ export function updateVendor(id: string, data: Partial<Vendor>): Promise<Vendor>
     body: JSON.stringify(data),
   });
 }
+
+export function deleteVendor(id: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/vendors/${id}`, { method: 'DELETE' });
+}

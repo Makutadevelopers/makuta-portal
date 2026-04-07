@@ -11,6 +11,8 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { query, queryOne } from '../db/query';
 import { recomputeInvoiceStatus } from '../services/payment.service';
+import { logAudit } from '../services/audit.service';
+import { notifyPaymentRecorded } from '../services/email.service';
 
 const MINOR_LIMIT = 50000;
 
@@ -42,7 +44,7 @@ interface PaymentRow {
 
 export async function createPayment(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { id: invoiceId } = req.params;
+    const invoiceId = req.params.id as string;
     const data = createPaymentSchema.parse(req.body);
     const { role, id: userId } = req.user!;
 
@@ -54,6 +56,21 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
 
     if (!invoice) {
       res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
+      return;
+    }
+
+    // Block overpayment
+    const existingPayments = await query<{ total: number }>(
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE invoice_id = $1',
+      [invoiceId]
+    );
+    const alreadyPaid = Number(existingPayments[0]?.total ?? 0);
+    const balance = Number(invoice.invoice_amount) - alreadyPaid;
+    if (data.amount > balance) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: `Payment of ₹${data.amount.toLocaleString('en-IN')} exceeds outstanding balance of ₹${balance.toLocaleString('en-IN')}`,
+      });
       return;
     }
 
@@ -83,6 +100,24 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
 
     // Recompute invoice payment_status
     const newStatus = await recomputeInvoiceStatus(invoiceId);
+
+    const newBalance = balance - data.amount;
+    const isPartial = newStatus === 'Partial';
+    await logAudit({
+      userId,
+      action: `${isPartial ? 'Part payment' : 'Full payment'}: ₹${data.amount.toLocaleString('en-IN')} via ${data.payment_type}${isPartial ? ` · Balance ₹${newBalance.toLocaleString('en-IN')}` : ''}`,
+      invoiceId,
+      metadata: { amount: data.amount, type: data.payment_type, ref: data.payment_ref },
+    });
+
+    notifyPaymentRecorded({
+      vendorName: '',
+      invoiceNo: invoiceId,
+      paymentAmount: data.amount,
+      paymentType: data.payment_type,
+      balance: newBalance,
+      hoEmail: 'rajesh@makuta.in',
+    }).catch(() => {});
 
     res.status(201).json({ ...payment, invoice_payment_status: newStatus });
   } catch (err) {

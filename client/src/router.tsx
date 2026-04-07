@@ -10,6 +10,7 @@ import PaymentAging from './pages/ho/PaymentAging';
 import CashflowPage from './pages/ho/CashflowPage';
 import VendorMaster from './pages/ho/VendorMaster';
 import AuditTrail from './pages/ho/AuditTrail';
+import Bin from './pages/ho/Bin';
 
 // Mgmt pages
 import MgmtOverview from './pages/mgmt/MgmtOverview';
@@ -60,6 +61,7 @@ export default function AppRouter() {
         <Route path="/cashflow" element={<ProtectedRoute allowed={['ho']}><CashflowPage /></ProtectedRoute>} />
         <Route path="/vendors" element={<ProtectedRoute allowed={['ho']}><VendorMaster /></ProtectedRoute>} />
         <Route path="/audit" element={<ProtectedRoute allowed={['ho']}><AuditTrail /></ProtectedRoute>} />
+        <Route path="/bin" element={<ProtectedRoute allowed={['ho']}><Bin /></ProtectedRoute>} />
 
         {/* Mgmt routes */}
         <Route path="/overview" element={<ProtectedRoute allowed={['mgmt']}><MgmtOverview /></ProtectedRoute>} />

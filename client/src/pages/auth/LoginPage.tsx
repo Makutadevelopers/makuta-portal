@@ -3,6 +3,17 @@ import { useNavigate } from 'react-router-dom';
 import { loginApi } from '../../api/auth';
 import { useAuth } from '../../hooks/useAuth';
 
+const DEMO_USERS = [
+  { label: 'Rajesh', tag: '(HO)', email: 'rajesh@makuta.in', password: 'ho123' },
+  { label: 'Arun', tag: '(MD)', email: 'arun@makuta.in', password: 'md123' },
+  { label: 'Suresh', tag: 'Nirvana', email: 'suresh@makuta.in', password: 'nv123' },
+  { label: 'Priya', tag: 'Taranga', email: 'priya@makuta.in', password: 'tr123' },
+  { label: 'Mahesh', tag: 'Horizon', email: 'mahesh@makuta.in', password: 'hz123' },
+  { label: 'Kavitha', tag: 'Green', email: 'kavitha@makuta.in', password: 'gw123' },
+  { label: 'Venkat', tag: 'Aruna', email: 'venkat@makuta.in', password: 'aa123' },
+  { label: 'Lakshmi', tag: 'Office', email: 'lakshmi@makuta.in', password: 'of123' },
+];
+
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,7 +31,6 @@ export default function LoginPage() {
       const data = await loginApi(email, password);
       setAuth(data);
 
-      // Redirect by role
       switch (data.user.role) {
         case 'ho':
           navigate('/dashboard');
@@ -39,55 +49,85 @@ export default function LoginPage() {
     }
   }
 
+  function autofill(u: typeof DEMO_USERS[number]) {
+    setEmail(u.email);
+    setPassword(u.password);
+    setError('');
+  }
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm bg-white rounded-lg shadow p-8">
-        <h1 className="text-2xl font-bold text-center mb-6">Makuta Portal</h1>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-10">
+        {/* Logo */}
+        <div className="text-center mb-7">
+          <div className="w-14 h-14 rounded-2xl bg-[#1a3c5e] flex items-center justify-center mx-auto mb-4">
+            <span className="text-white text-2xl font-medium">M</span>
+          </div>
+          <div className="text-xl font-medium text-gray-900">Makuta Developers</div>
+          <div className="text-sm text-gray-500 mt-1">Accounting Module</div>
+        </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-50 text-red-700 rounded text-sm">
+          <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm">
             {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-              Email
-            </label>
+            <label htmlFor="email" className="block text-xs text-gray-500 mb-1">Email</label>
             <input
               id="email"
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
               placeholder="rajesh@makuta.in"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-              Password
-            </label>
+            <label htmlFor="password" className="block text-xs text-gray-500 mb-1">Password</label>
             <input
               id="password"
               type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+              placeholder="Password"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 font-medium"
+            className="w-full py-2.5 bg-[#1a3c5e] text-white rounded-lg hover:bg-[#15304d] disabled:opacity-50 text-sm font-medium mt-1"
           >
-            {loading ? 'Signing in...' : 'Sign in'}
+            {loading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
+
+        {/* Demo credentials */}
+        <div className="mt-6 pt-5 border-t border-gray-100">
+          <div className="text-xs font-medium text-gray-500 mb-3">Demo credentials — click to autofill</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            {DEMO_USERS.map(u => (
+              <div
+                key={u.email}
+                onClick={() => autofill(u)}
+                className="flex items-center justify-between py-1.5 border-b border-gray-50 cursor-pointer hover:bg-gray-50 rounded px-1 -mx-1"
+              >
+                <span className="text-xs text-gray-900">
+                  {u.label}
+                  <span className="text-gray-400 ml-1">{u.tag}</span>
+                </span>
+                <code className="text-[10px] text-gray-400">{u.password}</code>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -11,6 +11,12 @@ const ALLOWED_MIMES = [
   'image/jpeg',
   'image/png',
   'image/webp',
+  'text/csv',
+  'text/plain',
+  'application/csv',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/octet-stream',
 ];
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -21,7 +27,7 @@ function fileFilter(_req: Request, file: Express.Multer.File, cb: multer.FileFil
   if (ALLOWED_MIMES.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error(`Invalid file type: ${file.mimetype}. Allowed: PDF, JPG, PNG, WEBP`));
+    cb(new Error(`Invalid file type: ${file.mimetype}. Allowed: PDF, JPG, PNG, WEBP, CSV, XLS, XLSX`));
   }
 }
 

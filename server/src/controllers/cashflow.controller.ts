@@ -1,5 +1,5 @@
 // cashflow.controller.ts
-// GET /api/cashflow — ho + mgmt only
+// GET /api/cashflow?site=All — ho + mgmt only
 // Returns invoices grouped by category x month with
 // invoice amounts (expenditure) and payment amounts (cashflow).
 
@@ -14,8 +14,12 @@ interface CashflowRow {
   invoice_count: number;
 }
 
-export async function getCashflow(_req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function getCashflow(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    const site = (req.query.site as string) || 'All';
+    const siteClause = site !== 'All' ? 'WHERE i.site = $1' : '';
+    const params = site !== 'All' ? [site] : [];
+
     const rows = await query<CashflowRow>(
       `SELECT
          TO_CHAR(i.month, 'YYYY-MM') AS month,
@@ -29,8 +33,10 @@ export async function getCashflow(_req: Request, res: Response, next: NextFuncti
          FROM payments
          GROUP BY invoice_id
        ) p ON p.invoice_id = i.id
+       ${siteClause}
        GROUP BY TO_CHAR(i.month, 'YYYY-MM'), i.purpose
-       ORDER BY month DESC, i.purpose`
+       ORDER BY month DESC, i.purpose`,
+      params
     );
     res.json(rows);
   } catch (err) {

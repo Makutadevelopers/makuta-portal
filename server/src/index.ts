@@ -16,6 +16,11 @@ import agingRoutes from './routes/aging.routes';
 import cashflowRoutes from './routes/cashflow.routes';
 import auditRoutes from './routes/audit.routes';
 import attachmentRoutes from './routes/attachment.routes';
+import exportRoutes from './routes/export.routes';
+import tallyRoutes from './routes/tally.routes';
+import importRoutes from './routes/import.routes';
+
+console.log('Imported routes:', { authRoutes, vendorRoutes });
 
 const app = express();
 
@@ -24,22 +29,35 @@ app.use(cors());
 app.use(helmet());
 app.use(express.json());
 
+console.log('Setting up routes...');
+
 // Health check
 app.get('/api/health', (_req, res) => {
+  console.log('Health endpoint called');
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Test route
+app.get('/api/test', (_req, res) => {
+  console.log('Test endpoint called');
+  res.json({ message: 'API is working' });
+});
+
+console.log('Mounting auth routes...');
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/vendors', vendorRoutes);
-app.use('/api/invoices', invoiceRoutes);
-app.use('/api/invoices/:id/payments', paymentRoutes);
 app.use('/api/invoices/:id/attachments', attachmentRoutes);
+app.use('/api/invoices/:id/payments', paymentRoutes);
+app.use('/api/invoices', invoiceRoutes);
 app.use('/api/aging', agingRoutes);
 app.use('/api/cashflow', cashflowRoutes);
 app.use('/api/audit', auditRoutes);
+app.use('/api/export', exportRoutes);
+app.use('/api/tally', tallyRoutes);
+app.use('/api/import', importRoutes);
 
-// Global error handler (must be last)
+// Error handler (must be after all routes)
 app.use(errorHandler);
 
 // Start server

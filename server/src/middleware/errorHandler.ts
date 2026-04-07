@@ -4,8 +4,25 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
+import multer from 'multer';
 
 export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
+  // Multer file upload errors
+  if (err instanceof multer.MulterError) {
+    const messages: Record<string, string> = {
+      LIMIT_FILE_SIZE: 'File too large. Maximum size is 10 MB.',
+      LIMIT_UNEXPECTED_FILE: 'Unexpected file field.',
+    };
+    res.status(400).json({ error: 'Upload Error', message: messages[err.code] || err.message });
+    return;
+  }
+
+  // Multer file filter rejection (thrown as plain Error)
+  if (err.message?.startsWith('Invalid file type:')) {
+    res.status(400).json({ error: 'Upload Error', message: err.message });
+    return;
+  }
+
   // Zod validation errors
   if (err instanceof ZodError) {
     const issues = err.issues.map((i) => ({
@@ -17,7 +34,7 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
   }
 
   // Known operational errors with a status code
-  const status = (err as Record<string, unknown>).status;
+  const status = (err as any).status;
   if (typeof status === 'number') {
     res.status(status).json({ error: err.name || 'Error', message: err.message });
     return;

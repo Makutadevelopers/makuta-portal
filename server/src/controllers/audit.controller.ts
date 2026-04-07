@@ -30,3 +30,22 @@ export async function getAuditLogs(_req: Request, res: Response, next: NextFunct
     next(err);
   }
 }
+
+export async function getInvoiceHistory(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { invoiceId } = req.params;
+    const logs = await query<AuditRow>(
+      `SELECT
+         a.id, a.user_id, u.name AS user_name,
+         a.action, a.invoice_id, a.metadata, a.created_at
+       FROM audit_logs a
+       LEFT JOIN users u ON u.id = a.user_id
+       WHERE a.invoice_id = $1
+       ORDER BY a.created_at DESC`,
+      [invoiceId]
+    );
+    res.json(logs);
+  } catch (err) {
+    next(err);
+  }
+}

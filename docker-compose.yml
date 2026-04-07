@@ -1,18 +1,63 @@
-version: '3.9'
-
 services:
   postgres:
     image: postgres:15-alpine
     container_name: makuta-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB:       makuta_portal
-      POSTGRES_USER:     makuta_admin
-      POSTGRES_PASSWORD: localdevpassword
+      POSTGRES_DB: makuta_portal
+      POSTGRES_USER: makuta_admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-localdevpassword}
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U makuta_admin -d makuta_portal"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build: ./server
+    container_name: makuta-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: makuta_portal
+      DB_USER: makuta_admin
+      DB_PASSWORD: ${DB_PASSWORD:-localdevpassword}
+      DB_SSL: "false"
+      JWT_SECRET: ${JWT_SECRET:-changeme_in_production_64_chars_minimum_please_replace_this}
+      JWT_EXPIRES_IN: 8h
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-local_dev_key}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-local_dev_secret}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-makuta-invoice-attachments}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@makutadevelopers.com}
+    ports:
+      - "4000:4000"
+    volumes:
+      - uploads_data:/app/uploads
+
+  client:
+    build: ./client
+    container_name: makuta-client
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "${CLIENT_PORT:-3000}:80"
 
 volumes:
   postgres_data:
+  uploads_data:

@@ -52,14 +52,12 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
     const payload = {
       id: user.id,
       name: user.name,
-      role: user.role,
+      role: user.role as 'ho' | 'site' | 'mgmt',
       site: user.site,
       title: user.title,
     };
 
-    const token = jwt.sign(payload, env.JWT_SECRET, {
-      expiresIn: env.JWT_EXPIRES_IN,
-    });
+    const token = jwt.sign(payload, env.JWT_SECRET as string, { expiresIn: '8h' });
 
     res.json({
       token,

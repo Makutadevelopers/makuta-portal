@@ -1,15 +1,24 @@
 // vendor.controller.ts
-// GET  /api/vendors     — all authenticated roles
-// POST /api/vendors     — ho only
-// PATCH /api/vendors/:id — ho only
+// GET  /api/vendors       — all authenticated roles
+// GET  /api/vendors/:id   — all authenticated roles
+// POST /api/vendors       — ho only
+// PATCH /api/vendors/:id  — ho only
 
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { query, queryOne } from '../db/query';
+import {
+  getAllVendors,
+  getVendorById,
+  getVendorByName,
+  createVendor as createVendorService,
+  updateVendor as updateVendorService,
+  deleteVendor as deleteVendorService,
+} from '../services/vendor.service';
+import { logAudit } from '../services/audit.service';
 
 const createVendorSchema = z.object({
-  name: z.string().min(1, 'Vendor name is required'),
-  payment_terms: z.number().int().positive().default(30),
+  name: z.string().min(1, 'Vendor name is required').trim(),
+  payment_terms: z.number().int().min(1).max(365).default(30),
   category: z.string().nullable().optional(),
   gstin: z.string().nullable().optional(),
   contact_name: z.string().nullable().optional(),
@@ -20,52 +29,59 @@ const createVendorSchema = z.object({
 
 const updateVendorSchema = createVendorSchema.partial();
 
-interface VendorRow {
-  id: string;
-  name: string;
-  payment_terms: number;
-  category: string | null;
-  gstin: string | null;
-  contact_name: string | null;
-  phone: string | null;
-  email: string | null;
-  notes: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export async function getVendors(_req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function getVendors(
+  _req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
-    const vendors = await query<VendorRow>(
-      'SELECT * FROM vendors ORDER BY name'
-    );
+    const vendors = await getAllVendors();
     res.json(vendors);
   } catch (err) {
     next(err);
   }
 }
 
-export async function createVendor(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function getVendor(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const vendor = await getVendorById(req.params.id);
+    if (!vendor) {
+      res.status(404).json({ error: 'Not Found', message: 'Vendor not found' });
+      return;
+    }
+    res.json(vendor);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function createVendor(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     const data = createVendorSchema.parse(req.body);
 
-    const vendor = await queryOne<VendorRow>(
-      `INSERT INTO vendors (name, payment_terms, category, gstin, contact_name, phone, email, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING *`,
-      [
-        data.name,
-        data.payment_terms,
-        data.category ?? null,
-        data.gstin ?? null,
-        data.contact_name ?? null,
-        data.phone ?? null,
-        data.email ?? null,
-        data.notes ?? null,
-        req.user!.id,
-      ]
-    );
+    const existing = await getVendorByName(data.name);
+    if (existing) {
+      res.status(409).json({
+        error: 'Conflict',
+        message: `Vendor "${data.name}" already exists`,
+      });
+      return;
+    }
+
+    const vendor = await createVendorService(data, req.user!.id);
+
+    await logAudit({
+      userId: req.user!.id,
+      action: `Added vendor "${data.name}" to Vendor Master (${data.payment_terms ?? 30}-day terms)`,
+    });
 
     res.status(201).json(vendor);
   } catch (err) {
@@ -73,43 +89,69 @@ export async function createVendor(req: Request, res: Response, next: NextFuncti
   }
 }
 
-export async function updateVendor(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function updateVendor(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
   try {
     const { id } = req.params;
     const data = updateVendorSchema.parse(req.body);
 
-    // Build SET clause dynamically from provided fields
-    const fields: string[] = [];
-    const values: unknown[] = [];
-    let idx = 1;
-
-    for (const [key, value] of Object.entries(data)) {
-      if (value !== undefined) {
-        fields.push(`${key} = $${idx}`);
-        values.push(value);
-        idx++;
-      }
-    }
-
-    if (fields.length === 0) {
+    if (Object.keys(data).length === 0) {
       res.status(400).json({ error: 'Bad Request', message: 'No fields to update' });
       return;
     }
 
-    fields.push(`updated_at = NOW()`);
-    values.push(id);
+    // If renaming, check uniqueness against other vendors
+    if (data.name) {
+      const existing = await getVendorByName(data.name);
+      if (existing && existing.id !== id) {
+        res.status(409).json({
+          error: 'Conflict',
+          message: `Vendor "${data.name}" already exists`,
+        });
+        return;
+      }
+    }
 
-    const vendor = await queryOne<VendorRow>(
-      `UPDATE vendors SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
-      values
-    );
+    const vendor = await updateVendorService(id, data, req.user!.id);
+    if (!vendor) {
+      res.status(404).json({ error: 'Not Found', message: 'Vendor not found' });
+      return;
+    }
+
+    await logAudit({
+      userId: req.user!.id,
+      action: `Updated vendor "${vendor.name}" in Vendor Master`,
+    });
+
+    res.json(vendor);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteVendor(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { id } = req.params;
+    const vendor = await deleteVendorService(id);
 
     if (!vendor) {
       res.status(404).json({ error: 'Not Found', message: 'Vendor not found' });
       return;
     }
 
-    res.json(vendor);
+    await logAudit({
+      userId: req.user!.id,
+      action: `Removed vendor "${vendor.name}" from Vendor Master`,
+    });
+
+    res.json({ message: 'Vendor deleted', vendor });
   } catch (err) {
     next(err);
   }

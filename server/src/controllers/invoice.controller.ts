@@ -9,11 +9,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { query, queryOne } from '../db/query';
+import { logAudit } from '../services/audit.service';
+import { notifyInvoicePushed } from '../services/email.service';
 
 const createInvoiceSchema = z.object({
   month: z.string().min(1, 'Month is required'),
   invoice_date: z.string().min(1, 'Invoice date is required'),
-  vendor_id: z.string().uuid('Valid vendor_id is required'),
+  vendor_id: z.string().uuid().nullable().optional().or(z.literal('')).transform(v => v || null),
   vendor_name: z.string().min(1, 'Vendor name is required'),
   invoice_no: z.string().min(1, 'Invoice number is required'),
   po_number: z.string().nullable().optional(),
@@ -27,7 +29,7 @@ const updateInvoiceSchema = createInvoiceSchema.partial();
 
 // Columns safe for site role — excludes all payment-related fields
 const SITE_COLUMNS = `
-  id, sl_no, month, invoice_date, vendor_id, vendor_name,
+  id, sl_no, internal_no, month, invoice_date, vendor_id, vendor_name,
   invoice_no, po_number, purpose, site, invoice_amount,
   remarks, pushed, pushed_at, minor_payment,
   created_by, created_at, updated_at
@@ -48,14 +50,18 @@ export async function getInvoices(req: Request, res: Response, next: NextFunctio
     if (role === 'site') {
       // Site: own site only, NO payment data
       const invoices = await query<InvoiceRow>(
-        `SELECT ${SITE_COLUMNS} FROM invoices WHERE site = $1 ORDER BY invoice_date DESC`,
+        `SELECT ${SITE_COLUMNS},
+           (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = invoices.id)::int AS attachment_count
+         FROM invoices WHERE site = $1 AND deleted_at IS NULL ORDER BY invoice_date DESC`,
         [site]
       );
       res.json(invoices);
     } else {
       // ho + mgmt: all invoices, full data
       const invoices = await query<InvoiceRow>(
-        `SELECT ${FULL_COLUMNS} FROM invoices ORDER BY invoice_date DESC`
+        `SELECT ${FULL_COLUMNS},
+           (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = invoices.id)::int AS attachment_count
+         FROM invoices WHERE deleted_at IS NULL ORDER BY invoice_date DESC`
       );
       res.json(invoices);
     }
@@ -75,18 +81,28 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
       return;
     }
 
+    // Generate internal tracking number
+    const seqResult = await queryOne<{ nextval: string }>("SELECT nextval('invoice_internal_seq')");
+    const internalNo = `MKT-${String(seqResult!.nextval).padStart(5, '0')}`;
+
     const invoice = await queryOne<InvoiceRow>(
       `INSERT INTO invoices (
         month, invoice_date, vendor_id, vendor_name, invoice_no, po_number,
-        purpose, site, invoice_amount, remarks, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        purpose, site, invoice_amount, remarks, created_by, internal_no
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *`,
       [
         data.month, data.invoice_date, data.vendor_id, data.vendor_name,
         data.invoice_no, data.po_number ?? null, data.purpose, data.site,
-        data.invoice_amount, data.remarks ?? null, userId,
+        data.invoice_amount, data.remarks ?? null, userId, internalNo,
       ]
     );
+
+    await logAudit({
+      userId,
+      action: `Created invoice #${data.invoice_no} — ${data.vendor_name} ₹${Number(data.invoice_amount).toLocaleString('en-IN')}`,
+      invoiceId: invoice?.id,
+    });
 
     res.status(201).json(invoice);
   } catch (err) {
@@ -100,14 +116,19 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
     const data = updateInvoiceSchema.parse(req.body);
     const { role, site } = req.user!;
 
-    // Verify invoice exists and check site ownership
+    // Verify invoice exists, check site ownership, and check finalized status
     const existing = await queryOne<InvoiceRow>(
-      'SELECT id, site FROM invoices WHERE id = $1',
+      'SELECT id, site, pushed FROM invoices WHERE id = $1',
       [id]
     );
 
     if (!existing) {
       res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
+      return;
+    }
+
+    if (existing.pushed) {
+      res.status(403).json({ error: 'Forbidden', message: 'Cannot edit a finalized invoice' });
       return;
     }
 
@@ -141,6 +162,13 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
       values
     );
 
+    await logAudit({
+      userId: req.user!.id,
+      action: `Updated invoice #${invoice?.invoice_no ?? id}`,
+      invoiceId: id,
+      metadata: { fields_changed: Object.keys(data) },
+    });
+
     res.json(invoice);
   } catch (err) {
     next(err);
@@ -164,6 +192,211 @@ export async function pushInvoice(req: Request, res: Response, next: NextFunctio
       res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
       return;
     }
+
+    await logAudit({
+      userId,
+      action: `Finalized invoice #${invoice.invoice_no ?? id}`,
+      invoiceId: id,
+    });
+
+    // Fire-and-forget email notification
+    notifyInvoicePushed({
+      vendorName: String(invoice.vendor_name ?? ''),
+      invoiceNo: String(invoice.invoice_no ?? ''),
+      amount: Number(invoice.invoice_amount ?? 0),
+      site: String(invoice.site ?? ''),
+      hoEmail: 'rajesh@makuta.in',
+    }).catch(() => {});
+
+    res.json(invoice);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function bulkPushInvoices(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { ids } = req.body as { ids: string[] };
+    const userId = req.user!.id;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ error: 'Bad Request', message: 'ids array is required' });
+      return;
+    }
+
+    const result = await query<InvoiceRow>(
+      `UPDATE invoices
+       SET pushed = TRUE, pushed_at = NOW(), approved_by = $1, updated_at = NOW()
+       WHERE id = ANY($2) AND pushed = FALSE
+       RETURNING id, invoice_no`,
+      [userId, ids]
+    );
+
+    await logAudit({
+      userId,
+      action: `Bulk finalized ${result.length} invoices`,
+    });
+
+    res.json({ finalized: result.length, total: ids.length });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    const userId = req.user!.id;
+
+    const existing = await queryOne<InvoiceRow>(
+      'SELECT id, invoice_no, pushed FROM invoices WHERE id = $1 AND deleted_at IS NULL',
+      [id]
+    );
+
+    if (!existing) {
+      res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
+      return;
+    }
+
+    if (existing.pushed) {
+      res.status(403).json({ error: 'Forbidden', message: 'Cannot delete a finalized invoice. Undo finalization first.' });
+      return;
+    }
+
+    // Soft-delete — move to bin
+    await queryOne(
+      'UPDATE invoices SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2',
+      [userId, id]
+    );
+
+    await logAudit({
+      userId,
+      action: `Moved invoice #${existing.invoice_no ?? id} to bin`,
+      invoiceId: id,
+    });
+
+    res.json({ message: 'Invoice moved to bin' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getBinInvoices(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const invoices = await query<InvoiceRow>(
+      `SELECT i.*, u.name AS deleted_by_name
+       FROM invoices i
+       LEFT JOIN users u ON u.id = i.deleted_by
+       WHERE i.deleted_at IS NOT NULL
+       ORDER BY i.deleted_at DESC`
+    );
+    res.json(invoices);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function restoreInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    const userId = req.user!.id;
+
+    const invoice = await queryOne<InvoiceRow>(
+      'UPDATE invoices SET deleted_at = NULL, deleted_by = NULL WHERE id = $1 AND deleted_at IS NOT NULL RETURNING *',
+      [id]
+    );
+
+    if (!invoice) {
+      res.status(404).json({ error: 'Not Found', message: 'Invoice not found in bin' });
+      return;
+    }
+
+    await logAudit({
+      userId,
+      action: `Restored invoice #${invoice.invoice_no ?? id} from bin`,
+      invoiceId: id,
+    });
+
+    res.json(invoice);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function permanentDeleteInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    const userId = req.user!.id;
+
+    const existing = await queryOne<InvoiceRow>(
+      'SELECT id, invoice_no FROM invoices WHERE id = $1 AND deleted_at IS NOT NULL',
+      [id]
+    );
+
+    if (!existing) {
+      res.status(404).json({ error: 'Not Found', message: 'Invoice not found in bin' });
+      return;
+    }
+
+    await query('DELETE FROM payments WHERE invoice_id = $1', [id]);
+    await query('DELETE FROM attachments WHERE invoice_id = $1', [id]);
+    await query('DELETE FROM audit_logs WHERE invoice_id = $1', [id]);
+    await query('DELETE FROM invoices WHERE id = $1', [id]);
+
+    await logAudit({
+      userId,
+      action: `Permanently deleted invoice #${existing.invoice_no ?? id}`,
+    });
+
+    res.json({ message: 'Invoice permanently deleted' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function purgeOldBinInvoices(_req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    // Delete invoices in bin for more than 30 days
+    const old = await query<InvoiceRow>(
+      "SELECT id FROM invoices WHERE deleted_at IS NOT NULL AND deleted_at < NOW() - INTERVAL '30 days'"
+    );
+
+    for (const inv of old) {
+      await query('DELETE FROM payments WHERE invoice_id = $1', [inv.id]);
+      await query('DELETE FROM attachments WHERE invoice_id = $1', [inv.id]);
+      await query('DELETE FROM audit_logs WHERE invoice_id = $1', [inv.id]);
+      await query('DELETE FROM invoices WHERE id = $1', [inv.id]);
+    }
+
+    res.json({ purged: old.length });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function undoPushInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    const userId = req.user!.id;
+
+    const invoice = await queryOne<InvoiceRow>(
+      `UPDATE invoices
+       SET pushed = FALSE, pushed_at = NULL, approved_by = NULL, updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+
+    if (!invoice) {
+      res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
+      return;
+    }
+
+    await logAudit({
+      userId,
+      action: `Reverted finalization of invoice #${invoice.invoice_no ?? id}`,
+      invoiceId: id,
+    });
 
     res.json(invoice);
   } catch (err) {
