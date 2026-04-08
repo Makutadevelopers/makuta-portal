@@ -33,6 +33,9 @@ export async function getAgingData(siteFilter?: string): Promise<{
   const siteClause = siteFilter && siteFilter !== 'All' ? 'AND i.site = $1' : '';
   const params = siteFilter && siteFilter !== 'All' ? [siteFilter] : [];
 
+  // L6: Use DATE math (not NOW() timestamps) so the day-count is stable
+  // regardless of server timezone. CURRENT_DATE is the server-local date.
+  // We cast due_date to DATE and subtract, which yields an integer number of whole days.
   const rows = await query<AgingRow>(
     `SELECT
        i.id AS invoice_id,
@@ -45,10 +48,10 @@ export async function getAgingData(siteFilter?: string): Promise<{
        (i.invoice_date + COALESCE(v.payment_terms, 30) * INTERVAL '1 day')::DATE AS due_date,
        COALESCE(p.total_paid, 0) AS total_paid,
        i.invoice_amount - COALESCE(p.total_paid, 0) AS balance,
-       EXTRACT(DAY FROM NOW() - (i.invoice_date + COALESCE(v.payment_terms, 30) * INTERVAL '1 day'))::INT AS days_past_due,
-       EXTRACT(DAY FROM (i.invoice_date + COALESCE(v.payment_terms, 30) * INTERVAL '1 day') - NOW())::INT AS days_left,
+       (CURRENT_DATE - (i.invoice_date + COALESCE(v.payment_terms, 30) * INTERVAL '1 day')::DATE) AS days_past_due,
+       ((i.invoice_date + COALESCE(v.payment_terms, 30) * INTERVAL '1 day')::DATE - CURRENT_DATE) AS days_left,
        CASE
-         WHEN NOW() > (i.invoice_date + COALESCE(v.payment_terms, 30) * INTERVAL '1 day')
+         WHEN CURRENT_DATE > (i.invoice_date + COALESCE(v.payment_terms, 30) * INTERVAL '1 day')::DATE
               AND i.invoice_amount - COALESCE(p.total_paid, 0) > 0
          THEN TRUE ELSE FALSE
        END AS overdue,
@@ -61,6 +64,7 @@ export async function getAgingData(siteFilter?: string): Promise<{
        GROUP BY invoice_id
      ) p ON p.invoice_id = i.id
      WHERE i.payment_status IN ('Not Paid', 'Partial')
+       AND i.deleted_at IS NULL
      ${siteClause}
      ORDER BY overdue DESC, days_past_due DESC`,
     params

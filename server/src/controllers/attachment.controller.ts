@@ -59,10 +59,11 @@ export async function uploadAttachment(req: Request, res: Response, next: NextFu
     const s3Key = `invoices/${invoiceId}/${Date.now()}_${sanitizedName}`;
 
     if (isLocalDev) {
-      // Save to local disk
-      const dir = path.join(UPLOADS_DIR, 'invoices', invoiceId);
+      // Save to local disk at the exact s3_key path (so download can find it)
+      const fullPath = path.join(UPLOADS_DIR, s3Key);
+      const dir = path.dirname(fullPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, sanitizedName), file.buffer);
+      fs.writeFileSync(fullPath, file.buffer);
     } else {
       // Upload to S3
       await s3.send(
@@ -119,6 +120,51 @@ export async function getAttachments(req: Request, res: Response, next: NextFunc
   }
 }
 
+/**
+ * Delete all disk files for an invoice (local dev only).
+ * Call this BEFORE removing the invoice / attachment rows from the DB.
+ * Silently ignores missing files so it's safe to call repeatedly.
+ */
+export async function deleteInvoiceFilesFromDisk(invoiceId: string): Promise<void> {
+  if (!isLocalDev) return;
+  const dir = path.join(UPLOADS_DIR, 'invoices', invoiceId);
+  try {
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.error(`[attachments] failed to clean files for invoice ${invoiceId}:`, err);
+  }
+}
+
+export async function deleteAttachment(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const invoiceId = req.params.id as string;
+    const attachmentId = req.params.attachmentId as string;
+
+    const att = await queryOne<AttachmentRow>(
+      'SELECT * FROM attachments WHERE id = $1 AND invoice_id = $2',
+      [attachmentId, invoiceId]
+    );
+
+    if (!att) {
+      res.status(404).json({ error: 'Not Found', message: 'Attachment not found' });
+      return;
+    }
+
+    // Remove from disk (local dev) — ignore errors if file already missing
+    if (isLocalDev) {
+      const filePath = path.join(UPLOADS_DIR, att.s3_key);
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { /* ignore */ }
+    }
+
+    await query('DELETE FROM attachments WHERE id = $1', [attachmentId]);
+    res.json({ message: 'Attachment deleted' });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function downloadAttachment(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const invoiceId = req.params.id as string;
@@ -140,8 +186,10 @@ export async function downloadAttachment(req: Request, res: Response, next: Next
       return;
     }
 
+    // ?download=1 forces download, otherwise serve inline so PDFs/images preview in-browser
+    const disposition = req.query.download === '1' ? 'attachment' : 'inline';
     res.setHeader('Content-Type', att.mime_type ?? 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(att.file_name)}`);
+    res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(att.file_name)}`);
     fs.createReadStream(filePath).pipe(res);
   } catch (err) {
     next(err);

@@ -121,7 +121,12 @@ function derive(
   const paidInvoiceTotal = invoices
     .filter(i => i.payment_status === 'Paid')
     .reduce((s, i) => s + n(i.invoice_amount), 0);
-  const agingPaidTotal = fullAgingRows.reduce((s, r) => s + n(r.total_paid), 0);
+  // L5: aging only returns Not Paid + Partial rows (see aging.service.ts WHERE clause).
+  // We explicitly filter again here so any future change to the endpoint can't silently
+  // cause fully-paid rows to be double-counted in the Total Paid KPI.
+  const agingPaidTotal = fullAgingRows
+    .filter(r => r.payment_status !== 'Paid')
+    .reduce((s, r) => s + n(r.total_paid), 0);
   const totalPaid = paidInvoiceTotal + agingPaidTotal;
 
   // Outstanding / overdue: always from full (unfiltered) aging — live operational metrics
@@ -269,7 +274,21 @@ export function useDashboardData(dateRange?: { from: string; to: string } | null
       try {
         const [aging, cashflow, invoices] = await Promise.all([
           apiFetch<AgingData>('/aging?site=All'),
-          apiFetch<CashflowRow[]>('/cashflow'),
+          apiFetch<{ expenditure: { month: string; purpose: string; total: number }[]; cashflow: { month: string; purpose: string; total: number }[] }>('/cashflow').then(res => {
+            // Merge expenditure + cashflow into CashflowRow[] for dashboard compatibility
+            const merged = new Map<string, CashflowRow>();
+            for (const r of res.expenditure) {
+              const key = `${r.month}|${r.purpose}`;
+              if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
+              merged.get(key)!.total_invoiced += Number(r.total);
+            }
+            for (const r of res.cashflow) {
+              const key = `${r.month}|${r.purpose}`;
+              if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
+              merged.get(key)!.total_paid += Number(r.total);
+            }
+            return Array.from(merged.values());
+          }),
           apiFetch<Invoice[]>('/invoices'),
         ]);
         if (!cancelled) {

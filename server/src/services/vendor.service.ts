@@ -280,27 +280,41 @@ export async function findAllDuplicatePairs(): Promise<DuplicatePair[]> {
 
 // ── Vendor merge ───────────────────────────────────────────────────────────
 
-export async function mergeVendors(keepId: string, removeId: string): Promise<VendorRow | null> {
+export interface MergeResult {
+  keptVendor: VendorRow;
+  repointedCount: number;
+  removedName: string;
+}
+
+export async function mergeVendors(keepId: string, removeId: string): Promise<MergeResult | null> {
   const keepVendor = await getVendorById(keepId);
   const removeVendor = await getVendorById(removeId);
 
   if (!keepVendor || !removeVendor) return null;
 
-  // Reassign invoices: update vendor_id for linked invoices
-  await query(
-    'UPDATE invoices SET vendor_id = $1 WHERE vendor_id = $2',
+  // Re-point invoices by vendor_id
+  const byId = await query<{ id: string }>(
+    'UPDATE invoices SET vendor_id = $1, updated_at = NOW() WHERE vendor_id = $2 RETURNING id',
     [keepId, removeId]
   );
 
-  // Reassign invoices: update vendor_name AND link unlinked invoices
-  // This also catches invoices with vendor_id = NULL that match by name
-  await query(
-    'UPDATE invoices SET vendor_name = $1, vendor_id = $2 WHERE LOWER(vendor_name) = LOWER($3)',
+  // Re-point invoices by vendor_name (catches unlinked rows matching the removed vendor).
+  // IS DISTINCT FROM handles NULL vendor_id correctly (plain != would skip NULLs).
+  const byName = await query<{ id: string }>(
+    `UPDATE invoices SET vendor_name = $1, vendor_id = $2, updated_at = NOW()
+     WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM($3)) AND vendor_id IS DISTINCT FROM $2
+     RETURNING id`,
     [keepVendor.name, keepId, removeVendor.name]
   );
 
   // Delete the removed vendor
   await query('DELETE FROM vendors WHERE id = $1', [removeId]);
 
-  return keepVendor;
+  // Unique count of re-pointed invoices
+  const uniqueIds = new Set([...byId.map(r => r.id), ...byName.map(r => r.id)]);
+  return {
+    keptVendor: keepVendor,
+    repointedCount: uniqueIds.size,
+    removedName: removeVendor.name,
+  };
 }

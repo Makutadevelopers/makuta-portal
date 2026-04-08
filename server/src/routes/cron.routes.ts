@@ -33,7 +33,7 @@ router.post('/overdue-alert', async (req: Request, res: Response) => {
       `SELECT
          i.vendor_name,
          i.invoice_amount - COALESCE(p.total_paid, 0) AS balance,
-         EXTRACT(DAY FROM NOW() - (i.invoice_date + COALESCE(v.payment_terms, 30) * INTERVAL '1 day'))::INT AS days_past_due
+         (CURRENT_DATE - (i.invoice_date + COALESCE(v.payment_terms, 30) * INTERVAL '1 day')::DATE) AS days_past_due
        FROM invoices i
        LEFT JOIN vendors v ON v.id = i.vendor_id
        LEFT JOIN (
@@ -41,7 +41,7 @@ router.post('/overdue-alert', async (req: Request, res: Response) => {
        ) p ON p.invoice_id = i.id
        WHERE i.payment_status IN ('Not Paid', 'Partial')
          AND i.deleted_at IS NULL
-         AND NOW() > (i.invoice_date + COALESCE(v.payment_terms, 30) * INTERVAL '1 day')
+         AND CURRENT_DATE > (i.invoice_date + COALESCE(v.payment_terms, 30) * INTERVAL '1 day')::DATE
          AND i.invoice_amount - COALESCE(p.total_paid, 0) > 0
        ORDER BY days_past_due DESC`
     );

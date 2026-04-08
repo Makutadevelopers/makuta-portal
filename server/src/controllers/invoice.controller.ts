@@ -8,21 +8,31 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { query, queryOne } from '../db/query';
+import { query, queryOne, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
 import { notifyInvoicePushed } from '../services/email.service';
+import { deleteInvoiceFilesFromDisk } from './attachment.controller';
+
+// ISO date YYYY-MM-DD (strict — rejects "banana", "2026/04/01", partial dates, etc.)
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
+  .refine(v => !isNaN(new Date(v).getTime()), 'Invalid calendar date');
 
 const createInvoiceSchema = z.object({
-  month: z.string().min(1, 'Month is required'),
-  invoice_date: z.string().min(1, 'Invoice date is required'),
+  month: isoDate,
+  invoice_date: isoDate,
   vendor_id: z.string().uuid().nullable().optional().or(z.literal('')).transform(v => v || null),
-  vendor_name: z.string().min(1, 'Vendor name is required'),
-  invoice_no: z.string().min(1, 'Invoice number is required'),
-  po_number: z.string().nullable().optional(),
-  purpose: z.string().min(1, 'Purpose is required'),
-  site: z.string().min(1, 'Site is required'),
-  invoice_amount: z.number().positive('Amount must be positive'),
-  remarks: z.string().nullable().optional(),
+  vendor_name: z.string().min(1, 'Vendor name is required').max(500, 'Vendor name too long'),
+  // M1: invoice_no is optional — imports and contractor work orders often have no number.
+  // The DB column is nullable (migration 010). We still enforce max length when present.
+  invoice_no: z.string().max(100, 'Invoice number too long').nullable().optional().or(z.literal(''))
+    .transform(v => (v && v.trim() ? v.trim() : null)),
+  po_number: z.string().max(200).nullable().optional(),
+  purpose: z.string().min(1, 'Purpose is required').max(100),
+  site: z.string().min(1, 'Site is required').max(100),
+  invoice_amount: z.number().positive('Amount must be positive').max(1e12, 'Amount too large'),
+  remarks: z.string().max(2000).nullable().optional(),
+  // H5: client sets this to true only after user confirms the duplicate warning
+  confirm_duplicate: z.boolean().optional(),
 });
 
 const updateInvoiceSchema = createInvoiceSchema.partial();
@@ -81,21 +91,48 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
       return;
     }
 
-    // Check for duplicate invoice (same invoice_no + vendor_name)
-    const duplicate = await queryOne<{ id: string; invoice_no: string }>(
-      `SELECT id, invoice_no FROM invoices
-       WHERE invoice_no = $1 AND LOWER(vendor_name) = LOWER($2) AND deleted_at IS NULL`,
-      [data.invoice_no, data.vendor_name]
-    );
-    if (duplicate) {
-      // Create alert but still allow creation
+    // H5: Duplicate check — same invoice_no + same vendor (case-insensitive), not deleted.
+    // If invoice_no is null/blank, fall back to vendor + amount + date match.
+    // By default we REFUSE to create and return 409 with the existing invoice info.
+    // The client can retry with `confirm_duplicate: true` to explicitly override.
+    const duplicate = data.invoice_no
+      ? await queryOne<{ id: string; invoice_no: string | null; invoice_date: string; invoice_amount: string }>(
+          `SELECT id, invoice_no, invoice_date, invoice_amount FROM invoices
+           WHERE invoice_no = $1 AND LOWER(TRIM(vendor_name)) = LOWER(TRIM($2)) AND deleted_at IS NULL`,
+          [data.invoice_no, data.vendor_name]
+        )
+      : await queryOne<{ id: string; invoice_no: string | null; invoice_date: string; invoice_amount: string }>(
+          `SELECT id, invoice_no, invoice_date, invoice_amount FROM invoices
+           WHERE invoice_no IS NULL
+             AND LOWER(TRIM(vendor_name)) = LOWER(TRIM($1))
+             AND invoice_amount = $2
+             AND invoice_date = $3
+             AND deleted_at IS NULL`,
+          [data.vendor_name, data.invoice_amount, data.invoice_date]
+        );
+    if (duplicate && !data.confirm_duplicate) {
+      res.status(409).json({
+        error: 'Conflict',
+        code: 'duplicate_invoice',
+        message: `Invoice #${data.invoice_no} already exists for vendor "${data.vendor_name}". Retry with confirm_duplicate=true to force.`,
+        existing: {
+          id: duplicate.id,
+          invoice_no: duplicate.invoice_no,
+          invoice_date: duplicate.invoice_date,
+          invoice_amount: duplicate.invoice_amount,
+        },
+      });
+      return;
+    }
+    if (duplicate && data.confirm_duplicate) {
+      // Still log an alert so HO can review forced duplicates later
       await queryOne(
         `INSERT INTO alerts (alert_type, title, message, metadata)
          VALUES ('duplicate_invoice', $1, $2, $3)`,
         [
-          `Duplicate invoice #${data.invoice_no}`,
-          `Invoice #${data.invoice_no} from "${data.vendor_name}" may be a duplicate — an invoice with the same number already exists.`,
-          JSON.stringify({ existingInvoiceId: duplicate.id, invoiceNo: data.invoice_no, vendorName: data.vendor_name }),
+          `Duplicate invoice #${data.invoice_no} (force-created)`,
+          `Invoice #${data.invoice_no} from "${data.vendor_name}" was created even though a duplicate exists. User confirmed override.`,
+          JSON.stringify({ existingInvoiceId: duplicate.id, invoiceNo: data.invoice_no, vendorName: data.vendor_name, createdBy: userId }),
         ]
       );
     }
@@ -135,9 +172,9 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
     const data = updateInvoiceSchema.parse(req.body);
     const { role, site } = req.user!;
 
-    // Verify invoice exists, check site ownership, and check finalized status
+    // Verify invoice exists (excludes soft-deleted), check site ownership, and finalized status
     const existing = await queryOne<InvoiceRow>(
-      'SELECT id, site, pushed FROM invoices WHERE id = $1',
+      'SELECT id, site, pushed FROM invoices WHERE id = $1 AND deleted_at IS NULL',
       [id]
     );
 
@@ -153,6 +190,12 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
 
     if (role === 'site' && existing.site !== site) {
       res.status(403).json({ error: 'Forbidden', message: 'You can only edit invoices for your own site' });
+      return;
+    }
+
+    // H1: site role cannot change the site of an invoice — that would let them escape their boundary
+    if (role === 'site' && data.site !== undefined && data.site !== existing.site) {
+      res.status(403).json({ error: 'Forbidden', message: 'Site accountants cannot change the site of an invoice' });
       return;
     }
 
@@ -207,7 +250,7 @@ export async function pushInvoice(req: Request, res: Response, next: NextFunctio
     const invoice = await queryOne<InvoiceRow>(
       `UPDATE invoices
        SET pushed = TRUE, pushed_at = NOW(), approved_by = $1, updated_at = NOW()
-       WHERE id = $2
+       WHERE id = $2 AND deleted_at IS NULL
        RETURNING *`,
       [userId, id]
     );
@@ -217,11 +260,15 @@ export async function pushInvoice(req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    await logAudit({
-      userId,
-      action: `Finalized invoice #${invoice.invoice_no ?? id}`,
-      invoiceId: id,
-    });
+    try {
+      await logAudit({
+        userId,
+        action: `Finalized invoice #${invoice.invoice_no ?? id}`,
+        invoiceId: id,
+      });
+    } catch (auditErr) {
+      console.error('[audit] pushInvoice audit log failed:', auditErr);
+    }
 
     // Fire-and-forget email notification
     notifyInvoicePushed({
@@ -230,7 +277,7 @@ export async function pushInvoice(req: Request, res: Response, next: NextFunctio
       amount: Number(invoice.invoice_amount ?? 0),
       site: String(invoice.site ?? ''),
       hoEmail: 'rajesh@makuta.in',
-    }).catch(() => {});
+    }).catch((err) => console.error('[email] notifyInvoicePushed failed:', err));
 
     res.json(invoice);
   } catch (err) {
@@ -247,7 +294,7 @@ export async function bulkPushInvoices(req: Request, res: Response, next: NextFu
     const result = await query<InvoiceRow>(
       `UPDATE invoices
        SET pushed = TRUE, pushed_at = NOW(), approved_by = $1, updated_at = NOW()
-       WHERE id = ANY($2) AND pushed = FALSE
+       WHERE id = ANY($2) AND pushed = FALSE AND deleted_at IS NULL
        RETURNING id, invoice_no`,
       [userId, ids]
     );
@@ -358,10 +405,17 @@ export async function permanentDeleteInvoice(req: Request, res: Response, next: 
       return;
     }
 
-    await query('DELETE FROM payments WHERE invoice_id = $1', [id]);
-    await query('DELETE FROM attachments WHERE invoice_id = $1', [id]);
-    await query('DELETE FROM audit_logs WHERE invoice_id = $1', [id]);
-    await query('DELETE FROM invoices WHERE id = $1', [id]);
+    // Atomic purge — all dependents plus invoice in one transaction
+    await withTransaction(async (tx) => {
+      await tx.query('DELETE FROM payments WHERE invoice_id = $1', [id]);
+      await tx.query('DELETE FROM attachments WHERE invoice_id = $1', [id]);
+      // Null out audit FK instead of deleting — preserves history
+      await tx.query('UPDATE audit_logs SET invoice_id = NULL WHERE invoice_id = $1', [id]);
+      await tx.query('DELETE FROM invoices WHERE id = $1', [id]);
+    });
+
+    // Clean up physical files from disk (local dev) after the DB rows are gone
+    await deleteInvoiceFilesFromDisk(id);
 
     await logAudit({
       userId,
@@ -376,19 +430,29 @@ export async function permanentDeleteInvoice(req: Request, res: Response, next: 
 
 export async function purgeOldBinInvoices(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    // Delete invoices in bin for more than 30 days
-    const old = await query<InvoiceRow>(
-      "SELECT id FROM invoices WHERE deleted_at IS NOT NULL AND deleted_at < NOW() - INTERVAL '30 days'"
-    );
+    // Collect the IDs that will be purged so we can also wipe their disk files
+    const purgedIds: string[] = [];
+    const purgedCount = await withTransaction(async (tx) => {
+      const old = await tx.query<{ id: string }>(
+        "SELECT id FROM invoices WHERE deleted_at IS NOT NULL AND deleted_at < NOW() - INTERVAL '30 days'"
+      );
+      if (old.length === 0) return 0;
 
-    for (const inv of old) {
-      await query('DELETE FROM payments WHERE invoice_id = $1', [inv.id]);
-      await query('DELETE FROM attachments WHERE invoice_id = $1', [inv.id]);
-      await query('DELETE FROM audit_logs WHERE invoice_id = $1', [inv.id]);
-      await query('DELETE FROM invoices WHERE id = $1', [inv.id]);
+      const ids = old.map(r => r.id);
+      purgedIds.push(...ids);
+      await tx.query('DELETE FROM payments WHERE invoice_id = ANY($1)', [ids]);
+      await tx.query('DELETE FROM attachments WHERE invoice_id = ANY($1)', [ids]);
+      await tx.query('UPDATE audit_logs SET invoice_id = NULL WHERE invoice_id = ANY($1)', [ids]);
+      await tx.query('DELETE FROM invoices WHERE id = ANY($1)', [ids]);
+      return old.length;
+    });
+
+    // Clean up physical files for every purged invoice (outside the transaction)
+    for (const id of purgedIds) {
+      await deleteInvoiceFilesFromDisk(id);
     }
 
-    res.json({ purged: old.length });
+    res.json({ purged: purgedCount });
   } catch (err) {
     next(err);
   }
@@ -402,7 +466,7 @@ export async function undoPushInvoice(req: Request, res: Response, next: NextFun
     const invoice = await queryOne<InvoiceRow>(
       `UPDATE invoices
        SET pushed = FALSE, pushed_at = NULL, approved_by = NULL, updated_at = NOW()
-       WHERE id = $1
+       WHERE id = $1 AND deleted_at IS NULL
        RETURNING *`,
       [id]
     );

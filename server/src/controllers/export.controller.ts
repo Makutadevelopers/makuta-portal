@@ -111,7 +111,7 @@ interface InvoiceRow {
 
 export async function exportInvoices(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const invoices = await query<InvoiceRow>('SELECT * FROM invoices ORDER BY invoice_date DESC');
+    const invoices = await query<InvoiceRow>('SELECT * FROM invoices WHERE deleted_at IS NULL ORDER BY invoice_date DESC');
 
     const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 40 });
     res.setHeader('Content-Type', 'application/pdf');
@@ -188,6 +188,7 @@ export async function exportCashflow(req: Request, res: Response, next: NextFunc
          COUNT(i.id)::INT AS invoice_count
        FROM invoices i
        LEFT JOIN (SELECT invoice_id, SUM(amount) AS total_paid FROM payments GROUP BY invoice_id) p ON p.invoice_id = i.id
+       WHERE i.deleted_at IS NULL
        GROUP BY TO_CHAR(i.month, 'YYYY-MM'), i.purpose
        ORDER BY month, i.purpose`
     );

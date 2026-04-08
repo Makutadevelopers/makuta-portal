@@ -17,7 +17,7 @@ router.get('/duplicates', requireRole(['ho']), getDuplicates);
 router.get('/', getVendors);
 router.get('/:id', getVendor);
 router.post('/merge', requireRole(['ho']), mergeVendors);
-router.post('/', requireRole(['ho']), createVendor);
+router.post('/', requireRole(['ho', 'site']), createVendor);
 router.patch('/:id', requireRole(['ho']), updateVendor);
 router.delete('/:id', requireRole(['ho']), deleteVendor);
 

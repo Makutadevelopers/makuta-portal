@@ -26,13 +26,20 @@ declare global {
 
 export function authenticate(req: Request, res: Response, next: NextFunction): void {
   const header = req.headers.authorization;
+  // Allow ?token=... query param as fallback so file download links work when opened in a new tab
+  const queryToken = typeof req.query.token === 'string' ? req.query.token : null;
 
-  if (!header || !header.startsWith('Bearer ')) {
+  let token: string | null = null;
+  if (header && header.startsWith('Bearer ')) {
+    token = header.slice(7);
+  } else if (queryToken) {
+    token = queryToken;
+  }
+
+  if (!token) {
     res.status(401).json({ error: 'Unauthorized', message: 'Missing or malformed Authorization header' });
     return;
   }
-
-  const token = header.slice(7);
 
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;

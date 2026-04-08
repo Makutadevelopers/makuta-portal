@@ -3,7 +3,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useVendors } from '../../hooks/useVendors';
 import { createInvoice, updateInvoice } from '../../api/invoices';
-import { uploadAttachment, getAttachments, Attachment } from '../../api/attachments';
+import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
 import { Invoice } from '../../types/invoice';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { PURPOSES } from '../../utils/constants';
@@ -146,6 +146,7 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
   onSaved: () => void;
 }) {
   const isEdit = !!editInvoice;
+  const { notify } = useToast();
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
 
@@ -408,11 +409,24 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
           <label className="block text-xs text-gray-500 mb-1">Invoice copies & supporting documents</label>
           <div
             onDragOver={(e: DragEvent) => { e.preventDefault(); e.stopPropagation(); }}
-            onDrop={(e: DragEvent) => {
+            onDrop={async (e: DragEvent) => {
               e.preventDefault();
               e.stopPropagation();
               const files = Array.from(e.dataTransfer.files);
-              setPendingFiles(prev => [...prev, ...files]);
+              if (isEdit) {
+                setUploading(true);
+                try {
+                  for (const file of files) await uploadAttachment(editInvoice!.id, file);
+                  const fresh = await getAttachments(editInvoice!.id);
+                  setExistingAttachments(fresh);
+                  notify(`Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : 'Upload failed');
+                } finally { setUploading(false); }
+              } else {
+                setPendingFiles(prev => [...prev, ...files]);
+                notify(`Added ${files.length} file${files.length > 1 ? 's' : ''} — will upload on save`);
+              }
             }}
             onClick={() => fileInputRef.current?.click()}
             className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center cursor-pointer hover:border-blue-300 transition-colors"
@@ -423,10 +437,21 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
               accept=".pdf,.jpg,.jpeg,.png,.webp"
               multiple
               className="hidden"
-              onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                if (e.target.files) {
-                  setPendingFiles(prev => [...prev, ...Array.from(e.target.files!)]);
-                  e.target.value = '';
+              onChange={async (e: ChangeEvent<HTMLInputElement>) => {
+                if (!e.target.files) return;
+                const files = Array.from(e.target.files);
+                e.target.value = '';
+                if (isEdit) {
+                  setUploading(true);
+                  try {
+                    for (const file of files) await uploadAttachment(editInvoice!.id, file);
+                    const fresh = await getAttachments(editInvoice!.id);
+                    setExistingAttachments(fresh);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : 'Upload failed');
+                  } finally { setUploading(false); }
+                } else {
+                  setPendingFiles(prev => [...prev, ...files]);
                 }
               }}
             />
@@ -440,17 +465,32 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
           {/* Existing attachments (edit mode) */}
           {existingAttachments.length > 0 && (
             <div className="mt-3 space-y-2">
-              {existingAttachments.map(att => (
-                <div key={att.id} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <span className="text-red-500 text-sm">&#128196;</span>
-                    <div>
-                      <a href={att.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline font-medium">{att.file_name}</a>
-                      <div className="text-xs text-gray-400">{att.file_size ? `${Math.round(att.file_size / 1024)} KB` : ''}</div>
+              {existingAttachments.map(att => {
+                const fullUrl = att.url.startsWith('http') ? att.url : `${window.location.origin}${att.url}`;
+                return (
+                  <div key={att.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 rounded-lg">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <span className="text-red-500 text-sm">&#128196;</span>
+                      <span className="text-sm font-medium text-gray-900 truncate">{att.file_name}</span>
+                      <span className="text-xs text-gray-400 flex-shrink-0">{att.file_size ? `${Math.round(att.file_size / 1024)} KB` : ''}</span>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <a href={fullUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded">View</a>
+                      <a href={`${fullUrl}${fullUrl.includes('?') ? '&' : '?'}download=1`} className="px-2 py-1 text-xs text-green-600 hover:bg-green-50 rounded">Download</a>
+                      <button type="button" onClick={() => { navigator.clipboard.writeText(fullUrl); alert('Link copied'); }} className="px-2 py-1 text-xs text-purple-600 hover:bg-purple-50 rounded">Share</button>
+                      <button type="button" onClick={async () => {
+                        if (!confirm(`Delete ${att.file_name}?`)) return;
+                        try {
+                          await deleteAttachment(editInvoice!.id, att.id);
+                          setExistingAttachments(prev => prev.filter(a => a.id !== att.id));
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Failed to delete');
+                        }
+                      }} className="px-2 py-1 text-xs text-red-500 hover:bg-red-50 rounded">Delete</button>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

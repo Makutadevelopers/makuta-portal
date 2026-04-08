@@ -4,7 +4,7 @@ import { useInvoices } from '../../hooks/useInvoices';
 import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { useVendors } from '../../hooks/useVendors';
 import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, getInvoiceHistory, AuditLogEntry, createInvoice, updateInvoice, deleteInvoice as deleteInvoiceApi } from '../../api/invoices';
-import { uploadAttachment, getAttachments, Attachment } from '../../api/attachments';
+import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
 import { createPayment, getPayments } from '../../api/payments';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES, PURPOSES, PAYMENT_TYPES, BANKS } from '../../utils/constants';
@@ -409,31 +409,24 @@ export default function InvoiceList() {
                           : <span className="text-xs font-medium text-red-500">N/A</span>}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {!inv.pushed && (
-                            <>
-                              <button onClick={() => setExpandedEditId(expandedEditId === inv.id ? null : inv.id)} className="text-xs text-gray-600 hover:underline">Edit</button>
-                              <button onClick={() => handlePush(inv.id)} className="text-xs text-blue-600 hover:underline">Final</button>
-                              <button onClick={() => handleDelete(inv)} className="text-xs text-red-500 hover:underline">Del</button>
-                            </>
-                          )}
-                          {inv.pushed && (
-                            <button onClick={() => handleUndo(inv.id)} className="text-xs text-orange-600 hover:underline">Undo</button>
-                          )}
-                          {isNotPaid && (
-                            <button onClick={() => setPayInvoice(inv)} className="text-xs text-green-600 hover:underline">Mark Paid</button>
-                          )}
-                          {isPartial && (
-                            <>
-                              <button onClick={() => setPayInvoice(inv)} className="text-xs text-green-600 hover:underline">Add Payment</button>
-                              <button onClick={() => openHistory(inv)} className="text-xs text-gray-500 hover:underline">History</button>
-                            </>
-                          )}
-                          {isPaid && (
-                            <button onClick={() => openHistory(inv)} className="text-xs text-gray-500 hover:underline">History</button>
-                          )}
-                          <button onClick={() => openInfo(inv)} className="text-xs text-purple-600 hover:underline">Info</button>
-                        </div>
+                        <ActionsMenu
+                          items={[
+                            ...(!inv.pushed ? [
+                              { label: 'Edit', color: 'text-gray-700', onClick: () => setExpandedEditId(expandedEditId === inv.id ? null : inv.id) },
+                              { label: 'Finalize', color: 'text-blue-600', onClick: () => handlePush(inv.id) },
+                              { label: 'Delete', color: 'text-red-500', onClick: () => handleDelete(inv) },
+                            ] : [
+                              { label: 'Undo Finalize', color: 'text-orange-600', onClick: () => handleUndo(inv.id) },
+                            ]),
+                            ...(isNotPaid ? [{ label: 'Mark Paid', color: 'text-green-600', onClick: () => setPayInvoice(inv) }] : []),
+                            ...(isPartial ? [
+                              { label: 'Add Payment', color: 'text-green-600', onClick: () => setPayInvoice(inv) },
+                              { label: 'Payment History', color: 'text-gray-600', onClick: () => openHistory(inv) },
+                            ] : []),
+                            ...(isPaid ? [{ label: 'Payment History', color: 'text-gray-600', onClick: () => openHistory(inv) }] : []),
+                            { label: 'Info / Audit', color: 'text-purple-600', onClick: () => openInfo(inv) },
+                          ]}
+                        />
                       </td>
                     </tr>
                     {expandedEditId === inv.id && (
@@ -766,6 +759,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   onSaved: () => void;
 }) {
   const isEdit = !!editInvoice;
+  const { notify } = useToast();
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
 
@@ -939,22 +933,77 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
           <label className="block text-xs text-gray-500 mb-1">Invoice copies & documents</label>
           <div
             onDragOver={(e: DragEvent) => { e.preventDefault(); e.stopPropagation(); }}
-            onDrop={(e: DragEvent) => { e.preventDefault(); e.stopPropagation(); setPendingFiles(prev => [...prev, ...Array.from(e.dataTransfer.files)]); }}
+            onDrop={async (e: DragEvent) => {
+              e.preventDefault(); e.stopPropagation();
+              const files = Array.from(e.dataTransfer.files);
+              if (isEdit) {
+                setUploading(true);
+                try {
+                  for (const file of files) await uploadAttachment(editInvoice.id, file);
+                  const fresh = await getAttachments(editInvoice.id);
+                  setExistingAttachments(fresh);
+                  notify(`Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : 'Upload failed');
+                } finally { setUploading(false); }
+              } else {
+                setPendingFiles(prev => [...prev, ...files]);
+                notify(`Added ${files.length} file${files.length > 1 ? 's' : ''} — will upload on save`);
+              }
+            }}
             onClick={() => fileInputRef.current?.click()}
             className="border-2 border-dashed border-gray-200 rounded-lg p-6 text-center cursor-pointer hover:border-blue-300">
             <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple className="hidden"
-              onChange={(e: ChangeEvent<HTMLInputElement>) => { if (e.target.files) { setPendingFiles(prev => [...prev, ...Array.from(e.target.files!)]); e.target.value = ''; } }} />
+              onChange={async (e: ChangeEvent<HTMLInputElement>) => {
+                if (!e.target.files) return;
+                const files = Array.from(e.target.files);
+                e.target.value = '';
+                if (isEdit) {
+                  // Upload immediately to existing invoice
+                  setUploading(true);
+                  try {
+                    for (const file of files) await uploadAttachment(editInvoice.id, file);
+                    const fresh = await getAttachments(editInvoice.id);
+                    setExistingAttachments(fresh);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : 'Upload failed');
+                  } finally {
+                    setUploading(false);
+                  }
+                } else {
+                  setPendingFiles(prev => [...prev, ...files]);
+                }
+              }} />
             <div className="text-sm text-gray-600 font-medium">Drag & drop or click to browse</div>
             <div className="text-xs text-gray-400 mt-1">PDF, JPG, PNG — max 10 MB each</div>
           </div>
           {existingAttachments.length > 0 && (
             <div className="mt-3 space-y-2">
-              {existingAttachments.map(att => (
-                <div key={att.id} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg">
-                  <a href={att.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline font-medium">{att.file_name}</a>
-                  <span className="text-xs text-gray-400">{att.file_size ? `${Math.round(att.file_size / 1024)} KB` : ''}</span>
-                </div>
-              ))}
+              {existingAttachments.map(att => {
+                const fullUrl = att.url.startsWith('http') ? att.url : `${window.location.origin}${att.url}`;
+                return (
+                  <div key={att.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 rounded-lg">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <span className="text-sm font-medium text-gray-900 truncate">{att.file_name}</span>
+                      <span className="text-xs text-gray-400 flex-shrink-0">{att.file_size ? `${Math.round(att.file_size / 1024)} KB` : ''}</span>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <a href={fullUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded" title="View">View</a>
+                      <a href={`${fullUrl}${fullUrl.includes('?') ? '&' : '?'}download=1`} className="px-2 py-1 text-xs text-green-600 hover:bg-green-50 rounded" title="Download">Download</a>
+                      <button type="button" onClick={() => { navigator.clipboard.writeText(fullUrl); alert('Link copied to clipboard'); }} className="px-2 py-1 text-xs text-purple-600 hover:bg-purple-50 rounded" title="Copy share link">Share</button>
+                      <button type="button" onClick={async () => {
+                        if (!confirm(`Delete ${att.file_name}?`)) return;
+                        try {
+                          await deleteAttachment(editInvoice!.id, att.id);
+                          setExistingAttachments(prev => prev.filter(a => a.id !== att.id));
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Failed to delete');
+                        }
+                      }} className="px-2 py-1 text-xs text-red-500 hover:bg-red-50 rounded" title="Delete">Delete</button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
           {pendingFiles.length > 0 && (
@@ -977,6 +1026,52 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
           <button type="button" onClick={onCancel} className="px-5 py-2.5 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// ── Actions dropdown menu ──────────────────────────────────────────────────
+interface ActionItem {
+  label: string;
+  color: string;
+  onClick: () => void;
+}
+
+function ActionsMenu({ items }: { items: ActionItem[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-1"
+      >
+        Actions
+        <span className="text-[10px]">&#9662;</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+          {items.map((item, i) => (
+            <button
+              key={i}
+              onClick={() => { item.onClick(); setOpen(false); }}
+              className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-50 ${item.color}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

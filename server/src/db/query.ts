@@ -54,4 +54,43 @@ export async function queryOne<T>(sql: string, params?: unknown[]): Promise<T | 
   return (rows[0] as T) ?? null;
 }
 
+/**
+ * Execute a callback inside a BEGIN/COMMIT transaction. Automatically rolls back on error.
+ * The callback receives a `tx` object with `query` and `queryOne` bound to a single pooled client.
+ *
+ * @example
+ *   await withTransaction(async (tx) => {
+ *     const inv = await tx.queryOne<Row>('SELECT * FROM invoices WHERE id = $1 FOR UPDATE', [id]);
+ *     await tx.query('INSERT INTO payments ...', [...]);
+ *   });
+ */
+export async function withTransaction<T>(
+  fn: (tx: {
+    query: <R>(sql: string, params?: unknown[]) => Promise<R[]>;
+    queryOne: <R>(sql: string, params?: unknown[]) => Promise<R | null>;
+  }) => Promise<T>
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn({
+      query: async <R>(sql: string, params?: unknown[]) => {
+        const { rows } = await client.query(sql, params);
+        return rows as R[];
+      },
+      queryOne: async <R>(sql: string, params?: unknown[]) => {
+        const { rows } = await client.query(sql, params);
+        return (rows[0] as R) ?? null;
+      },
+    });
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => { /* ignore rollback errors */ });
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export { pool };

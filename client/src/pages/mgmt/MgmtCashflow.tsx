@@ -16,8 +16,21 @@ export default function MgmtCashflow() {
   const [fVendor, setFVendor] = useState('');
 
   useEffect(() => {
-    apiFetch<CashflowRow[]>('/cashflow')
-      .then(setRows)
+    apiFetch<{ expenditure: { month: string; purpose: string; total: number }[]; cashflow: { month: string; purpose: string; total: number }[] }>('/cashflow')
+      .then(res => {
+        const merged = new Map<string, CashflowRow>();
+        for (const r of res.expenditure) {
+          const key = `${r.month}|${r.purpose}`;
+          if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
+          merged.get(key)!.total_invoiced += Number(r.total);
+        }
+        for (const r of res.cashflow) {
+          const key = `${r.month}|${r.purpose}`;
+          if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
+          merged.get(key)!.total_paid += Number(r.total);
+        }
+        setRows(Array.from(merged.values()));
+      })
       .finally(() => setLoading(false));
   }, []);
 

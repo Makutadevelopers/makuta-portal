@@ -209,18 +209,23 @@ export async function mergeVendors(
       return;
     }
 
-    const kept = await mergeVendorsService(keepId, removeId);
-    if (!kept) {
+    const result = await mergeVendorsService(keepId, removeId);
+    if (!result) {
       res.status(404).json({ error: 'Not Found', message: 'One or both vendors not found' });
       return;
     }
 
     await logAudit({
       userId: req.user!.id,
-      action: `Merged duplicate vendor into "${kept.name}"`,
+      action: `Merged vendor "${result.removedName}" into "${result.keptVendor.name}" (${result.repointedCount} invoice${result.repointedCount === 1 ? '' : 's'} re-pointed)`,
+      metadata: { keepId, removeId, repointedCount: result.repointedCount, removedName: result.removedName },
     });
 
-    res.json(kept);
+    res.json({
+      ...result.keptVendor,
+      repointedCount: result.repointedCount,
+      removedName: result.removedName,
+    });
   } catch (err) {
     next(err);
   }
