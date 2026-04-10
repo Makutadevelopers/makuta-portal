@@ -2,8 +2,8 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "DOCKERFILE",
-    "dockerfilePath": "Dockerfile",
-    "watchPatterns": ["src/**", "package.json", "tsconfig.json"]
+    "dockerfilePath": "server/Dockerfile",
+    "watchPatterns": ["server/**"]
   },
   "deploy": {
     "startCommand": "npx tsx src/index.ts",
