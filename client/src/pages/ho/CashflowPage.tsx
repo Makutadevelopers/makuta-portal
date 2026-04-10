@@ -26,34 +26,25 @@ export default function CashflowPage() {
 
   const drillByVendor = fCategory !== 'All';
 
-  // Initial fetch for categories list
+  // Populate the category dropdown once from the unfiltered response
   useEffect(() => {
-    apiFetch<CashflowResponse>('/cashflow')
-      .then(res => {
-        setData(res);
-        const cats = new Set(res.expenditure.map(r => r.purpose));
-        setAllCategories(Array.from(cats).sort());
-      })
-      .finally(() => setLoading(false));
+    apiFetch<CashflowResponse>('/cashflow').then(res => {
+      const cats = new Set(res.expenditure.map(r => r.purpose));
+      setAllCategories(Array.from(cats).sort());
+    });
   }, []);
 
-  // Re-fetch when category changes
+  // Re-fetch whenever site OR category changes
   useEffect(() => {
-    if (fCategory === 'All') return;
     setLoading(true);
-    apiFetch<CashflowResponse>(`/cashflow?category=${encodeURIComponent(fCategory)}`)
+    const params = new URLSearchParams();
+    if (fSite !== 'All') params.set('site', fSite);
+    if (fCategory !== 'All') params.set('category', fCategory);
+    const qs = params.toString();
+    apiFetch<CashflowResponse>(`/cashflow${qs ? `?${qs}` : ''}`)
       .then(setData)
       .finally(() => setLoading(false));
-  }, [fCategory]);
-
-  // Reset to all-categories data when filter cleared
-  useEffect(() => {
-    if (fCategory !== 'All') return;
-    setLoading(true);
-    apiFetch<CashflowResponse>('/cashflow')
-      .then(setData)
-      .finally(() => setLoading(false));
-  }, [fCategory]);
+  }, [fSite, fCategory]);
 
   const rows = activeTab === 'expenditure' ? data.expenditure : data.cashflow;
 

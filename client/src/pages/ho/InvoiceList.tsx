@@ -6,6 +6,7 @@ import { useVendors } from '../../hooks/useVendors';
 import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, getInvoiceHistory, AuditLogEntry, createInvoice, updateInvoice, deleteInvoice as deleteInvoiceApi } from '../../api/invoices';
 import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
 import { createPayment, getPayments } from '../../api/payments';
+import { bulkPayInvoices } from '../../api/reconciliation';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES, PURPOSES, PAYMENT_TYPES, BANKS } from '../../utils/constants';
 import { Invoice } from '../../types/invoice';
@@ -46,6 +47,7 @@ export default function InvoiceList() {
 
   // Payment modal state
   const [payInvoice, setPayInvoice] = useState<Invoice | null>(null);
+  const [showBulkPay, setShowBulkPay] = useState(false);
   // History panel state
   const [historyInvoice, setHistoryInvoice] = useState<Invoice | null>(null);
   const [historyPayments, setHistoryPayments] = useState<Payment[]>([]);
@@ -123,8 +125,14 @@ export default function InvoiceList() {
     });
   }, [invoices, fSite, fStatus, fPurpose, fMonth, search, timeline, dateFrom, dateTo]);
 
-  // Selectable = filtered invoices that are not yet finalized (draft)
-  const selectableIds = useMemo(() => filtered.filter(i => !i.pushed).map(i => i.id), [filtered]);
+  // Selectable = filtered invoices that still need action
+  // (draft → eligible for bulk finalize, unpaid → eligible for bulk pay).
+  // We allow any non-Paid invoice to be ticked; individual actions re-filter
+  // the selection to the subset they apply to.
+  const selectableIds = useMemo(
+    () => filtered.filter(i => i.payment_status !== 'Paid').map(i => i.id),
+    [filtered]
+  );
   const allSelected = selectableIds.length > 0 && selectableIds.every(id => selected.has(id));
 
   function toggleSelectAll() {
@@ -145,8 +153,13 @@ export default function InvoiceList() {
   }
 
   async function handleBulkFinalize() {
-    const ids = Array.from(selected);
-    if (ids.length === 0) return;
+    // Bulk finalize only applies to draft (non-pushed) invoices — filter the selection.
+    const draftIds = Array.from(selected).filter(id => {
+      const inv = invoices.find(x => x.id === id);
+      return inv && !inv.pushed;
+    });
+    if (draftIds.length === 0) { notify('No draft invoices in selection to finalize'); return; }
+    const ids = draftIds;
     setBulkLoading(true);
     try {
       const result = await bulkFinalizeInvoices(ids);
@@ -268,14 +281,33 @@ export default function InvoiceList() {
 
       {/* Bulk actions bar */}
       {selected.size > 0 && (
-        <div className="flex items-center gap-3 mb-4 px-4 py-2.5 bg-blue-50 rounded-lg border border-blue-100">
+        <div className="flex items-center gap-3 mb-4 px-4 py-2.5 bg-blue-50 rounded-lg border border-blue-100 flex-wrap">
           <span className="text-sm font-medium text-blue-800">{selected.size} invoice{selected.size > 1 ? 's' : ''} selected</span>
           <button onClick={handleBulkFinalize} disabled={bulkLoading}
             className="px-4 py-1.5 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d] disabled:opacity-50">
-            {bulkLoading ? 'Finalizing...' : `Finalize ${selected.size} Invoice${selected.size > 1 ? 's' : ''}`}
+            {bulkLoading ? 'Finalizing...' : `Finalize ${selected.size}`}
+          </button>
+          <button onClick={() => setShowBulkPay(true)}
+            className="px-4 py-1.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">
+            Bulk Pay (1 Cheque / Txn)
           </button>
           <button onClick={() => setSelected(new Set())} className="text-sm text-gray-500 hover:text-gray-700">Clear</button>
         </div>
+      )}
+
+      {/* Bulk Pay Modal */}
+      {showBulkPay && (
+        <BulkPayModal
+          invoices={invoices.filter(i => selected.has(i.id))}
+          agingMap={agingMap}
+          onClose={() => setShowBulkPay(false)}
+          onSaved={() => {
+            setShowBulkPay(false);
+            setSelected(new Set());
+            notify('Bulk payment recorded');
+            refresh();
+          }}
+        />
       )}
 
       {/* New Invoice Form (above table) */}
@@ -368,7 +400,7 @@ export default function InvoiceList() {
                   <Fragment key={inv.id}>
                     <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${selected.has(inv.id) ? 'bg-blue-50/50' : ''}`}>
                       <td className="px-4 py-3">
-                        {!inv.pushed ? (
+                        {inv.payment_status !== 'Paid' ? (
                           <input type="checkbox" checked={selected.has(inv.id)} onChange={() => toggleSelect(inv.id)}
                             className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200" />
                         ) : <span className="text-gray-300">—</span>}
@@ -1072,6 +1104,213 @@ function ActionsMenu({ items }: { items: ActionItem[] }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BulkPayModal — single cheque / transaction spanning multiple invoices
+// ---------------------------------------------------------------------------
+interface BulkPayModalProps {
+  invoices: Invoice[];
+  agingMap: Map<string, { balance: number; daysLabel: string; daysNum: number }>;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProps) {
+  const { notify } = useToast();
+  const today = new Date().toISOString().slice(0, 10);
+
+  const initialAllocs = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const inv of invoices) {
+      const bal = agingMap.get(inv.id)?.balance ?? Number(inv.invoice_amount);
+      m[inv.id] = bal > 0 ? String(bal) : '0';
+    }
+    return m;
+  }, [invoices, agingMap]);
+
+  const [allocs, setAllocs] = useState<Record<string, string>>(initialAllocs);
+  const [txnType, setTxnType] = useState('Cheque');
+  const [txnRef, setTxnRef] = useState('');
+  const [txnAmount, setTxnAmount] = useState('');
+  const [txnDate, setTxnDate] = useState(today);
+  const [bank, setBank] = useState('HDFC');
+  const [remarks, setRemarks] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const allocTotal = Object.values(allocs).reduce((s, v) => s + (Number(v) || 0), 0);
+  const txnAmtNum = Number(txnAmount) || 0;
+  const diff = Number((txnAmtNum - allocTotal).toFixed(2));
+  const tallied = Math.abs(diff) < 0.01 && txnAmtNum > 0;
+
+  function balanceFor(inv: Invoice): number {
+    return agingMap.get(inv.id)?.balance ?? Number(inv.invoice_amount);
+  }
+
+  function autoDistribute() {
+    // Fill txn_amount across invoices in order, capping at each invoice balance
+    let remaining = txnAmtNum;
+    const next: Record<string, string> = {};
+    for (const inv of invoices) {
+      if (remaining <= 0) { next[inv.id] = '0'; continue; }
+      const bal = Math.max(0, balanceFor(inv));
+      const take = Math.min(bal, remaining);
+      next[inv.id] = String(Number(take.toFixed(2)));
+      remaining -= take;
+    }
+    setAllocs(next);
+  }
+
+  async function handleSubmit() {
+    if (!txnRef.trim()) { notify('Enter cheque / transaction reference'); return; }
+    if (txnAmtNum <= 0) { notify('Enter cheque / transaction amount'); return; }
+    if (!tallied) { notify(`Allocations total ₹${allocTotal.toLocaleString('en-IN')} must equal txn amount ₹${txnAmtNum.toLocaleString('en-IN')}`); return; }
+
+    const allocations = invoices
+      .map(inv => ({ invoice_id: inv.id, amount: Number(allocs[inv.id] || 0) }))
+      .filter(a => a.amount > 0);
+
+    if (allocations.length === 0) { notify('Allocate at least one invoice'); return; }
+
+    setSaving(true);
+    try {
+      await bulkPayInvoices({
+        txn_type: txnType,
+        txn_ref: txnRef.trim(),
+        txn_amount: txnAmtNum,
+        txn_date: txnDate,
+        bank,
+        remarks: remarks.trim() || null,
+        allocations,
+      });
+      onSaved();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Bulk payment failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <div className="text-base font-medium text-gray-900">Bulk Pay — Single Cheque / Transaction</div>
+            <div className="text-xs text-gray-500 mt-0.5">Record one cheque / bank transfer against {invoices.length} invoice{invoices.length > 1 ? 's' : ''}</div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">×</button>
+        </div>
+
+        <div className="px-6 py-4 overflow-y-auto flex-1">
+          {/* Transaction details */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-5">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Payment Type</label>
+              <select value={txnType} onChange={e => setTxnType(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
+                {PAYMENT_TYPES.map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Cheque No / Txn ID</label>
+              <input value={txnRef} onChange={e => setTxnRef(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="e.g. 000123" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Total Amount</label>
+              <input type="number" value={txnAmount} onChange={e => setTxnAmount(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="0.00" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Date</label>
+              <input type="date" value={txnDate} onChange={e => setTxnDate(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Bank</label>
+              <select value={bank} onChange={e => setBank(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
+                {BANKS.map(b => <option key={b}>{b}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Remarks (optional)</label>
+              <input value={remarks} onChange={e => setRemarks(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="Notes..." />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-medium text-gray-600">Allocate across selected invoices</div>
+            <button onClick={autoDistribute}
+              className="text-xs px-2.5 py-1 border border-gray-200 rounded-md text-gray-600 hover:bg-gray-50">
+              Auto-distribute
+            </button>
+          </div>
+
+          <div className="border border-gray-100 rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-xs">
+                <tr>
+                  <th className="text-left px-3 py-2 font-medium">Invoice No</th>
+                  <th className="text-left px-3 py-2 font-medium">Vendor</th>
+                  <th className="text-left px-3 py-2 font-medium">Site</th>
+                  <th className="text-right px-3 py-2 font-medium">Invoice Amt</th>
+                  <th className="text-right px-3 py-2 font-medium">Balance</th>
+                  <th className="text-right px-3 py-2 font-medium w-36">Allocate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.map(inv => {
+                  const bal = balanceFor(inv);
+                  return (
+                    <tr key={inv.id} className="border-t border-gray-50">
+                      <td className="px-3 py-2 font-medium text-gray-900">{inv.invoice_no}</td>
+                      <td className="px-3 py-2 text-gray-700">{inv.vendor_name}</td>
+                      <td className="px-3 py-2 text-gray-600">{inv.site}</td>
+                      <td className="px-3 py-2 text-right text-gray-700">{formatINR(Number(inv.invoice_amount))}</td>
+                      <td className="px-3 py-2 text-right text-gray-700">{formatINR(bal)}</td>
+                      <td className="px-3 py-2 text-right">
+                        <input type="number" value={allocs[inv.id] ?? ''}
+                          onChange={e => setAllocs(prev => ({ ...prev, [inv.id]: e.target.value }))}
+                          className="w-32 px-2 py-1 border border-gray-200 rounded-md text-sm text-right" />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot className="bg-gray-50/60 text-xs">
+                <tr>
+                  <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Cheque / Txn amount</td>
+                  <td className="px-3 py-2 text-right font-medium text-gray-900">{formatINR(txnAmtNum)}</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Allocated total</td>
+                  <td className="px-3 py-2 text-right font-medium text-gray-900">{formatINR(allocTotal)}</td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Difference</td>
+                  <td className={`px-3 py-2 text-right font-medium ${tallied ? 'text-green-700' : 'text-amber-700'}`}>{formatINR(diff)}</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        <div className="px-6 py-3 border-t border-gray-100 flex items-center justify-end gap-2 bg-gray-50/50">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+          <button onClick={handleSubmit} disabled={saving || !tallied}
+            className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
+            {saving ? 'Processing...' : tallied ? 'Record Bulk Payment' : 'Amounts must tally'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -33,10 +33,18 @@ export default function VendorMaster() {
     (!categoryFilter || v.category === categoryFilter)
   );
 
-  // Find vendor names in invoices that aren't in vendor master
+  // An invoice is "mastered" if either
+  //   (a) it has a vendor_id pointing to an existing master row, OR
+  //   (b) its denormalized vendor_name matches a master name (case-insensitive).
+  // Without (a), merges that re-point vendor_id but don't rewrite the legacy
+  // vendor_name text would incorrectly resurface the old name in this banner.
+  const vendorIds = new Set(vendors.map(v => v.id));
   const vendorNames = new Set(vendors.map(v => v.name.toLowerCase()));
   const unmasteredVendors = Array.from(new Set(
-    invoices.map(i => i.vendor_name).filter(name => !vendorNames.has(name.toLowerCase()))
+    invoices
+      .filter(i => !(i.vendor_id && vendorIds.has(i.vendor_id)))
+      .map(i => i.vendor_name)
+      .filter(name => !vendorNames.has(name.toLowerCase()))
   ));
 
   function termsBadgeColor(days: number): string {

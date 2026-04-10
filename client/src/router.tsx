@@ -11,11 +11,13 @@ import CashflowPage from './pages/ho/CashflowPage';
 import VendorMaster from './pages/ho/VendorMaster';
 import AuditTrail from './pages/ho/AuditTrail';
 import Bin from './pages/ho/Bin';
+import BankReconciliation from './pages/ho/BankReconciliation';
 
 // Mgmt pages
 import MgmtOverview from './pages/mgmt/MgmtOverview';
 import VendorAging from './pages/mgmt/VendorAging';
 import MgmtCashflow from './pages/mgmt/MgmtCashflow';
+import MgmtBankReconciliation from './pages/mgmt/MgmtBankReconciliation';
 
 // Site pages
 import MyInvoices from './pages/site/MyInvoices';
@@ -62,11 +64,13 @@ export default function AppRouter() {
         <Route path="/vendors" element={<ProtectedRoute allowed={['ho']}><VendorMaster /></ProtectedRoute>} />
         <Route path="/audit" element={<ProtectedRoute allowed={['ho']}><AuditTrail /></ProtectedRoute>} />
         <Route path="/bin" element={<ProtectedRoute allowed={['ho']}><Bin /></ProtectedRoute>} />
+        <Route path="/bank-reconciliation" element={<ProtectedRoute allowed={['ho']}><BankReconciliation /></ProtectedRoute>} />
 
         {/* Mgmt routes */}
         <Route path="/overview" element={<ProtectedRoute allowed={['mgmt']}><MgmtOverview /></ProtectedRoute>} />
         <Route path="/vendor-aging" element={<ProtectedRoute allowed={['mgmt']}><VendorAging /></ProtectedRoute>} />
         <Route path="/mgmt-cashflow" element={<ProtectedRoute allowed={['mgmt']}><MgmtCashflow /></ProtectedRoute>} />
+        <Route path="/mgmt-bank-reconciliation" element={<ProtectedRoute allowed={['mgmt']}><MgmtBankReconciliation /></ProtectedRoute>} />
 
         {/* Site routes */}
         <Route path="/my-invoices" element={<ProtectedRoute allowed={['site']}><MyInvoices /></ProtectedRoute>} />

@@ -67,4 +67,39 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 
+// ── Production safety checks ────────────────────────────────────────────
+// When NODE_ENV=production, refuse to start with dev/placeholder values.
+if (env.NODE_ENV === 'production') {
+  const problems: string[] = [];
+
+  if (env.JWT_SECRET.includes('replace_with') || env.JWT_SECRET.includes('dev_secret')) {
+    problems.push('JWT_SECRET still uses a placeholder — generate a real secret with `openssl rand -hex 48`');
+  }
+  if (env.JWT_SECRET.length < 48) {
+    problems.push('JWT_SECRET should be at least 48 characters for production');
+  }
+  if (env.AWS_ACCESS_KEY_ID === 'local_dev_key' || env.AWS_SECRET_ACCESS_KEY === 'local_dev_secret') {
+    problems.push('AWS credentials are placeholders — set real keys so attachments go to S3 instead of local disk');
+  }
+  if (env.DB_PASSWORD === 'localdevpassword' || env.DB_PASSWORD.length < 12) {
+    problems.push('DB_PASSWORD is weak or uses the local dev default');
+  }
+  if (!env.DB_SSL) {
+    problems.push('DB_SSL should be true in production (RDS requires TLS)');
+  }
+  if (env.ALLOWED_ORIGINS.includes('localhost')) {
+    problems.push('ALLOWED_ORIGINS contains localhost — set to the real frontend domain(s)');
+  }
+  if (!env.CRON_SECRET) {
+    problems.push('CRON_SECRET is empty — scheduled jobs (overdue alerts) will not run');
+  }
+
+  if (problems.length > 0) {
+    console.error('\n❌ Production startup blocked by unsafe configuration:\n');
+    for (const p of problems) console.error(`  • ${p}`);
+    console.error('\nFix these in your production .env before deploying.\n');
+    process.exit(1);
+  }
+}
+
 export type Env = z.infer<typeof envSchema>;

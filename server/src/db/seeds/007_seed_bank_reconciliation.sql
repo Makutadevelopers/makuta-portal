@@ -1,0 +1,3 @@
+-- 007_seed_bank_reconciliation.sql
+-- Intentionally empty. Bank reconsideration test data has been cleared.
+-- (File kept so runSeeds.ts reference doesn't break.)

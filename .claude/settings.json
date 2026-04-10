@@ -46,7 +46,23 @@
       "Bash(curl -s http://localhost:4000/api/vendors -H 'Authorization: Bearer __TRACKED_VAR__')",
       "Bash(curl -s -X POST http://localhost:4000/api/vendors -H 'Authorization: Bearer __TRACKED_VAR__' -H 'Content-Type: application/json' -d '{\"name\":\"H2c Keep\",\"payment_terms\":30,\"category\":\"Steel\"}')",
       "Bash(curl -s 'http://localhost:4000/api/audit?limit=10' -H 'Authorization: Bearer __TRACKED_VAR__')",
-      "Bash(curl -s 'http://localhost:4000/api/aging?site=All' -H 'Authorization: Bearer __TRACKED_VAR__')"
+      "Bash(curl -s 'http://localhost:4000/api/aging?site=All' -H 'Authorization: Bearer __TRACKED_VAR__')",
+      "Bash(cp /tmp/backfill.mjs ./backfill-temp.mjs)",
+      "Bash(node ./backfill-temp.mjs)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:4000/api/health)",
+      "Bash(ls /Users/sohailshaik/Desktop/makuta-portal/server/vitest.config*)",
+      "Bash(npm test:*)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('exp rows:', len\\(d['expenditure']\\), 'cashflow rows:', len\\(d['cashflow']\\)\\)\")",
+      "Bash(PGPASSWORD=localdevpassword psql -h localhost -p 5433 -U makuta_admin -d makuta_portal -c \"SELECT COUNT\\(*\\) AS payments_total FROM payments; SELECT COUNT\\(*\\) AS payments_with_live_invoice FROM payments p JOIN invoices i ON i.id = p.invoice_id WHERE i.deleted_at IS NULL; SELECT column_name FROM information_schema.columns WHERE table_name='payments' ORDER BY ordinal_position;\")",
+      "Bash(ls /Users/sohailshaik/Desktop/makuta-portal/*.csv)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('exp rows:', len\\(d['expenditure']\\), 'cashflow rows:', len\\(d['cashflow']\\)\\); print\\('sample cashflow:'\\); [print\\(' ', r\\) for r in d['cashflow'][:5]]\")",
+      "Read(//Users/sohailshaik/Desktop/**)",
+      "Bash(ls ~/Desktop/*.csv ~/Downloads/*.csv)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('bank txns:', len\\(d\\)\\); tally_ok=sum\\(1 for r in d if r['tally_ok']\\); print\\('tally ok:', tally_ok, '/', len\\(d\\)\\); print\\('first 5:'\\); [print\\(' ', r['txn_ref'], r['bank'], r['txn_amount'], 'allocs:', r['allocation_count']\\) for r in d[:5]]\")"
+    ],
+    "additionalDirectories": [
+      "/tmp",
+      "/private/tmp"
     ]
   }
 }

@@ -292,10 +292,16 @@ export async function mergeVendors(keepId: string, removeId: string): Promise<Me
 
   if (!keepVendor || !removeVendor) return null;
 
-  // Re-point invoices by vendor_id
+  // Re-point invoices by vendor_id.
+  // Also rewrite the denormalized vendor_name so the "unmastered vendors"
+  // banner on Vendor Master doesn't keep resurfacing the old/variant name
+  // after a merge (the invoice text is a denormalized copy, not an FK).
   const byId = await query<{ id: string }>(
-    'UPDATE invoices SET vendor_id = $1, updated_at = NOW() WHERE vendor_id = $2 RETURNING id',
-    [keepId, removeId]
+    `UPDATE invoices
+     SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
+     WHERE vendor_id = $3
+     RETURNING id`,
+    [keepId, keepVendor.name, removeId]
   );
 
   // Re-point invoices by vendor_name (catches unlinked rows matching the removed vendor).

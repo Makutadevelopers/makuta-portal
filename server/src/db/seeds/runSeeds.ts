@@ -19,6 +19,7 @@ const SEED_FILES = [
   '004_seed_payments.sql',
   '005_seed_attachments.sql',
   '006_seed_audit_logs.sql',
+  '007_seed_bank_reconciliation.sql',
 ];
 
 /**

@@ -9,6 +9,7 @@ const HO_TABS = [
   { to: '/payment-aging', label: 'Payment Aging' },
   { to: '/cashflow', label: 'Cashflow' },
   { to: '/vendors', label: 'Vendor Master' },
+  { to: '/bank-reconciliation', label: 'Bank Reconsideration' },
   { to: '/audit', label: 'Audit Trail' },
   { to: '/bin', label: 'Bin' },
 ];
@@ -17,6 +18,7 @@ const MGMT_TABS = [
   { to: '/overview', label: 'Overview' },
   { to: '/vendor-aging', label: 'Vendor Aging' },
   { to: '/mgmt-cashflow', label: 'Cashflow' },
+  { to: '/mgmt-bank-reconciliation', label: 'Bank Reconsideration' },
 ];
 
 const SITE_TABS = [
