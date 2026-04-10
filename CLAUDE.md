@@ -1,4 +1,4 @@
-# Makuta Developers — Invoice & Payment Portal
+# Makuta Accounts Module
 
 ## What this project is
 A multi-role invoice and payment portal for a real estate company.

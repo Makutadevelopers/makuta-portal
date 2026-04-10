@@ -58,7 +58,11 @@
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('exp rows:', len\\(d['expenditure']\\), 'cashflow rows:', len\\(d['cashflow']\\)\\); print\\('sample cashflow:'\\); [print\\(' ', r\\) for r in d['cashflow'][:5]]\")",
       "Read(//Users/sohailshaik/Desktop/**)",
       "Bash(ls ~/Desktop/*.csv ~/Downloads/*.csv)",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('bank txns:', len\\(d\\)\\); tally_ok=sum\\(1 for r in d if r['tally_ok']\\); print\\('tally ok:', tally_ok, '/', len\\(d\\)\\); print\\('first 5:'\\); [print\\(' ', r['txn_ref'], r['bank'], r['txn_amount'], 'allocs:', r['allocation_count']\\) for r in d[:5]]\")"
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('bank txns:', len\\(d\\)\\); tally_ok=sum\\(1 for r in d if r['tally_ok']\\); print\\('tally ok:', tally_ok, '/', len\\(d\\)\\); print\\('first 5:'\\); [print\\(' ', r['txn_ref'], r['bank'], r['txn_amount'], 'allocs:', r['allocation_count']\\) for r in d[:5]]\")",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git push:*)",
+      "Bash(openssl rand:*)"
     ],
     "additionalDirectories": [
       "/tmp",
