@@ -10,8 +10,11 @@ FROM node:22-alpine
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/src/db ./src/db
+COPY --from=builder /app/src ./src
+COPY tsconfig.json ./
+
+# tsx handles ESM imports without .js extensions
+RUN npm install tsx
 
 EXPOSE 4000
-CMD ["node", "dist/index.js"]
+CMD ["npx", "tsx", "src/index.ts"]
