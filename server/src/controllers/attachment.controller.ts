@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.resolve(__dirname, '../../uploads');
-const isLocalDev = env.AWS_ACCESS_KEY_ID === 'local_dev_key';
+const isLocalDev = !s3;
 
 // Ensure uploads directory exists in dev
 if (isLocalDev && !fs.existsSync(UPLOADS_DIR)) {
@@ -66,7 +66,7 @@ export async function uploadAttachment(req: Request, res: Response, next: NextFu
       fs.writeFileSync(fullPath, file.buffer);
     } else {
       // Upload to S3
-      await s3.send(
+      await s3!.send(
         new PutObjectCommand({
           Bucket: S3_BUCKET,
           Key: s3Key,
@@ -105,7 +105,7 @@ export async function getAttachments(req: Request, res: Response, next: NextFunc
           url = `/api/invoices/${invoiceId}/attachments/${att.id}/download`;
         } else {
           url = await getSignedUrl(
-            s3,
+            s3!,
             new GetObjectCommand({ Bucket: att.s3_bucket, Key: att.s3_key }),
             { expiresIn: 900 }
           );

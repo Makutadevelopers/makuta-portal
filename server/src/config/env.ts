@@ -16,12 +16,12 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
 
-  // Database
-  DB_HOST: z.string().min(1, 'DB_HOST is required'),
+  // Database (individual vars OR DATABASE_URL — Railway injects the latter)
+  DB_HOST: z.string().default(''),
   DB_PORT: z.coerce.number().int().positive().default(5432),
-  DB_NAME: z.string().min(1, 'DB_NAME is required'),
-  DB_USER: z.string().min(1, 'DB_USER is required'),
-  DB_PASSWORD: z.string().min(1, 'DB_PASSWORD is required'),
+  DB_NAME: z.string().default(''),
+  DB_USER: z.string().default(''),
+  DB_PASSWORD: z.string().default(''),
   DB_SSL: z
     .string()
     .default('false')
@@ -44,11 +44,14 @@ const envSchema = z.object({
   // Cron secret for internal scheduled endpoints
   CRON_SECRET: z.string().default(''),
 
-  // AWS S3
-  AWS_REGION: z.string().min(1, 'AWS_REGION is required'),
-  AWS_ACCESS_KEY_ID: z.string().min(1, 'AWS_ACCESS_KEY_ID is required'),
-  AWS_SECRET_ACCESS_KEY: z.string().min(1, 'AWS_SECRET_ACCESS_KEY is required'),
-  S3_BUCKET_NAME: z.string().min(1, 'S3_BUCKET_NAME is required'),
+  // Database URL (Railway / managed DB providers inject this)
+  DATABASE_URL: z.string().optional(),
+
+  // AWS S3 (optional for testing — attachments saved to local disk if not set)
+  AWS_REGION: z.string().default('ap-south-1'),
+  AWS_ACCESS_KEY_ID: z.string().default(''),
+  AWS_SECRET_ACCESS_KEY: z.string().default(''),
+  S3_BUCKET_NAME: z.string().default(''),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -81,10 +84,10 @@ if (env.NODE_ENV === 'production') {
   if (env.AWS_ACCESS_KEY_ID === 'local_dev_key' || env.AWS_SECRET_ACCESS_KEY === 'local_dev_secret') {
     problems.push('AWS credentials are placeholders — set real keys so attachments go to S3 instead of local disk');
   }
-  if (env.DB_PASSWORD === 'localdevpassword' || env.DB_PASSWORD.length < 12) {
+  if (!env.DATABASE_URL && (env.DB_PASSWORD === 'localdevpassword' || env.DB_PASSWORD.length < 12)) {
     problems.push('DB_PASSWORD is weak or uses the local dev default');
   }
-  if (!env.DB_SSL) {
+  if (!env.DATABASE_URL && !env.DB_SSL) {
     problems.push('DB_SSL should be true in production (RDS requires TLS)');
   }
   if (env.ALLOWED_ORIGINS.includes('localhost')) {
