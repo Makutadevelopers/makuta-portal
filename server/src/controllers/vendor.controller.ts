@@ -16,6 +16,7 @@ import {
   findSimilarVendors,
   findAllDuplicatePairs,
   mergeVendors as mergeVendorsService,
+  getVendorDetail as getVendorDetailService,
 } from '../services/vendor.service';
 import { logAudit } from '../services/audit.service';
 
@@ -155,6 +156,23 @@ export async function deleteVendor(
     });
 
     res.json({ message: 'Vendor deleted', vendor });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getVendorDetailHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const detail = await getVendorDetailService(req.params.id as string);
+    if (!detail) {
+      res.status(404).json({ error: 'Not Found', message: 'Vendor not found' });
+      return;
+    }
+    res.json(detail);
   } catch (err) {
     next(err);
   }

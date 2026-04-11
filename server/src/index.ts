@@ -23,6 +23,7 @@ import importRoutes from './routes/import.routes';
 import cronRoutes from './routes/cron.routes';
 import alertsRoutes from './routes/alerts.routes';
 import reconciliationRoutes from './routes/reconciliation.routes';
+import cron from 'node-cron';
 
 console.log('Imported routes:', { authRoutes, vendorRoutes });
 
@@ -105,6 +106,27 @@ async function start(): Promise<void> {
   } catch (err) {
     console.error('Failed to connect to database:', err);
     process.exit(1);
+  }
+
+  // Schedule daily overdue alert at 8:00 AM IST (2:30 AM UTC)
+  const cronSecret = (env as Record<string, unknown>)['CRON_SECRET'] as string | undefined;
+  if (cronSecret) {
+    cron.schedule('30 2 * * *', async () => {
+      console.log('[cron] Running daily overdue alert...');
+      try {
+        const res = await fetch(`http://localhost:${env.PORT}/api/cron/overdue-alert`, {
+          method: 'POST',
+          headers: { 'x-cron-secret': cronSecret },
+        });
+        const data = await res.json() as Record<string, unknown>;
+        console.log('[cron] Overdue alert result:', data);
+      } catch (err) {
+        console.error('[cron] Overdue alert failed:', err);
+      }
+    }, { timezone: 'Asia/Kolkata' });
+    console.log('Cron: daily overdue alert scheduled at 8:00 AM IST');
+  } else {
+    console.log('Cron: CRON_SECRET not set, skipping scheduled jobs');
   }
 
   // Graceful shutdown

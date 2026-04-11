@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { getAlerts, getAlertCount, resolveAlert, Alert } from '../../api/alerts';
+import { getPendingCount } from '../../utils/offlineSync';
 
 const HO_TABS = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -22,6 +23,7 @@ const MGMT_TABS = [
 ];
 
 const SITE_TABS = [
+  { to: '/site-dashboard', label: 'Dashboard' },
   { to: '/my-invoices', label: 'My Invoices' },
   { to: '/site-expenditure', label: 'Expenditure' },
 ];
@@ -41,6 +43,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const avatarBg = role === 'ho' ? 'bg-blue-50 text-blue-800'
     : role === 'mgmt' ? 'bg-purple-50 text-purple-800'
       : 'bg-green-50 text-green-800';
+
+  // Online/offline state
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingSync, setPendingSync] = useState(0);
+
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    getPendingCount().then(setPendingSync).catch(() => {});
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+  }, []);
 
   // Notification state (HO only)
   const [alertCount, setAlertCount] = useState(0);
@@ -227,6 +242,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         ))}
       </nav>
+
+      {/* Offline banner */}
+      {!isOnline && (
+        <div className="bg-red-50 border-b border-red-200 px-4 sm:px-6 py-2 text-xs text-red-800 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          You are offline — cached data is shown. Changes will sync when connectivity returns.
+          {pendingSync > 0 && <span className="font-medium ml-1">({pendingSync} pending)</span>}
+        </div>
+      )}
 
       {/* Content */}
       <main className="p-4 sm:p-6">{children}</main>

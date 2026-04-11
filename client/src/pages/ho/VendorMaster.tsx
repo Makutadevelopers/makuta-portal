@@ -1,4 +1,5 @@
 import { useState, FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { useVendors } from '../../hooks/useVendors';
 import { useInvoices } from '../../hooks/useInvoices';
 import { createVendor, updateVendor, deleteVendor, getSimilarVendors } from '../../api/vendors';
@@ -132,7 +133,7 @@ export default function VendorMaster() {
                 return (
                   <tr key={v.id} className="border-t border-gray-50 hover:bg-gray-50/50">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900">{v.name}</div>
+                      <Link to={`/vendors/${v.id}`} className="font-medium text-blue-700 hover:underline">{v.name}</Link>
                       {outstanding && outstanding > 0 && (
                         <div className="text-[11px] text-red-500 mt-0.5">{formatINR(outstanding)} outstanding</div>
                       )}

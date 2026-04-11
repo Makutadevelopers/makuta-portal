@@ -1,6 +1,36 @@
 import { apiFetch } from './client';
 import { Vendor } from '../types/vendor';
 
+export interface VendorDetailStats {
+  totalInvoices: number;
+  totalAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  oldestUnpaid: string | null;
+}
+
+export interface VendorDetailInvoice {
+  id: string;
+  invoice_date: string;
+  invoice_no: string | null;
+  po_number: string | null;
+  purpose: string;
+  site: string;
+  invoice_amount: number;
+  payment_status: string;
+  balance: number;
+}
+
+export interface VendorDetailResponse {
+  vendor: Vendor;
+  stats: VendorDetailStats;
+  invoices: VendorDetailInvoice[];
+}
+
+export function getVendorDetail(id: string): Promise<VendorDetailResponse> {
+  return apiFetch<VendorDetailResponse>(`/vendors/${id}/detail`);
+}
+
 export function getVendors(): Promise<Vendor[]> {
   return apiFetch<Vendor[]>('/vendors');
 }

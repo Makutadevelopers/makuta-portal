@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requireRole } from '../middleware/rbac';
-import { getVendors, getVendor, createVendor, updateVendor, deleteVendor, getSimilar, getDuplicates, mergeVendors } from '../controllers/vendor.controller';
+import { getVendors, getVendor, createVendor, updateVendor, deleteVendor, getSimilar, getDuplicates, mergeVendors, getVendorDetailHandler } from '../controllers/vendor.controller';
 
 const router = Router();
 
@@ -15,6 +15,7 @@ router.use(authenticate);
 router.get('/similar', getSimilar);
 router.get('/duplicates', requireRole(['ho']), getDuplicates);
 router.get('/', getVendors);
+router.get('/:id/detail', requireRole(['ho', 'mgmt']), getVendorDetailHandler);
 router.get('/:id', getVendor);
 router.post('/merge', requireRole(['ho']), mergeVendors);
 router.post('/', requireRole(['ho', 'site']), createVendor);

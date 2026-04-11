@@ -9,6 +9,7 @@ import InvoiceList from './pages/ho/InvoiceList';
 import PaymentAging from './pages/ho/PaymentAging';
 import CashflowPage from './pages/ho/CashflowPage';
 import VendorMaster from './pages/ho/VendorMaster';
+import VendorDetail from './pages/ho/VendorDetail';
 import AuditTrail from './pages/ho/AuditTrail';
 import Bin from './pages/ho/Bin';
 import BankReconciliation from './pages/ho/BankReconciliation';
@@ -20,6 +21,7 @@ import MgmtCashflow from './pages/mgmt/MgmtCashflow';
 import MgmtBankReconciliation from './pages/mgmt/MgmtBankReconciliation';
 
 // Site pages
+import SiteDashboard from './pages/site/SiteDashboard';
 import MyInvoices from './pages/site/MyInvoices';
 import SiteExpenditure from './pages/site/SiteExpenditure';
 
@@ -43,7 +45,7 @@ function RootRedirect() {
     case 'mgmt':
       return <Navigate to="/overview" replace />;
     case 'site':
-      return <Navigate to="/my-invoices" replace />;
+      return <Navigate to="/site-dashboard" replace />;
     default:
       return <Navigate to="/login" replace />;
   }
@@ -62,6 +64,7 @@ export default function AppRouter() {
         <Route path="/payment-aging" element={<ProtectedRoute allowed={['ho']}><PaymentAging /></ProtectedRoute>} />
         <Route path="/cashflow" element={<ProtectedRoute allowed={['ho']}><CashflowPage /></ProtectedRoute>} />
         <Route path="/vendors" element={<ProtectedRoute allowed={['ho']}><VendorMaster /></ProtectedRoute>} />
+        <Route path="/vendors/:id" element={<ProtectedRoute allowed={['ho', 'mgmt']}><VendorDetail /></ProtectedRoute>} />
         <Route path="/audit" element={<ProtectedRoute allowed={['ho']}><AuditTrail /></ProtectedRoute>} />
         <Route path="/bin" element={<ProtectedRoute allowed={['ho']}><Bin /></ProtectedRoute>} />
         <Route path="/bank-reconciliation" element={<ProtectedRoute allowed={['ho']}><BankReconciliation /></ProtectedRoute>} />
@@ -73,6 +76,7 @@ export default function AppRouter() {
         <Route path="/mgmt-bank-reconciliation" element={<ProtectedRoute allowed={['mgmt']}><MgmtBankReconciliation /></ProtectedRoute>} />
 
         {/* Site routes */}
+        <Route path="/site-dashboard" element={<ProtectedRoute allowed={['site']}><SiteDashboard /></ProtectedRoute>} />
         <Route path="/my-invoices" element={<ProtectedRoute allowed={['site']}><MyInvoices /></ProtectedRoute>} />
         <Route path="/site-expenditure" element={<ProtectedRoute allowed={['site']}><SiteExpenditure /></ProtectedRoute>} />
 

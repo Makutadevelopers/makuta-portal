@@ -133,6 +133,84 @@ export async function deleteVendor(id: string): Promise<VendorRow | null> {
   );
 }
 
+// ── Vendor detail with invoice stats ──────────────────────────────────────
+
+export interface VendorDetailStats {
+  totalInvoices: number;
+  totalAmount: number;
+  paidAmount: number;
+  outstandingAmount: number;
+  oldestUnpaid: string | null;
+}
+
+export interface VendorDetailInvoice {
+  id: string;
+  invoice_date: string;
+  invoice_no: string | null;
+  po_number: string | null;
+  purpose: string;
+  site: string;
+  invoice_amount: number;
+  payment_status: string;
+  balance: number;
+}
+
+export interface VendorDetailResult {
+  vendor: VendorRow;
+  stats: VendorDetailStats;
+  invoices: VendorDetailInvoice[];
+}
+
+export async function getVendorDetail(id: string): Promise<VendorDetailResult | null> {
+  const vendor = await getVendorById(id);
+  if (!vendor) return null;
+
+  const invoiceRows = await query<VendorDetailInvoice>(
+    `SELECT
+       i.id,
+       i.invoice_date,
+       i.invoice_no,
+       i.po_number,
+       i.purpose,
+       i.site,
+       i.invoice_amount,
+       i.payment_status,
+       i.invoice_amount - COALESCE(
+         (SELECT SUM(p.amount) FROM payments p WHERE p.invoice_id = i.id), 0
+       ) AS balance
+     FROM invoices i
+     WHERE i.vendor_id = $1
+       AND i.deleted_at IS NULL
+     ORDER BY i.invoice_date DESC`,
+    [id]
+  );
+
+  const totalInvoices = invoiceRows.length;
+  const totalAmount = invoiceRows.reduce((sum, inv) => sum + Number(inv.invoice_amount), 0);
+  const paidAmount = invoiceRows.reduce((sum, inv) => sum + (Number(inv.invoice_amount) - Number(inv.balance)), 0);
+  const outstandingAmount = invoiceRows.reduce((sum, inv) => sum + Number(inv.balance), 0);
+
+  // Find the oldest unpaid invoice date
+  const unpaidInvoices = invoiceRows.filter(inv => Number(inv.balance) > 0);
+  let oldestUnpaid: string | null = null;
+  if (unpaidInvoices.length > 0) {
+    // invoiceRows are ordered DESC, so oldest unpaid is the last one with balance > 0
+    oldestUnpaid = unpaidInvoices[unpaidInvoices.length - 1].invoice_date;
+  }
+
+  return {
+    vendor,
+    stats: {
+      totalInvoices,
+      totalAmount,
+      paidAmount,
+      outstandingAmount,
+      oldestUnpaid,
+    },
+    invoices: invoiceRows,
+  };
+}
+
 // ── Fuzzy vendor matching ──────────────────────────────────────────────────
 
 export interface SimilarVendorMatch {

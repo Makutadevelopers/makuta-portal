@@ -5,6 +5,15 @@ import { getDuplicateVendors, mergeVendors, DuplicatePair } from '../../api/vend
 import { formatINR, formatDate } from '../../utils/formatters';
 import AppShell from '../../components/layout/AppShell';
 import { useToast } from '../../context/ToastContext';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+} from 'recharts';
 
 function getTimelineRange(tl: string, dateFrom: string, dateTo: string): { from: string; to: string } | null {
   if (tl === 'all') return null;
@@ -406,38 +415,36 @@ function OverduePanel({ rows, totalOverdue, overdueCount }: { rows: VendorOverdu
 // ── Section 5: Spend by Category ────────────────────────────────────────────
 function SpendByCategoryPanel({ rows }: { rows: CategorySpend[] }) {
   const top7 = rows.slice(0, 7);
-  const maxInvoiced = Math.max(...top7.map(r => r.totalInvoiced), 1);
+  const chartData = top7.map(r => ({
+    name: r.purpose,
+    paid: r.totalPaid,
+    outstanding: r.outstanding,
+  }));
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100">
         <div className="text-sm font-medium text-gray-900">Spend by Category</div>
-        <div className="text-[11px] text-gray-500 mt-0.5">Top categories by total invoiced — green bar = paid, grey = outstanding</div>
+        <div className="text-[11px] text-gray-500 mt-0.5">Top categories by total invoiced — green bar = paid, navy = outstanding</div>
       </div>
-      <div className="px-5 py-3 space-y-4">
-        {top7.map(r => {
-          const barWidth = (r.totalInvoiced / maxInvoiced) * 100;
-          const paidPct = r.totalInvoiced > 0 ? (r.totalPaid / r.totalInvoiced) * 100 : 0;
-
-          return (
-            <div key={r.purpose}>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-sm font-medium text-gray-900">{r.purpose}</span>
-                <span className="text-xs text-gray-500">
-                  {formatINR(r.totalInvoiced)}
-                  {r.outstanding > 0 && (
-                    <span className="text-red-500 ml-1.5">{formatINR(r.outstanding)} outstanding</span>
-                  )}
-                </span>
-              </div>
-              <div className="h-2.5 rounded-full bg-gray-100" style={{ width: `${barWidth}%` }}>
-                <div className="h-full rounded-full bg-green-500" style={{ width: `${paidPct}%` }} />
-              </div>
-            </div>
-          );
-        })}
-        {rows.length === 0 && (
+      <div className="px-5 py-3">
+        {rows.length === 0 ? (
           <div className="py-5 text-center text-sm text-gray-400">No data</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={top7.length * 50 + 40}>
+            <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+              <XAxis type="number" tickFormatter={(v: number) => formatINR(v)} tick={{ fontSize: 11, fill: '#6b7280' }} />
+              <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12, fill: '#374151' }} />
+              <Tooltip
+                formatter={(value) => formatINR(Number(value ?? 0))}
+                labelStyle={{ fontWeight: 600, color: '#111827' }}
+                contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }}
+              />
+              <Bar dataKey="paid" stackId="a" fill="#22c55e" name="Paid" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="outstanding" stackId="a" fill="#1a3c5e" name="Outstanding" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         )}
       </div>
     </div>
@@ -446,13 +453,17 @@ function SpendByCategoryPanel({ rows }: { rows: CategorySpend[] }) {
 
 // ── Section 6: Monthly Trend ────────────────────────────────────────────────
 function MonthlyTrendPanel({ rows }: { rows: MonthTrend[] }) {
-  const maxVal = Math.max(...rows.map(r => r.totalInvoiced), 1);
-
   function monthLabel(ym: string): string {
     const [y, m] = ym.split('-');
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return `${months[parseInt(m, 10) - 1]} ${y.slice(2)}`;
   }
+
+  const chartData = rows.map(r => ({
+    name: monthLabel(r.month),
+    invoiced: r.totalInvoiced,
+    paid: r.totalPaid,
+  }));
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
@@ -460,37 +471,24 @@ function MonthlyTrendPanel({ rows }: { rows: MonthTrend[] }) {
         <div className="text-sm font-medium text-gray-900">Monthly Trend</div>
         <div className="text-[11px] text-gray-500 mt-0.5">Invoice value booked vs actual payments made each month</div>
       </div>
-      <div className="px-5 py-3 space-y-4">
-        {rows.map(r => {
-          const invW = (r.totalInvoiced / maxVal) * 100;
-          const paidW = (r.totalPaid / maxVal) * 100;
-
-          return (
-            <div key={r.month}>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-sm font-medium text-gray-700 w-14">{monthLabel(r.month)}</span>
-                <span className="text-xs text-gray-500">
-                  {formatINR(r.totalInvoiced)} invoiced · {formatINR(r.totalPaid)} paid
-                  {r.gap > 0 && (
-                    <span className="text-red-500 ml-1">(gap {formatINR(r.gap)})</span>
-                  )}
-                </span>
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-gray-400 w-8">Inv.</span>
-                  <div className="h-2 rounded-full bg-[#1a3c5e]" style={{ width: `${invW}%` }} />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-gray-400 w-8">Paid</span>
-                  <div className="h-2 rounded-full bg-green-500" style={{ width: `${paidW}%` }} />
-                </div>
-              </div>
-            </div>
-          );
-        })}
-        {rows.length === 0 && (
+      <div className="px-5 py-3">
+        {rows.length === 0 ? (
           <div className="py-5 text-center text-sm text-gray-400">No data</div>
+        ) : (
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#6b7280' }} />
+              <YAxis tickFormatter={(v: number) => formatINR(v)} tick={{ fontSize: 11, fill: '#6b7280' }} width={80} />
+              <Tooltip
+                formatter={(value) => formatINR(Number(value ?? 0))}
+                labelStyle={{ fontWeight: 600, color: '#111827' }}
+                contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }}
+              />
+              <Bar dataKey="invoiced" fill="#1a3c5e" name="Invoiced" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="paid" fill="#22c55e" name="Paid" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         )}
       </div>
     </div>
