@@ -23,6 +23,7 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string>),
+    'ngrok-skip-browser-warning': 'true',
   };
 
   if (tokenRef) {

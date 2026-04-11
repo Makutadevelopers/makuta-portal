@@ -31,9 +31,9 @@ const app = express();
 
 // Global middleware
 app.use(cors({
-  origin: env.ALLOWED_ORIGINS.split(',').map(o => o.trim()),
+  origin: env.ALLOWED_ORIGINS === '*' ? true : env.ALLOWED_ORIGINS.split(',').map(o => o.trim()),
   credentials: true,
-  methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'PUT'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 app.use(helmet());
