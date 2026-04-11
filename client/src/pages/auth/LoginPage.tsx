@@ -6,14 +6,14 @@ import { useAuth } from '../../hooks/useAuth';
 const SHOW_DEMO = import.meta.env.VITE_DEMO_MODE === 'true';
 
 const DEMO_USERS = [
-  { label: 'Rajesh', tag: '(HO)', email: 'rajesh@makuta.in', password: 'ho123' },
-  { label: 'Arun', tag: '(MD)', email: 'arun@makuta.in', password: 'md123' },
-  { label: 'Suresh', tag: 'Nirvana', email: 'suresh@makuta.in', password: 'nv123' },
-  { label: 'Priya', tag: 'Taranga', email: 'priya@makuta.in', password: 'tr123' },
-  { label: 'Mahesh', tag: 'Horizon', email: 'mahesh@makuta.in', password: 'hz123' },
-  { label: 'Kavitha', tag: 'Green', email: 'kavitha@makuta.in', password: 'gw123' },
-  { label: 'Venkat', tag: 'Aruna', email: 'venkat@makuta.in', password: 'aa123' },
-  { label: 'Lakshmi', tag: 'Office', email: 'lakshmi@makuta.in', password: 'of123' },
+  { label: 'Raju S', tag: '(HO)', email: 'raju@makuta.in', password: 'ho123' },
+  { label: 'Harsha', tag: '(MD)', email: 'harsha@makuta.in', password: 'md123' },
+  { label: 'Ramana', tag: 'Nirvana', email: 'ramana@makuta.in', password: 'nv123' },
+  { label: 'Veerandhar', tag: 'Taranga', email: 'veerandhar@makuta.in', password: 'tr123' },
+  { label: 'Madhu', tag: 'Horizon', email: 'madhu@makuta.in', password: 'hz123' },
+  { label: 'Madhu', tag: 'Green', email: 'madhu.gw@makuta.in', password: 'gw123' },
+  { label: 'Ramana', tag: 'Aruna', email: 'ramana.aa@makuta.in', password: 'aa123' },
+  { label: 'Thanug', tag: 'Office', email: 'thanug@makuta.in', password: 'of123' },
 ];
 
 export default function LoginPage() {
