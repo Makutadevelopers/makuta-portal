@@ -1,2 +1,7 @@
 -- 006_seed_audit_logs.sql
--- Empty: audit logs generated automatically
+-- Auto-generated from live presentation data
+
+INSERT INTO audit_logs (id, user_id, action, invoice_id, metadata, created_at) VALUES ('4e2fadca-81a3-486d-8c1a-58fdbfcd1c85', 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d', 'Bulk imported 249 invoices (0 confirmed duplicates, 0 skipped)', NULL, '{"type": "invoices", "batchId": "6e43c23e-dfa4-44de-a82d-05a6f1b35f9d", "skipped": 0, "imported": 249, "forcedDuplicates": 0}', '2026-04-11 04:59:46.321148+00');
+INSERT INTO audit_logs (id, user_id, action, invoice_id, metadata, created_at) VALUES ('b5ee0cbe-0faa-426d-bf59-8c4f4f499683', 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d', 'Bulk imported 249 invoices (0 confirmed duplicates, 0 skipped)', NULL, '{"type": "invoices", "batchId": "48e4fe8c-8194-4591-a3f3-2192380d6884", "skipped": 0, "imported": 249, "forcedDuplicates": 0}', '2026-04-11 05:13:49.168136+00');
+INSERT INTO audit_logs (id, user_id, action, invoice_id, metadata, created_at) VALUES ('e3494484-cad6-42e6-8bab-940c05e6ea04', 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d', 'Undid bulk import batch: deleted 249 invoices, 0 payments, 0 vendors', NULL, '{"batchId": "48e4fe8c-8194-4591-a3f3-2192380d6884"}', '2026-04-11 05:14:27.282168+00');
+INSERT INTO audit_logs (id, user_id, action, invoice_id, metadata, created_at) VALUES ('38c97d34-2a52-4611-9364-23477c5aab3a', 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d', 'Bulk imported 1213 invoices (0 confirmed duplicates, 674 skipped)', NULL, '{"type": "invoices", "batchId": "90209c92-5c25-4ddc-8cd1-e01e36ff9610", "skipped": 674, "imported": 1213, "forcedDuplicates": 0}', '2026-04-11 05:14:46.705925+00');

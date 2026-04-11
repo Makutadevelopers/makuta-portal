@@ -28,10 +28,13 @@ const MAX_FILES = 20;
 
 const storage = multer.memoryStorage();
 
+const ALLOWED_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.csv', '.xls', '.xlsx'];
+
 function fileFilter(_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback): void {
   // Normalize to lower-case so case-variant mimes from different browsers are accepted
   const mime = (file.mimetype || '').toLowerCase();
-  if (ALLOWED_MIMES.includes(mime)) {
+  const ext = (file.originalname || '').toLowerCase().slice(file.originalname.lastIndexOf('.'));
+  if (ALLOWED_MIMES.includes(mime) || ALLOWED_EXTENSIONS.includes(ext)) {
     cb(null, true);
   } else {
     cb(new Error(`Invalid file type: ${file.mimetype}. Allowed: PDF, JPG, PNG, WEBP, HEIC, CSV, XLS, XLSX`));

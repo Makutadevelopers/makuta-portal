@@ -93,7 +93,12 @@ app.get('/api/health/db', async (_req, res) => {
 
 // Start server
 async function start(): Promise<void> {
-  // Verify database connection
+  // Start listening FIRST so Railway healthcheck can reach /api/health
+  const server = app.listen(env.PORT, () => {
+    console.log(`Server running on port ${env.PORT} (${env.NODE_ENV})`);
+  });
+
+  // Then verify database connection
   try {
     await pool.query('SELECT 1');
     console.log('Database connected');
@@ -101,10 +106,6 @@ async function start(): Promise<void> {
     console.error('Failed to connect to database:', err);
     process.exit(1);
   }
-
-  const server = app.listen(env.PORT, () => {
-    console.log(`Server running on port ${env.PORT} (${env.NODE_ENV})`);
-  });
 
   // Graceful shutdown
   function shutdown(signal: string): void {

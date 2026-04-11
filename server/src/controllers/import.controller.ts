@@ -186,6 +186,11 @@ interface NormalizedRow {
   amount: number;
   remarks: string;
   paymentStatus: string;
+  paymentType: string;
+  paymentRef: string;
+  paymentDate: string | null;
+  paymentBank: string;
+  paymentMonth: string;
 }
 
 function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { skip: true; reason: string } {
@@ -199,6 +204,11 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
   const amountStr = row['invoice_amount'] || row['Invoice amount'] || row['Invoice Amount'] || row['Amount'] || '0';
   const remarks = row['remarks'] || row['Remarks'] || '';
   const paymentStatus = row['payment_status'] || row['Payment Status'] || row['Status'] || 'Not Paid';
+  const paymentType = row['payment_type'] || row['Payment Type'] || row['Pay Type'] || '';
+  const paymentRef = row['payment_details'] || row['Payment Details'] || row['Cheque No'] || row['Txn ID'] || '';
+  const paymentDateRaw = row['payment_date'] || row['Payment Date'] || '';
+  const paymentBank = row['bank'] || row['Bank'] || '';
+  const paymentMonthRaw = row['payment_month'] || row['Payment Month'] || '';
 
   // Skip completely empty rows
   if (!vendorName && !invoiceNo && !site && !amountStr.replace(/[₹,\s0]/g, '')) {
@@ -217,6 +227,9 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
   const today = new Date().toISOString().split('T')[0];
   const monthDate = parsedMonth || (parsedInvoiceDate ? `${parsedInvoiceDate.slice(0, 7)}-01` : today);
 
+  const parsedPaymentDate = parseDate(paymentDateRaw);
+  const parsedPaymentMonth = parseMonthColumn(paymentMonthRaw);
+
   return {
     rowNum,
     month: monthDate,
@@ -229,6 +242,11 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
     amount,
     remarks,
     paymentStatus,
+    paymentType,
+    paymentRef,
+    paymentDate: parsedPaymentDate,
+    paymentBank,
+    paymentMonth: parsedPaymentMonth || monthDate,
   };
 }
 
@@ -393,11 +411,12 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
         const seqResult = await queryOne<{ nextval: string }>("SELECT nextval('invoice_internal_seq')");
         const internalNo = `MKT-${String(seqResult!.nextval).padStart(5, '0')}`;
 
-        await queryOne(
+        const insertedInvoice = await queryOne<{ id: string }>(
           `INSERT INTO invoices (
             month, invoice_date, vendor_id, vendor_name, invoice_no, po_number,
             purpose, site, invoice_amount, payment_status, remarks, created_by, internal_no, batch_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          RETURNING id`,
           [
             r.month,
             r.invoiceDate,
@@ -415,6 +434,59 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
             batchId,
           ]
         );
+
+        // Auto-create payment + bank transaction for Paid invoices
+        if (insertedInvoice && r.paymentStatus === 'Paid' && r.amount > 0) {
+          let bankTxnId: string | null = null;
+          const isBankPayment = r.paymentType && r.paymentType.toLowerCase() !== 'cash';
+
+          // Create bank_transaction for Cheque/NEFT/RTGS payments
+          if (isBankPayment && r.paymentRef) {
+            const existingTxn = await queryOne<{ id: string }>(
+              `SELECT id FROM bank_transactions WHERE txn_ref = $1 AND bank = $2`,
+              [r.paymentRef, r.paymentBank]
+            );
+            if (existingTxn) {
+              bankTxnId = existingTxn.id;
+              // Add this amount to the existing transaction
+              await queryOne(
+                `UPDATE bank_transactions SET txn_amount = txn_amount + $1 WHERE id = $2`,
+                [r.amount, bankTxnId]
+              );
+            } else {
+              const newTxn = await queryOne<{ id: string }>(
+                `INSERT INTO bank_transactions (txn_type, txn_ref, txn_amount, txn_date, bank, remarks, created_by)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+                [
+                  r.paymentType,
+                  r.paymentRef,
+                  r.amount,
+                  r.paymentDate || r.invoiceDate,
+                  r.paymentBank || '',
+                  `Imported batch ${batchId.slice(0, 8)}`,
+                  req.user!.id,
+                ]
+              );
+              bankTxnId = newTxn?.id ?? null;
+            }
+          }
+
+          await queryOne(
+            `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, payment_month, bank_txn_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+            [
+              insertedInvoice.id,
+              r.amount,
+              r.paymentType || 'Import',
+              r.paymentRef || `IMPORT-${batchId.slice(0, 8)}`,
+              r.paymentDate || r.invoiceDate,
+              r.paymentBank || null,
+              req.user!.id,
+              r.paymentMonth,
+              bankTxnId,
+            ]
+          );
+        }
 
         if (isDup) {
           forcedDuplicates.push({ row: r.rowNum, invoiceNo: r.invoiceNo || '(no invoice no)', vendorName: r.vendorName });
