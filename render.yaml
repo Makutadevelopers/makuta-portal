@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: makuta-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm ci
+    startCommand: npx tsx src/index.ts
+    envVars:
+      - key: NODE_ENV
+        value: development
+      - key: DATABASE_URL
+        fromDatabase:
+          name: makuta-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: CRON_SECRET
+        generateValue: true
+
+databases:
+  - name: makuta-db
+    plan: free
+    databaseName: makuta_portal
