@@ -1,5 +1,5 @@
 import { useState, useRef, ChangeEvent } from 'react';
-import { apiFetch } from '../../api/client';
+import { apiFetch, getApiToken } from '../../api/client';
 import { useToast } from '../../context/ToastContext';
 import { formatINR, formatDate } from '../../utils/formatters';
 
@@ -162,8 +162,27 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
     }
   }
 
-  function handleDownloadTemplate() {
-    window.open(`/api/import/template/${importType === 'invoices' ? 'payments' : 'vendors'}`, '_blank');
+  async function handleDownloadTemplate() {
+    const type = importType === 'invoices' ? 'payments' : 'vendors';
+    const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
+    const token = getApiToken();
+    try {
+      const res = await fetch(`${API_BASE}/import/template/${type}`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          'ngrok-skip-browser-warning': 'true',
+        },
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `makuta_${type}_template.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      notify('Failed to download template', 'error');
+    }
   }
 
   const nothingCommittedYet = !commitResult && !vendorResult;
