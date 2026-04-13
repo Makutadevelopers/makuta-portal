@@ -16,10 +16,10 @@ const SEED_FILES = [
   '001_seed_users.sql',
   '002_seed_vendors.sql',
   '003_seed_invoices.sql',
+  '003b_seed_bank_reconciliation.sql',
   '004_seed_payments.sql',
   '005_seed_attachments.sql',
   '006_seed_audit_logs.sql',
-  '007_seed_bank_reconciliation.sql',
 ];
 
 /**
