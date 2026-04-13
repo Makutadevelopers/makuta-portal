@@ -79,7 +79,15 @@
       "Bash(curl -s -X POST http://localhost:4000/api/import/invoices -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImExYjJjM2Q0LWU1ZjYtNGE3Yi04YzlkLTBlMWYyYTNiNGM1ZCIsIm5hbWUiOiJSYWplc2ggS3VtYXIiLCJyb2xlIjoiaG8iLCJzaXRlIjpudWxsLCJ0aXRsZSI6IkhlYWQgQWNjb3VudGFudCIsImlhdCI6MTc3NTgyODE2MiwiZXhwIjoxNzc1ODU2OTYyfQ.pY2JDkw8B-VEsivJ20TBDkmEYZfrSyGSU-6lY7wepXY' -F 'file=@/Users/sohailshaik/Desktop/Untitled spreadsheet - Sheet1.csv;type=text/csv' -F mode=preview)",
       "Read(//Users/sohailshaik/Desktop/makuta-portal/**)",
       "Bash(docker cp:*)",
-      "Bash(docker start:*)"
+      "Bash(docker start:*)",
+      "Bash(brew install:*)",
+      "Bash(ngrok http:*)",
+      "Bash(ngrok config:*)",
+      "Bash(curl -s https://monsoon-shakiness-finless.ngrok-free.dev/api/health)",
+      "Bash(pkill ngrok:*)",
+      "Bash(curl -s -H \"ngrok-skip-browser-warning: true\" https://monsoon-shakiness-finless.ngrok-free.dev/api/health)",
+      "Bash(curl -s -X POST https://monsoon-shakiness-finless.ngrok-free.dev/api/import/invoices -H 'ngrok-skip-browser-warning: true' -H 'Authorization: Bearer test' -F 'file=@/Users/sohailshaik/Desktop/Untitled spreadsheet - Sheet1.csv;type=text/csv' -F mode=preview)",
+      "Bash(curl -s -I -X OPTIONS https://monsoon-shakiness-finless.ngrok-free.dev/api/invoices -H 'Origin: https://makuta-portal.vercel.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: Content-Type,Authorization,ngrok-skip-browser-warning' -H 'ngrok-skip-browser-warning: true')"
     ],
     "additionalDirectories": [
       "/tmp",
