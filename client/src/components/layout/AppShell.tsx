@@ -170,9 +170,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                                   {alert.alert_type === 'duplicate_invoice' && alert.metadata && (
                                     <button
                                       onClick={() => {
-                                        const invoiceNo = (alert.metadata as Record<string, string>).invoiceNo;
+                                        const meta = alert.metadata as Record<string, string>;
+                                        const search = meta.vendorName || alert.title.match(/#(.+?)\s/)?.[1] || '';
                                         setShowAlerts(false);
-                                        navigate(`/invoices?search=${encodeURIComponent(invoiceNo)}`);
+                                        navigate(`/invoices?search=${encodeURIComponent(search)}`);
                                       }}
                                       className="text-[11px] text-purple-600 hover:underline font-medium"
                                     >
