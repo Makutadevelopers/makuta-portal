@@ -87,7 +87,11 @@
       "Bash(pkill ngrok:*)",
       "Bash(curl -s -H \"ngrok-skip-browser-warning: true\" https://monsoon-shakiness-finless.ngrok-free.dev/api/health)",
       "Bash(curl -s -X POST https://monsoon-shakiness-finless.ngrok-free.dev/api/import/invoices -H 'ngrok-skip-browser-warning: true' -H 'Authorization: Bearer test' -F 'file=@/Users/sohailshaik/Desktop/Untitled spreadsheet - Sheet1.csv;type=text/csv' -F mode=preview)",
-      "Bash(curl -s -I -X OPTIONS https://monsoon-shakiness-finless.ngrok-free.dev/api/invoices -H 'Origin: https://makuta-portal.vercel.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: Content-Type,Authorization,ngrok-skip-browser-warning' -H 'ngrok-skip-browser-warning: true')"
+      "Bash(curl -s -I -X OPTIONS https://monsoon-shakiness-finless.ngrok-free.dev/api/invoices -H 'Origin: https://makuta-portal.vercel.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: Content-Type,Authorization,ngrok-skip-browser-warning' -H 'ngrok-skip-browser-warning: true')",
+      "Bash(curl -s -X POST https://monsoon-shakiness-finless.ngrok-free.dev/api/auth/login -H 'Content-Type: application/json' -H 'ngrok-skip-browser-warning: true' -d '{\"email\":\"harsha@makuta.in\",\"password\":\"md123\"}')",
+      "Bash(docker stop:*)",
+      "Bash(mv 007_seed_bank_reconciliation.sql 003b_seed_bank_reconciliation.sql)",
+      "Bash(ls *.sql)"
     ],
     "additionalDirectories": [
       "/tmp",
