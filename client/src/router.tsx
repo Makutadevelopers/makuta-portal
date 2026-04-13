@@ -19,6 +19,7 @@ import MgmtOverview from './pages/mgmt/MgmtOverview';
 import VendorAging from './pages/mgmt/VendorAging';
 import MgmtCashflow from './pages/mgmt/MgmtCashflow';
 import MgmtBankReconciliation from './pages/mgmt/MgmtBankReconciliation';
+import EmployeeManagement from './pages/mgmt/EmployeeManagement';
 
 // Site pages
 import SiteDashboard from './pages/site/SiteDashboard';
@@ -74,6 +75,7 @@ export default function AppRouter() {
         <Route path="/vendor-aging" element={<ProtectedRoute allowed={['mgmt']}><VendorAging /></ProtectedRoute>} />
         <Route path="/mgmt-cashflow" element={<ProtectedRoute allowed={['mgmt']}><MgmtCashflow /></ProtectedRoute>} />
         <Route path="/mgmt-bank-reconciliation" element={<ProtectedRoute allowed={['mgmt']}><MgmtBankReconciliation /></ProtectedRoute>} />
+        <Route path="/employees" element={<ProtectedRoute allowed={['mgmt']}><EmployeeManagement /></ProtectedRoute>} />
 
         {/* Site routes */}
         <Route path="/site-dashboard" element={<ProtectedRoute allowed={['site']}><SiteDashboard /></ProtectedRoute>} />

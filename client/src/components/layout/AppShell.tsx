@@ -20,6 +20,7 @@ const MGMT_TABS = [
   { to: '/vendor-aging', label: 'Vendor Aging' },
   { to: '/mgmt-cashflow', label: 'Cashflow' },
   { to: '/mgmt-bank-reconciliation', label: 'Bank Reconsideration' },
+  { to: '/employees', label: 'Employees' },
 ];
 
 const SITE_TABS = [
