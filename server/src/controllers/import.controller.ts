@@ -808,7 +808,9 @@ export function downloadTemplate(req: Request, res: Response): void {
     },
     payments: {
       filename: 'payment_import_template.csv',
-      content: 'Sl.No,Month,Invoice date,Vendor Name,Invoice no,PO Number,Head,Site Location,Invoice amount,Payment Status,Pending Days,Payment Type,Payment Details,Payment Date,Bank,Payment Month\n1,2026-04-01,2026-04-01,Vendor Name,INV-001,PO-001,Steel,Nirvana,100000,Paid,0,Cheque,000856,2026-04-01,HDFC,2026-04-01\n',
+      content: 'Sl.No,Month,Invoice date,Vendor Name,Invoice no,PO Number,Head,Site Location,Invoice amount,Payment Status,Pending Days,Payment Type,Payment Details,Payment Date,Bank,,Payment Month\n' +
+        '1,Apr-2026,01-04-2026,Vendor Name,INV-001,MPLLP/NV/25-26/PO/001,Steel,Nirvana,100000,Paid,0,Cheque,000856,01-04-2026,HDFC,,Apr-2026\n' +
+        '2,Apr-2026,01-04-2026,Vendor Name,INV-002,MPLLP/NV/25-26/WO/002,Cement,Nirvana,50000,Not Paid,30,,,,,,\n',
     },
   };
 
