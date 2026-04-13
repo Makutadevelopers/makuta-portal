@@ -520,7 +520,7 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
   async function handleSubmit() {
     if (numAmount <= 0) { setError('Enter a valid amount'); return; }
     if (isOverpay) { setError('Amount exceeds balance'); return; }
-    if (!paymentRef.trim()) { setError('Reference / TXN number is required'); return; }
+    if (paymentType !== 'Cash' && !paymentRef.trim()) { setError('Reference / TXN number is required'); return; }
 
     setSaving(true);
     setError('');
@@ -608,11 +608,13 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
               {PAYMENT_TYPES.map(t => <option key={t}>{t}</option>)}
             </select>
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Reference / TXN No *</label>
-            <input value={paymentRef} onChange={e => setPaymentRef(e.target.value)} placeholder="Cheque / TXN number"
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
-          </div>
+          {paymentType !== 'Cash' && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Reference / TXN No *</label>
+              <input value={paymentRef} onChange={e => setPaymentRef(e.target.value)} placeholder="Cheque / TXN number"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
@@ -621,13 +623,15 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
             <input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Bank</label>
-            <select value={bank} onChange={e => setBank(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white">
-              {BANKS.map(b => <option key={b}>{b}</option>)}
-            </select>
-          </div>
+          {paymentType !== 'Cash' && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Bank</label>
+              <select value={bank} onChange={e => setBank(e.target.value)}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white">
+                {BANKS.map(b => <option key={b}>{b}</option>)}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Actions */}
@@ -1164,7 +1168,7 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
   }
 
   async function handleSubmit() {
-    if (!txnRef.trim()) { notify('Enter cheque / transaction reference'); return; }
+    if (txnType !== 'Cash' && !txnRef.trim()) { notify('Enter cheque / transaction reference'); return; }
     if (txnAmtNum <= 0) { notify('Enter cheque / transaction amount'); return; }
     if (!tallied) { notify(`Allocations total ₹${allocTotal.toLocaleString('en-IN')} must equal txn amount ₹${txnAmtNum.toLocaleString('en-IN')}`); return; }
 
@@ -1214,11 +1218,13 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
                 {PAYMENT_TYPES.map(t => <option key={t}>{t}</option>)}
               </select>
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Cheque No / Txn ID</label>
-              <input value={txnRef} onChange={e => setTxnRef(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="e.g. 000123" />
-            </div>
+            {txnType !== 'Cash' && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Cheque No / Txn ID</label>
+                <input value={txnRef} onChange={e => setTxnRef(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" placeholder="e.g. 000123" />
+              </div>
+            )}
             <div>
               <label className="block text-xs text-gray-500 mb-1">Total Amount</label>
               <input type="number" value={txnAmount} onChange={e => setTxnAmount(e.target.value)}
@@ -1229,13 +1235,15 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
               <input type="date" value={txnDate} onChange={e => setTxnDate(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
             </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Bank</label>
-              <select value={bank} onChange={e => setBank(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
-                {BANKS.map(b => <option key={b}>{b}</option>)}
-              </select>
-            </div>
+            {txnType !== 'Cash' && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Bank</label>
+                <select value={bank} onChange={e => setBank(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
+                  {BANKS.map(b => <option key={b}>{b}</option>)}
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-xs text-gray-500 mb-1">Remarks (optional)</label>
               <input value={remarks} onChange={e => setRemarks(e.target.value)}

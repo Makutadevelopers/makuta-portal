@@ -5,6 +5,7 @@ import { formatINR, formatDate } from '../../utils/formatters';
 import AppShell from '../../components/layout/AppShell';
 
 type StatusFilter = 'All' | 'Paid' | 'Partial' | 'Not Paid';
+type OrderType = 'All' | 'PO' | 'WO';
 
 export default function VendorDetail() {
   const { id } = useParams<{ id: string }>();
@@ -12,6 +13,7 @@ export default function VendorDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
+  const [orderType, setOrderType] = useState<OrderType>('All');
 
   useEffect(() => {
     if (!id) return;
@@ -44,9 +46,12 @@ export default function VendorDetail() {
 
   const { vendor, stats, invoices } = data;
 
-  const filtered = invoices.filter(inv =>
-    statusFilter === 'All' || inv.payment_status === statusFilter
-  );
+  const filtered = invoices.filter(inv => {
+    if (statusFilter !== 'All' && inv.payment_status !== statusFilter) return false;
+    if (orderType === 'PO' && !(inv.po_number || '').toUpperCase().includes('/PO/')) return false;
+    if (orderType === 'WO' && !(inv.po_number || '').toUpperCase().includes('/WO/')) return false;
+    return true;
+  });
 
   const statusCounts = {
     All: invoices.length,
@@ -131,6 +136,23 @@ export default function VendorDetail() {
               {status} ({statusCounts[status]})
             </button>
           ))}
+
+          <div className="w-px h-5 bg-gray-200 mx-1" />
+
+          {(['All', 'PO', 'WO'] as OrderType[]).map(ot => (
+            <button
+              key={ot}
+              onClick={() => setOrderType(ot)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                orderType === ot
+                  ? 'bg-amber-500 text-white border-amber-500'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              {ot === 'All' ? 'All Orders' : ot === 'PO' ? 'Purchase Orders' : 'Work Orders'}
+            </button>
+          ))}
+
           <span className="text-xs text-gray-400 ml-auto">{filtered.length} invoice{filtered.length !== 1 ? 's' : ''}</span>
         </div>
 
