@@ -30,6 +30,10 @@ const createInvoiceSchema = z.object({
   purpose: z.string().min(1, 'Purpose is required').max(100),
   site: z.string().min(1, 'Site is required').max(100),
   invoice_amount: z.number().positive('Amount must be positive').max(1e12, 'Amount too large'),
+  base_amount: z.number().nonnegative('Base amount must be ≥ 0').max(1e12, 'Amount too large').optional(),
+  cgst_pct: z.number().min(0).max(100).optional(),
+  sgst_pct: z.number().min(0).max(100).optional(),
+  igst_pct: z.number().min(0).max(100).optional(),
   remarks: z.string().max(2000).nullable().optional(),
   // H5: client sets this to true only after user confirms the duplicate warning
   confirm_duplicate: z.boolean().optional(),
@@ -41,6 +45,7 @@ const updateInvoiceSchema = createInvoiceSchema.partial();
 const SITE_COLUMNS = `
   id, sl_no, internal_no, month, invoice_date, vendor_id, vendor_name,
   invoice_no, po_number, purpose, site, invoice_amount,
+  base_amount, cgst_pct, sgst_pct, igst_pct,
   remarks, pushed, pushed_at, minor_payment,
   created_by, created_at, updated_at
 `;
@@ -141,16 +146,24 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
     const seqResult = await queryOne<{ nextval: string }>("SELECT nextval('invoice_internal_seq')");
     const internalNo = `MKT-${String(seqResult!.nextval).padStart(5, '0')}`;
 
+    // Default the tax split when the caller didn't supply one (legacy/import paths)
+    const baseAmount = data.base_amount ?? data.invoice_amount;
+    const cgstPct = data.cgst_pct ?? 0;
+    const sgstPct = data.sgst_pct ?? 0;
+    const igstPct = data.igst_pct ?? 0;
+
     const invoice = await queryOne<InvoiceRow>(
       `INSERT INTO invoices (
         month, invoice_date, vendor_id, vendor_name, invoice_no, po_number,
-        purpose, site, invoice_amount, remarks, created_by, internal_no
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        purpose, site, invoice_amount, base_amount, cgst_pct, sgst_pct, igst_pct,
+        remarks, created_by, internal_no
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *`,
       [
         data.month, data.invoice_date, data.vendor_id, data.vendor_name,
         data.invoice_no, data.po_number ?? null, data.purpose, data.site,
-        data.invoice_amount, data.remarks ?? null, userId, internalNo,
+        data.invoice_amount, baseAmount, cgstPct, sgstPct, igstPct,
+        data.remarks ?? null, userId, internalNo,
       ]
     );
 
@@ -201,7 +214,8 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
 
     const ALLOWED_UPDATE_FIELDS = [
       'month', 'invoice_date', 'vendor_id', 'vendor_name', 'invoice_no',
-      'po_number', 'purpose', 'site', 'invoice_amount', 'remarks',
+      'po_number', 'purpose', 'site', 'invoice_amount',
+      'base_amount', 'cgst_pct', 'sgst_pct', 'igst_pct', 'remarks',
     ];
 
     const fields: string[] = [];

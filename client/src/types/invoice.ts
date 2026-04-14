@@ -11,6 +11,10 @@ export interface Invoice {
   purpose: string;
   site: string;
   invoice_amount: number;
+  base_amount: number | null;
+  cgst_pct: number;
+  sgst_pct: number;
+  igst_pct: number;
   payment_status?: string;    // excluded for site role
   remarks: string | null;
   pushed: boolean;
@@ -35,5 +39,9 @@ export interface CreateInvoiceData {
   purpose: string;
   site: string;
   invoice_amount: number;
+  base_amount?: number;
+  cgst_pct?: number;
+  sgst_pct?: number;
+  igst_pct?: number;
   remarks?: string | null;
 }

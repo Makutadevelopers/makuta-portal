@@ -808,7 +808,22 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   const [site, setSite] = useState(editInvoice?.site ?? 'Nirvana');
   const [invoiceDate, setInvoiceDate] = useState(editInvoice?.invoice_date?.split('T')[0] ?? today);
   const [month, setMonth] = useState(editInvoice?.month?.split('T')[0] ?? `${currentMonth}-01`);
-  const [amount, setAmount] = useState(editInvoice ? String(editInvoice.invoice_amount) : '');
+  const [baseAmount, setBaseAmount] = useState(
+    editInvoice ? String(editInvoice.base_amount ?? editInvoice.invoice_amount) : ''
+  );
+  const [cgstPct, setCgstPct] = useState(editInvoice ? String(editInvoice.cgst_pct ?? 0) : '0');
+  const [sgstPct, setSgstPct] = useState(editInvoice ? String(editInvoice.sgst_pct ?? 0) : '0');
+  const [igstPct, setIgstPct] = useState(editInvoice ? String(editInvoice.igst_pct ?? 0) : '0');
+
+  const baseNum = Number(baseAmount) || 0;
+  const cgstNum = Number(cgstPct) || 0;
+  const sgstNum = Number(sgstPct) || 0;
+  const igstNum = Number(igstPct) || 0;
+  const cgstAmt = +(baseNum * cgstNum / 100).toFixed(2);
+  const sgstAmt = +(baseNum * sgstNum / 100).toFixed(2);
+  const igstAmt = +(baseNum * igstNum / 100).toFixed(2);
+  const totalAmount = +(baseNum + cgstAmt + sgstAmt + igstAmt).toFixed(2);
+
   const [remarks, setRemarks] = useState(editInvoice?.remarks ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -842,14 +857,17 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
     setError('');
     if (!vendorId && !vendorName.trim()) { setError('Select a vendor'); return; }
     if (!invoiceNo.trim()) { setError('Invoice number is required'); return; }
-    if (!amount || Number(amount) <= 0) { setError('Enter a valid amount'); return; }
+    if (baseNum <= 0) { setError('Enter a valid base amount'); return; }
+    if (totalAmount <= 0) { setError('Total amount must be greater than zero'); return; }
 
     setSaving(true);
     try {
       const data = {
         month, invoice_date: invoiceDate, vendor_id: vendorId || undefined, vendor_name: vendorName,
         invoice_no: invoiceNo.trim(), po_number: poNumber.trim() || null,
-        purpose, site, invoice_amount: Number(amount), remarks: remarks.trim() || null,
+        purpose, site, invoice_amount: totalAmount,
+        base_amount: baseNum, cgst_pct: cgstNum, sgst_pct: sgstNum, igst_pct: igstNum,
+        remarks: remarks.trim() || null,
       };
 
       let invoiceId: string;
@@ -944,18 +962,44 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Site Location</label>
-            <select value={site} onChange={e => setSite(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200">
-              {SITES.map(s => <option key={s}>{s}</option>)}
-            </select>
+        <div className="mb-4">
+          <label className="block text-xs text-gray-500 mb-1">Site Location</label>
+          <select value={site} onChange={e => setSite(e.target.value)}
+            className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200">
+            {SITES.map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+
+        <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-100">
+          <div className="text-xs font-medium text-gray-600 mb-3">Invoice Amount Breakdown</div>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Base Amount (₹) *</label>
+              <input type="number" value={baseAmount} onChange={e => setBaseAmount(e.target.value)} placeholder="0" min="0" step="0.01"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">CGST %</label>
+              <input type="number" value={cgstPct} onChange={e => setCgstPct(e.target.value)} placeholder="0" min="0" max="100" step="0.01"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200" />
+              <div className="text-[11px] text-gray-400 mt-1">{formatINR(cgstAmt)}</div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">SGST %</label>
+              <input type="number" value={sgstPct} onChange={e => setSgstPct(e.target.value)} placeholder="0" min="0" max="100" step="0.01"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200" />
+              <div className="text-[11px] text-gray-400 mt-1">{formatINR(sgstAmt)}</div>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">IGST %</label>
+              <input type="number" value={igstPct} onChange={e => setIgstPct(e.target.value)} placeholder="0" min="0" max="100" step="0.01"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200" />
+              <div className="text-[11px] text-gray-400 mt-1">{formatINR(igstAmt)}</div>
+            </div>
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Invoice Amount (*)</label>
-            <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0" min="1" step="0.01"
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
+            <span className="text-sm text-gray-600">Total Invoice Amount</span>
+            <span className="text-lg font-semibold text-[#1a3c5e]">{formatINR(totalAmount)}</span>
           </div>
         </div>
 
