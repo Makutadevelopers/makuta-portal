@@ -38,9 +38,14 @@ jobs:
 
       - name: Dump database
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL_RAW: ${{ secrets.DATABASE_URL }}
         run: |
           set -euo pipefail
+          # Strip any surrounding whitespace/newlines that sneak in via copy-paste
+          # into the GH secret — libpq treats a trailing \n as part of the final
+          # parameter value and rejects it (e.g. channel_binding="require\n").
+          DATABASE_URL=$(printf '%s' "$DATABASE_URL_RAW" | tr -d '[:space:]')
+
           if [ -z "${DATABASE_URL:-}" ]; then
             echo "::error::DATABASE_URL secret is not set on this repository."
             echo "Add it at Settings → Secrets and variables → Actions → New repository secret."
