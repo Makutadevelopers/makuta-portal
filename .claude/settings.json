@@ -102,7 +102,15 @@
       "Bash(lsof -i :5173 -sTCP:LISTEN)",
       "Bash(lsof -nP -iTCP:5434 -sTCP:LISTEN)",
       "Bash(lsof -nP -iTCP:5435 -sTCP:LISTEN)",
-      "Bash(docker rm:*)"
+      "Bash(docker rm:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:4000/api/health)",
+      "Bash(curl -s -H \"ngrok-skip-browser-warning: true\" -o /dev/null -w \"%{http_code}\\\\n\" https://monsoon-shakiness-finless.ngrok-free.dev/api/health)",
+      "Bash(lsof -nP -iTCP:4000 -sTCP:LISTEN)",
+      "Bash(curl -sS -X POST -H \"Content-Type: application/json\" -H \"ngrok-skip-browser-warning: true\" -H \"Origin: https://makuta-portal.vercel.app\" -d '{\"email\":\"raju@makuta.in\",\"password\":\"ho123\"}' -w \"\\\\nHTTP %{http_code}\\\\n\" https://monsoon-shakiness-finless.ngrok-free.dev/api/auth/login)",
+      "Bash(curl -sS -X POST -H \"Content-Type: application/json\" -d '{\"email\":\"raju@makuta.in\",\"password\":\"ho123\"}' -w \"\\\\nHTTP %{http_code}\\\\n\" http://localhost:4000/api/auth/login)",
+      "Bash(ps -p 16501 -o pid,comm,args)",
+      "Bash(curl -s http://localhost:4100/api/health)",
+      "Bash(curl -sS -X POST -H \"Content-Type: application/json\" -H \"Origin: https://makuta-portal.vercel.app\" -d '{\"email\":\"raju@makuta.in\",\"password\":\"ho123\"}' -w \"\\\\nHTTP %{http_code}\\\\n\" https://monsoon-shakiness-finless.ngrok-free.dev/api/auth/login)"
     ],
     "additionalDirectories": [
       "/tmp",
