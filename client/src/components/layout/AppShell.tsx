@@ -109,9 +109,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Header */}
       <header className="bg-white border-b border-gray-100 px-4 sm:px-6 py-3 flex justify-between items-center">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-[#1a3c5e] flex items-center justify-center flex-shrink-0">
-            <span className="text-white text-sm font-medium">M</span>
-          </div>
+          <img
+            src="/makuta-logo.jpeg"
+            alt="Makuta"
+            className="w-9 h-9 rounded-lg object-contain flex-shrink-0 bg-white"
+          />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-gray-900 truncate">
               <span className="sm:hidden">Makuta</span>

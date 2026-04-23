@@ -62,11 +62,12 @@ export default function LoginPage() {
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-10">
         {/* Logo */}
         <div className="text-center mb-7">
-          <div className="w-14 h-14 rounded-2xl bg-[#1a3c5e] flex items-center justify-center mx-auto mb-4">
-            <span className="text-white text-2xl font-medium">M</span>
-          </div>
-          <div className="text-xl font-medium text-gray-900">Makuta Developers</div>
-          <div className="text-sm text-gray-500 mt-1">Accounting Module</div>
+          <img
+            src="/makuta-logo.jpeg"
+            alt="Makuta Developers"
+            className="w-24 h-24 mx-auto mb-3 object-contain"
+          />
+          <div className="text-sm text-gray-500">Accounting Module</div>
         </div>
 
         {error && (
