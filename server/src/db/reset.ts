@@ -16,14 +16,18 @@ const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
 const SEEDS_DIR = path.join(__dirname, 'seeds');
 
 async function reset(): Promise<void> {
-  const pool = new Pool({
-    host: process.env.DB_HOST || 'localhost',
-    port: Number(process.env.DB_PORT) || 5432,
-    database: process.env.DB_NAME || 'makuta_portal',
-    user: process.env.DB_USER || 'makuta_admin',
-    password: process.env.DB_PASSWORD || 'localdevpassword',
-    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-  });
+  const pool = new Pool(
+    process.env.DATABASE_URL
+      ? { connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } }
+      : {
+          host: process.env.DB_HOST || 'localhost',
+          port: Number(process.env.DB_PORT) || 5432,
+          database: process.env.DB_NAME || 'makuta_portal',
+          user: process.env.DB_USER || 'makuta_admin',
+          password: process.env.DB_PASSWORD || 'localdevpassword',
+          ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+        }
+  );
 
   const client = await pool.connect();
 

@@ -11,17 +11,28 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
-const poolConfig: PoolConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: Number(process.env.DB_PORT) || 5432,
-  database: process.env.DB_NAME || 'makuta_portal',
-  user: process.env.DB_USER || 'makuta_admin',
-  password: process.env.DB_PASSWORD || 'localdevpassword',
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-  max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
-};
+// Managed Postgres providers (Neon, Render, Railway, Heroku) inject a single
+// DATABASE_URL. When present, prefer it over discrete DB_* vars and force SSL
+// — every managed provider requires TLS in transit.
+const poolConfig: PoolConfig = process.env.DATABASE_URL
+  ? {
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    }
+  : {
+      host: process.env.DB_HOST || 'localhost',
+      port: Number(process.env.DB_PORT) || 5432,
+      database: process.env.DB_NAME || 'makuta_portal',
+      user: process.env.DB_USER || 'makuta_admin',
+      password: process.env.DB_PASSWORD || 'localdevpassword',
+      ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    };
 
 const pool = new Pool(poolConfig);
 
