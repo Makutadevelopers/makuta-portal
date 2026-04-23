@@ -1,0 +1,77 @@
+name: Daily DB backup
+
+# Backs up the Neon Postgres every day. Dump is stored as a GitHub Actions
+# artifact with 90-day retention — downloadable from the Actions tab.
+#
+# Required repo secret:
+#   DATABASE_URL  — full Neon pooler connection string (postgresql://...?sslmode=require)
+#
+# Run it by hand any time from Actions → "Daily DB backup" → Run workflow.
+
+on:
+  schedule:
+    # 20:30 UTC = 02:00 IST (next day). Keeps backup time outside working hours.
+    - cron: '30 20 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Install PostgreSQL 17 client (PGDG)
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+            https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          pg_dump --version
+
+      - name: Dump database
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::DATABASE_URL secret is not set on this repository."
+            echo "Add it at Settings → Secrets and variables → Actions → New repository secret."
+            exit 1
+          fi
+
+          STAMP=$(date -u +%Y%m%d_%H%M%S)
+          FILE="makuta_portal_${STAMP}.sql"
+          echo "FILE=$FILE" >> "$GITHUB_ENV"
+
+          pg_dump --no-owner --no-acl --format=plain "$DATABASE_URL" > "$FILE"
+
+          echo "--- dump size ---"
+          ls -lh "$FILE"
+          echo "--- line count ---"
+          wc -l "$FILE"
+          echo "--- row counts ---"
+          psql "$DATABASE_URL" -At -F $'\t' -c \
+            "SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY n_live_tup DESC;"
+
+      - name: Compress dump
+        run: |
+          set -euo pipefail
+          gzip -9 "$FILE"
+          echo "FILE=${FILE}.gz" >> "$GITHUB_ENV"
+          ls -lh "${FILE}.gz"
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_number }}
+          path: ${{ env.FILE }}
+          retention-days: 90
+          if-no-files-found: error
