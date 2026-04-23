@@ -27,6 +27,7 @@ const SITE_TABS = [
   { to: '/site-dashboard', label: 'Dashboard' },
   { to: '/my-invoices', label: 'My Invoices' },
   { to: '/site-expenditure', label: 'Expenditure' },
+  { to: '/vendors', label: 'Vendor Master' },
 ];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {

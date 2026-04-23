@@ -107,6 +107,22 @@ export async function updateVendor(
       return;
     }
 
+    // Site accountants may only edit vendors they created themselves.
+    if (req.user!.role === 'site') {
+      const target = await getVendorById(id);
+      if (!target) {
+        res.status(404).json({ error: 'Not Found', message: 'Vendor not found' });
+        return;
+      }
+      if (target.created_by !== req.user!.id) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Site accountants may only edit vendors they added themselves',
+        });
+        return;
+      }
+    }
+
     // If renaming, check uniqueness against other vendors
     if (data.name) {
       const existing = await getVendorByName(data.name);
@@ -143,6 +159,23 @@ export async function deleteVendor(
 ): Promise<void> {
   try {
     const id = req.params.id as string;
+
+    // Site accountants may only delete vendors they created themselves.
+    if (req.user!.role === 'site') {
+      const target = await getVendorById(id);
+      if (!target) {
+        res.status(404).json({ error: 'Not Found', message: 'Vendor not found' });
+        return;
+      }
+      if (target.created_by !== req.user!.id) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Site accountants may only delete vendors they added themselves',
+        });
+        return;
+      }
+    }
+
     const vendor = await deleteVendorService(id);
 
     if (!vendor) {

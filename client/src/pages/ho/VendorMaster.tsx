@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useVendors } from '../../hooks/useVendors';
 import { useInvoices } from '../../hooks/useInvoices';
+import { useAuth } from '../../hooks/useAuth';
 import { createVendor, updateVendor, deleteVendor, getSimilarVendors } from '../../api/vendors';
 import { formatINR } from '../../utils/formatters';
 import { PURPOSES } from '../../utils/constants';
@@ -14,6 +15,9 @@ const TERM_OPTIONS = [7, 10, 14, 15, 21, 30, 45, 60, 75, 90];
 export default function VendorMaster() {
   const { vendors, loading, refresh } = useVendors();
   const { invoices } = useInvoices();
+  const { user } = useAuth();
+  const isSite = user?.role === 'site';
+  const canManage = (v: Vendor) => !isSite || v.created_by === user?.id;
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -133,8 +137,12 @@ export default function VendorMaster() {
                 return (
                   <tr key={v.id} className="border-t border-gray-50 hover:bg-gray-50/50">
                     <td className="px-4 py-3">
-                      <Link to={`/vendors/${v.id}`} className="font-medium text-blue-700 hover:underline">{v.name}</Link>
-                      {outstanding && outstanding > 0 && (
+                      {isSite ? (
+                        <span className="font-medium text-gray-900">{v.name}</span>
+                      ) : (
+                        <Link to={`/vendors/${v.id}`} className="font-medium text-blue-700 hover:underline">{v.name}</Link>
+                      )}
+                      {!isSite && outstanding && outstanding > 0 && (
                         <div className="text-[11px] text-red-500 mt-0.5">{formatINR(outstanding)} outstanding</div>
                       )}
                     </td>
@@ -150,10 +158,14 @@ export default function VendorMaster() {
                     <td className="px-4 py-3 text-gray-600 text-xs">{v.email ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-500 text-xs max-w-[140px] truncate" title={v.notes ?? ''}>{v.notes || '—'}</td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => { setEditVendor(v); setShowForm(true); }} className="text-xs text-blue-600 hover:underline">Edit</button>
-                        <button onClick={() => handleDelete(v)} className="text-xs text-red-500 hover:underline">Delete</button>
-                      </div>
+                      {canManage(v) ? (
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => { setEditVendor(v); setShowForm(true); }} className="text-xs text-blue-600 hover:underline">Edit</button>
+                          <button onClick={() => handleDelete(v)} className="text-xs text-red-500 hover:underline">Delete</button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
                     </td>
                   </tr>
                 );

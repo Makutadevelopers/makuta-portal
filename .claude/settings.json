@@ -91,7 +91,18 @@
       "Bash(curl -s -X POST https://monsoon-shakiness-finless.ngrok-free.dev/api/auth/login -H 'Content-Type: application/json' -H 'ngrok-skip-browser-warning: true' -d '{\"email\":\"harsha@makuta.in\",\"password\":\"md123\"}')",
       "Bash(docker stop:*)",
       "Bash(mv 007_seed_bank_reconciliation.sql 003b_seed_bank_reconciliation.sql)",
-      "Bash(ls *.sql)"
+      "Bash(ls *.sql)",
+      "Bash(gh pr:*)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(curl -sI -o /dev/null -w \"%{http_code}\\\\n\" https://makuta-portal.vercel.app/api/health)",
+      "Bash(curl -s https://makuta-portal.vercel.app/api/health)",
+      "Bash(curl -s https://makuta-portal.vercel.app/assets/index-CrOBHYVU.js)",
+      "Bash(curl -sI -o /dev/null -w \"%{http_code}\\\\n\" https://monsoon-shakiness-finless.ngrok-free.dev/api/health)",
+      "Bash(lsof -i :4000 -sTCP:LISTEN)",
+      "Bash(lsof -i :5173 -sTCP:LISTEN)",
+      "Bash(lsof -nP -iTCP:5434 -sTCP:LISTEN)",
+      "Bash(lsof -nP -iTCP:5435 -sTCP:LISTEN)",
+      "Bash(docker rm:*)"
     ],
     "additionalDirectories": [
       "/tmp",

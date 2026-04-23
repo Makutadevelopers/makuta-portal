@@ -78,7 +78,7 @@ lives in `server/src/config/env.ts`.
 ## 10. Data-correctness smoke tests
 
 - [ ] Create an invoice → soft-delete → verify hidden from Dashboard / All Invoices / Cashflow / Payment Aging / PDF export / Bin shows it restorable.
-- [ ] Create invoice with `confirm_duplicate` flow — single create returns 409; bulk import shows preview with per-row confirm/dismiss.
+- [x] Create invoice with `confirm_duplicate` flow — single create returns 409; bulk import shows preview with per-row confirm/dismiss.
 - [ ] Record a payment larger than balance → 400.
 - [ ] Run `curl -s -X POST http://…/api/cron/overdue-alert -H "x-cron-secret: $CRON_SECRET"` → non-empty response (or "No overdue invoices").
 - [ ] Upload a `.heic` photo → 201; upload an `.exe` → 400.
