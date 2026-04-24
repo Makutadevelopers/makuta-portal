@@ -63,7 +63,8 @@ function canSiteCreateInvoice(role: string, userSite: string | null, invoiceSite
   return userSite === invoiceSite;
 }
 
-const SITE_HIDDEN_FIELDS = ['payment_status', 'total_paid', 'balance', 'days_past_due', 'overdue'];
+// payment_status IS now visible to site (badge only); amounts + aging stay hidden.
+const SITE_HIDDEN_FIELDS = ['total_paid', 'balance', 'days_past_due', 'overdue'];
 
 function filterForSiteRole(invoice: Record<string, unknown>): Record<string, unknown> {
   const filtered = { ...invoice };
@@ -331,7 +332,7 @@ describe('Site Role — Data Filtering', () => {
     expect(filtered.id).toBe('123');
     expect(filtered.invoice_no).toBe('INV-001');
     expect(filtered.invoice_amount).toBe(100000);
-    expect(filtered).not.toHaveProperty('payment_status');
+    expect(filtered).toHaveProperty('payment_status', 'Partial');
     expect(filtered).not.toHaveProperty('total_paid');
     expect(filtered).not.toHaveProperty('balance');
     expect(filtered).not.toHaveProperty('days_past_due');

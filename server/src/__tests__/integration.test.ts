@@ -448,7 +448,7 @@ describe('MD — read-only access (scenario 14)', () => {
 describe('Site accountant — site scoping (scenarios 15, 16)', () => {
   let siteInvoiceId = '';
 
-  it('GET /invoices returns only Nirvana rows and hides payment fields', async () => {
+  it('GET /invoices returns only Nirvana rows with payment_status badge but no amounts', async () => {
     requireServer();
     const { status, body } = await api('GET', '/api/invoices', undefined, siteToken);
     expect(status).toBe(200);
@@ -456,9 +456,13 @@ describe('Site accountant — site scoping (scenarios 15, 16)', () => {
     expect(rows.length).toBeGreaterThan(0);
     for (const r of rows) {
       expect(r.site).toBe('Nirvana');
-      expect(r).not.toHaveProperty('payment_status');
+      // payment_status badge IS allowed — site needs to see Paid/Partial/Not Paid
+      expect(r).toHaveProperty('payment_status');
+      // Amounts and aging remain HO+mgmt only
       expect(r).not.toHaveProperty('total_paid');
       expect(r).not.toHaveProperty('balance');
+      expect(r).not.toHaveProperty('days_past_due');
+      expect(r).not.toHaveProperty('overdue');
     }
   });
 

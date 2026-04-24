@@ -110,9 +110,19 @@ export default function MyInvoices() {
                   <td className="px-4 py-3 text-gray-500">{inv.purpose}</td>
                   <td className="px-4 py-3 text-right font-medium">{formatINR(Number(inv.invoice_amount))}</td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                      inv.pushed ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
-                    }`}>{inv.pushed ? 'Finalized' : 'Draft'}</span>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                        inv.pushed ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
+                      }`}>{inv.pushed ? 'Finalized' : 'Draft'}</span>
+                      {inv.payment_status && (() => {
+                        const label = inv.payment_status === 'Not Paid' ? 'Pending' : inv.payment_status;
+                        const tone =
+                          inv.payment_status === 'Paid'    ? 'bg-green-50 text-green-700'   :
+                          inv.payment_status === 'Partial' ? 'bg-amber-50 text-amber-700'   :
+                                                             'bg-gray-100 text-gray-600';
+                        return <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${tone}`}>{label}</span>;
+                      })()}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     {!inv.pushed && (

@@ -74,7 +74,7 @@ export default function SiteDashboard() {
     <AppShell>
       <div className="mb-6">
         <div className="text-lg font-medium text-gray-900">Dashboard — {user?.site}</div>
-        <div className="text-xs text-gray-500 mt-1">Invoice summary for your site · payment details managed by Head Office</div>
+        <div className="text-xs text-gray-500 mt-1">Invoice summary for your site · cashflow and aging managed by Head Office</div>
       </div>
 
       {loading ? (
@@ -226,7 +226,7 @@ export default function SiteDashboard() {
 
           {/* Disclaimer */}
           <div className="px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-            Amounts shown are invoice values submitted from your site. Payment status, cashflow, and aging are managed exclusively by Head Office.
+            Amounts shown are invoice values submitted from your site. Cashflow and aging are managed exclusively by Head Office.
           </div>
         </>
       )}

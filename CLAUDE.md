@@ -9,10 +9,13 @@ invoices. Head Office processes payments. MD views executive dashboards.
 - **ho** (Head Accountant): full CRUD on invoices, payments, vendors, audit
 - **mgmt** (Managing Director): read-only dashboards — no data entry
 - **site** (Site Accountant): enter invoices for their site only,
-  view category/vendor expenditure for their site, NO payment status data
+  view category/vendor expenditure for their site, see Paid/Partial/Pending
+  payment badge on own-site invoices (no amounts, no aging)
 
 ## Key business rules (enforce these rigorously)
-- Site accountants CANNOT see payment status, paid/unpaid amounts, or aging
+- Site accountants see the payment_status badge (Paid / Partial / Not Paid)
+  for their own site's invoices, but NOT paid/unpaid amounts or aging data
+  (total_paid, balance, days_past_due, overdue stay HO+mgmt only)
 - Minor payments ≤ ₹50,000 can be processed by site accountants directly
 - Payments above ₹50,000 are HO-only
 - One invoice can have MULTIPLE part-payments (payments[] array)

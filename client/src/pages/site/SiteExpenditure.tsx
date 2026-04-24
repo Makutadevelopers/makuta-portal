@@ -54,7 +54,7 @@ export default function SiteExpenditure() {
       <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
         <div>
           <div className="text-lg font-medium text-gray-900">Expenditure — {user?.site}</div>
-          <div className="text-xs text-gray-500 mt-1">Invoice amounts for your site · payment details managed by Head Office</div>
+          <div className="text-xs text-gray-500 mt-1">Invoice amounts for your site · cashflow and aging managed by Head Office</div>
         </div>
         <select value={fMonth} onChange={e => setFMonth(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
           <option value="All">All Months</option>
@@ -133,7 +133,7 @@ export default function SiteExpenditure() {
 
           {/* Disclaimer */}
           <div className="mt-5 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-            Amounts shown are invoice values submitted from your site. Payment status, cashflow, and aging are managed exclusively by Head Office.
+            Amounts shown are invoice values submitted from your site. Cashflow and aging are managed exclusively by Head Office.
           </div>
         </>
       )}

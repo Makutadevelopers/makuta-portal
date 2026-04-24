@@ -4,7 +4,8 @@
 // PATCH /api/invoices/:id      — ho + site (own site only)
 // POST  /api/invoices/:id/push — ho only
 //
-// CRITICAL: site role NEVER receives payment_status, payment amounts, or aging data.
+// CRITICAL: site role sees only the payment_status badge (Paid/Partial/Not Paid).
+// Payment amounts (total_paid, balance) and aging data remain HO+mgmt only.
 
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
@@ -41,11 +42,13 @@ const createInvoiceSchema = z.object({
 
 const updateInvoiceSchema = createInvoiceSchema.partial();
 
-// Columns safe for site role — excludes all payment-related fields
+// Columns safe for site role — includes payment_status badge but excludes
+// payment amounts (total_paid, balance) and aging data (days_past_due, overdue).
 const SITE_COLUMNS = `
   id, sl_no, internal_no, month, invoice_date, vendor_id, vendor_name,
   invoice_no, po_number, purpose, site, invoice_amount,
   base_amount, cgst_pct, sgst_pct, igst_pct,
+  payment_status,
   remarks, pushed, pushed_at, minor_payment,
   created_by, created_at, updated_at
 `;
