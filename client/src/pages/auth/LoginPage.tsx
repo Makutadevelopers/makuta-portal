@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { loginApi } from '../../api/auth';
 import { useAuth } from '../../hooks/useAuth';
 
-const SHOW_DEMO = import.meta.env.VITE_DEMO_MODE === 'true';
+const SHOW_DEMO = import.meta.env.DEV;
 
 const DEMO_USERS = [
   { label: 'Raju S', tag: '(HO)', email: 'raju@makuta.in', password: 'ho123' },
@@ -112,7 +112,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Demo credentials — only visible in development when VITE_DEMO_MODE=true */}
+        {/* Demo credentials — only rendered in `vite dev`; stripped from production builds */}
         {SHOW_DEMO && (
           <div className="mt-6 pt-5 border-t border-gray-100">
             <div className="text-xs font-medium text-gray-500 mb-3">Demo credentials — click to autofill</div>
