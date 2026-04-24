@@ -153,7 +153,7 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
   const [vendorId, setVendorId] = useState(editInvoice?.vendor_id ?? '');
   const [vendorName, setVendorName] = useState(editInvoice?.vendor_name ?? '');
   const [freeTextMode, setFreeTextMode] = useState(false);
-  const [vendorSearch, setVendorSearch] = useState('');
+  const [vendorDropdownOpen, setVendorDropdownOpen] = useState(false);
   const [invoiceNo, setInvoiceNo] = useState(editInvoice?.invoice_no ?? '');
   const [poNumber, setPoNumber] = useState(editInvoice?.po_number ?? '');
   const [purpose, setPurpose] = useState(editInvoice?.purpose ?? 'Steel');
@@ -317,41 +317,44 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
                 className="text-xs text-blue-600 whitespace-nowrap hover:underline px-2">Back to list</button>
             </div>
           ) : (
-            <div>
-              <div className="relative">
-                <input
-                  value={vendorSearch}
-                  onChange={e => setVendorSearch(e.target.value)}
-                  placeholder="Type to search or select vendor..."
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
-                  onFocus={() => setVendorSearch(vendorName)}
-                />
-                {vendorSearch && (
-                  <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                    {vendors
-                      .filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase()))
-                      .map(v => (
-                        <div
-                          key={v.id}
-                          onClick={() => { handleVendorChange(v.id); setVendorSearch(''); }}
-                          className="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between"
-                        >
-                          <span className="text-sm text-gray-900">{v.name}</span>
-                          <span className="text-xs text-gray-400">{v.category} · {v.payment_terms}d</span>
-                        </div>
-                      ))}
-                    {vendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase())).length === 0 && (
-                      <div className="px-3 py-2">
-                        <div className="text-xs text-gray-400 mb-1">No matching vendor found</div>
-                        <button type="button" onClick={() => { setFreeTextMode(true); setVendorName(vendorSearch); setVendorSearch(''); setVendorId(''); }}
-                          className="text-xs text-orange-600 hover:underline">Enter "{vendorSearch}" as new vendor</button>
+            <div className="relative">
+              <input
+                value={vendorName}
+                onChange={e => {
+                  setVendorName(e.target.value);
+                  setVendorId('');
+                  setVendorDropdownOpen(true);
+                }}
+                onFocus={() => setVendorDropdownOpen(true)}
+                onBlur={() => setTimeout(() => setVendorDropdownOpen(false), 150)}
+                placeholder="Type to search or select vendor..."
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+              />
+              {vendorDropdownOpen && (
+                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {vendors
+                    .filter(v => v.name.toLowerCase().includes(vendorName.toLowerCase()))
+                    .map(v => (
+                      <div
+                        key={v.id}
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => { handleVendorChange(v.id); setVendorDropdownOpen(false); }}
+                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between"
+                      >
+                        <span className="text-sm text-gray-900">{v.name}</span>
+                        <span className="text-xs text-gray-400">{v.category} · {v.payment_terms}d</span>
                       </div>
-                    )}
-                  </div>
-                )}
-              </div>
-              {vendorId && !vendorSearch && (
-                <div className="mt-1 text-sm text-gray-700">{vendorName}</div>
+                    ))}
+                  {vendorName.trim() && vendors.filter(v => v.name.toLowerCase().includes(vendorName.toLowerCase())).length === 0 && (
+                    <div className="px-3 py-2">
+                      <div className="text-xs text-gray-400 mb-1">No matching vendor found</div>
+                      <button type="button"
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => { setFreeTextMode(true); setVendorId(''); setVendorDropdownOpen(false); }}
+                        className="text-xs text-orange-600 hover:underline">Enter "{vendorName}" as new vendor</button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}
