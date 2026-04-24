@@ -7,6 +7,8 @@ import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, getInvoiceHistory, 
 import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
 import { createPayment, getPayments } from '../../api/payments';
 import { bulkPayInvoices } from '../../api/reconciliation';
+import { getInvoiceCreditSuggestions, addAllocation } from '../../api/creditNotes';
+import { InvoiceCreditSuggestions } from '../../types/creditNote';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES, PURPOSES, PAYMENT_TYPES, BANKS } from '../../utils/constants';
 import { Invoice } from '../../types/invoice';
@@ -14,6 +16,7 @@ import { Payment } from '../../types/payment';
 import AppShell from '../../components/layout/AppShell';
 import BulkImportModal from '../../components/shared/BulkImportModal';
 import AttachmentViewer from '../../components/shared/AttachmentViewer';
+import DisputeModal from '../../components/shared/DisputeModal';
 import { useToast } from '../../context/ToastContext';
 
 export default function InvoiceList() {
@@ -55,6 +58,7 @@ export default function InvoiceList() {
   const [showImport, setShowImport] = useState(false);
   // Attachment viewer
   const [docsInvoice, setDocsInvoice] = useState<Invoice | null>(null);
+  const [disputeInvoice, setDisputeInvoice] = useState<Invoice | null>(null);
   // Invoice info/history panel
   const [infoInvoice, setInfoInvoice] = useState<Invoice | null>(null);
   const [infoHistory, setInfoHistory] = useState<AuditLogEntry[]>([]);
@@ -291,6 +295,21 @@ export default function InvoiceList() {
             className="px-4 py-1.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">
             Bulk Pay (1 Cheque / Txn)
           </button>
+          {selected.size === 1 && (() => {
+            const inv = invoices.find(i => selected.has(i.id));
+            if (!inv) return null;
+            return (
+              <button
+                onClick={() => setDisputeInvoice(inv)}
+                className={`px-4 py-1.5 text-white text-sm font-medium rounded-lg ${
+                  inv.disputed ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                }`}
+                title={inv.disputed ? `Clear dispute on #${inv.invoice_no}` : `Raise dispute on #${inv.invoice_no}`}
+              >
+                {inv.disputed ? 'Clear Dispute' : 'Raise Dispute'}
+              </button>
+            );
+          })()}
           <button onClick={() => setSelected(new Set())} className="text-sm text-gray-500 hover:text-gray-700">Clear</button>
         </div>
       )}
@@ -348,6 +367,20 @@ export default function InvoiceList() {
         />
       )}
 
+      {/* Dispute modal */}
+      {disputeInvoice && (
+        <DisputeModal
+          invoice={disputeInvoice}
+          onClose={() => setDisputeInvoice(null)}
+          onDone={() => {
+            const wasDisputed = disputeInvoice.disputed;
+            setDisputeInvoice(null);
+            notify(wasDisputed ? 'Dispute cleared' : 'Invoice disputed');
+            refresh();
+          }}
+        />
+      )}
+
       {/* Invoice Info / Audit History */}
       {infoInvoice && (
         <InvoiceInfoPanel
@@ -398,7 +431,7 @@ export default function InvoiceList() {
 
                 return (
                   <Fragment key={inv.id}>
-                    <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${selected.has(inv.id) ? 'bg-blue-50/50' : ''}`}>
+                    <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${selected.has(inv.id) ? 'bg-blue-50/50' : ''} ${inv.disputed ? (inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400') : ''}`}>
                       <td className="px-4 py-3">
                         {inv.payment_status !== 'Paid' ? (
                           <input type="checkbox" checked={selected.has(inv.id)} onChange={() => toggleSelect(inv.id)}
@@ -411,7 +444,14 @@ export default function InvoiceList() {
                       <td className="px-4 py-3 text-gray-500 max-w-[120px] truncate" title={inv.po_number ?? ''}>{inv.po_number ?? '—'}</td>
                       <td className="px-4 py-3 text-gray-500">{inv.purpose}</td>
                       <td className="px-4 py-3">{inv.site}</td>
-                      <td className="px-4 py-3 text-right font-medium">{formatINR(Number(inv.invoice_amount))}</td>
+                      <td className="px-4 py-3 text-right font-medium">
+                        {formatINR(Number(inv.invoice_amount))}
+                        {Number(inv.allocated_credits ?? 0) > 0 && (
+                          <div className="text-[10px] font-normal text-purple-600" title={`Credit note applied: ₹${Number(inv.allocated_credits).toLocaleString('en-IN')}`}>
+                            − CN {formatINR(Number(inv.allocated_credits))}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right">
                         {isPaid ? <span className="text-green-600">—</span>
                           : aging ? <span className="font-medium text-red-600">{formatINR(aging.balance)}</span>
@@ -432,6 +472,16 @@ export default function InvoiceList() {
                           }`}>{inv.pushed ? 'Master' : 'Draft'}</span>
                           {inv.minor_payment && (
                             <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-50 text-orange-600">site</span>
+                          )}
+                          {inv.disputed && (
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                inv.dispute_severity === 'major' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                              }`}
+                              title={inv.dispute_reason ?? ''}
+                            >
+                              Disputed · {inv.dispute_severity}
+                            </span>
                           )}
                         </div>
                       </td>
@@ -501,11 +551,28 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [prevPayments, setPrevPayments] = useState<Payment[]>([]);
+  const [creditSuggestions, setCreditSuggestions] = useState<InvoiceCreditSuggestions | null>(null);
+  const [applyingCredit, setApplyingCredit] = useState(false);
 
-  // Load previous payments
-  useState(() => {
+  useEffect(() => {
     getPayments(invoice.id).then(setPrevPayments).catch(() => {});
-  });
+    getInvoiceCreditSuggestions(invoice.id).then(setCreditSuggestions).catch(() => {});
+  }, [invoice.id]);
+
+  async function handleApplyCredit(cnId: string, availableAmount: number) {
+    const applyAmount = Math.min(availableAmount, balance);
+    if (applyAmount <= 0) return;
+    setApplyingCredit(true);
+    try {
+      await addAllocation(cnId, { invoice_id: invoice.id, allocated_amount: applyAmount });
+      // Signal parent to refresh invoices; the modal will close and reopen with new balance
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to apply credit');
+    } finally {
+      setApplyingCredit(false);
+    }
+  }
 
   const numAmount = Number(amount) || 0;
   const balanceAfter = balance - numAmount;
@@ -554,6 +621,38 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
         </div>
 
         {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
+
+        {/* Vendor credit available */}
+        {creditSuggestions && creditSuggestions.unallocated_balance > 0 && (
+          <div className="mb-4 p-3 bg-purple-50 border border-purple-100 rounded-lg">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1">
+                <div className="text-xs font-medium text-purple-800">
+                  {invoice.vendor_name} has {formatINR(creditSuggestions.unallocated_balance)} unallocated credit
+                </div>
+                <div className="text-[11px] text-purple-600 mt-0.5">
+                  Apply some of it to reduce this invoice's payable before paying cash.
+                </div>
+                <div className="mt-2 space-y-1">
+                  {creditSuggestions.available_credits.map((c) => (
+                    <div key={c.id} className="flex items-center justify-between text-xs bg-white rounded px-2 py-1 border border-purple-100">
+                      <span className="text-gray-700">
+                        CN #{c.cn_no} · {formatDate(c.cn_date)} · available {formatINR(c.unallocated_balance)}
+                      </span>
+                      <button
+                        onClick={() => handleApplyCredit(c.id, c.unallocated_balance)}
+                        disabled={applyingCredit}
+                        className="text-purple-700 hover:underline disabled:opacity-50"
+                      >
+                        Apply {formatINR(Math.min(c.unallocated_balance, balance))}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Previous payments */}
         {prevPayments.length > 0 && (
@@ -815,6 +914,22 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   const [sgstPct, setSgstPct] = useState(editInvoice ? String(editInvoice.sgst_pct ?? 0) : '0');
   const [igstPct, setIgstPct] = useState(editInvoice ? String(editInvoice.igst_pct ?? 0) : '0');
 
+  const [addlChargeOn, setAddlChargeOn] = useState(!!editInvoice && Number(editInvoice.additional_charge) > 0);
+  const [addlCharge, setAddlCharge] = useState(
+    editInvoice && Number(editInvoice.additional_charge) > 0 ? String(editInvoice.additional_charge) : ''
+  );
+  const [addlGstOn, setAddlGstOn] = useState(
+    !!editInvoice && (
+      Number(editInvoice.additional_charge_cgst_pct) > 0 ||
+      Number(editInvoice.additional_charge_sgst_pct) > 0 ||
+      Number(editInvoice.additional_charge_igst_pct) > 0
+    )
+  );
+  const [addlCgstPct, setAddlCgstPct] = useState(editInvoice ? String(editInvoice.additional_charge_cgst_pct ?? 0) : '0');
+  const [addlSgstPct, setAddlSgstPct] = useState(editInvoice ? String(editInvoice.additional_charge_sgst_pct ?? 0) : '0');
+  const [addlIgstPct, setAddlIgstPct] = useState(editInvoice ? String(editInvoice.additional_charge_igst_pct ?? 0) : '0');
+  const [addlReason, setAddlReason] = useState(editInvoice?.additional_charge_reason ?? '');
+
   const baseNum = Number(baseAmount) || 0;
   const cgstNum = Number(cgstPct) || 0;
   const sgstNum = Number(sgstPct) || 0;
@@ -822,7 +937,15 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   const cgstAmt = +(baseNum * cgstNum / 100).toFixed(2);
   const sgstAmt = +(baseNum * sgstNum / 100).toFixed(2);
   const igstAmt = +(baseNum * igstNum / 100).toFixed(2);
-  const totalAmount = +(baseNum + cgstAmt + sgstAmt + igstAmt).toFixed(2);
+  const addlChargeNum = addlChargeOn ? (Number(addlCharge) || 0) : 0;
+  const addlCgstNum = addlChargeOn && addlGstOn ? (Number(addlCgstPct) || 0) : 0;
+  const addlSgstNum = addlChargeOn && addlGstOn ? (Number(addlSgstPct) || 0) : 0;
+  const addlIgstNum = addlChargeOn && addlGstOn ? (Number(addlIgstPct) || 0) : 0;
+  const addlCgstAmt = +(addlChargeNum * addlCgstNum / 100).toFixed(2);
+  const addlSgstAmt = +(addlChargeNum * addlSgstNum / 100).toFixed(2);
+  const addlIgstAmt = +(addlChargeNum * addlIgstNum / 100).toFixed(2);
+  const addlLineTotal = +(addlChargeNum + addlCgstAmt + addlSgstAmt + addlIgstAmt).toFixed(2);
+  const totalAmount = +(baseNum + cgstAmt + sgstAmt + igstAmt + addlLineTotal).toFixed(2);
 
   const [remarks, setRemarks] = useState(editInvoice?.remarks ?? '');
   const [saving, setSaving] = useState(false);
@@ -859,6 +982,10 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
     if (!invoiceNo.trim()) { setError('Invoice number is required'); return; }
     if (baseNum <= 0) { setError('Enter a valid base amount'); return; }
     if (totalAmount <= 0) { setError('Total amount must be greater than zero'); return; }
+    if (addlChargeOn && addlChargeNum > 0 && !addlReason.trim()) {
+      setError('Reason is required when additional charge is entered');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -867,6 +994,11 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
         invoice_no: invoiceNo.trim(), po_number: poNumber.trim() || null,
         purpose, site, invoice_amount: totalAmount,
         base_amount: baseNum, cgst_pct: cgstNum, sgst_pct: sgstNum, igst_pct: igstNum,
+        additional_charge: addlChargeNum,
+        additional_charge_cgst_pct: addlCgstNum,
+        additional_charge_sgst_pct: addlSgstNum,
+        additional_charge_igst_pct: addlIgstNum,
+        additional_charge_reason: addlChargeNum > 0 ? addlReason.trim() : null,
         remarks: remarks.trim() || null,
       };
 
@@ -998,9 +1130,85 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
             </div>
           </div>
           <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
-            <span className="text-sm text-gray-600">Total Invoice Amount</span>
-            <span className="text-lg font-semibold text-[#1a3c5e]">{formatINR(totalAmount)}</span>
+            <span className="text-sm text-gray-600">Sub-total (base + GST)</span>
+            <span className="text-sm font-medium text-gray-800">
+              {formatINR(+(baseNum + cgstAmt + sgstAmt + igstAmt).toFixed(2))}
+            </span>
           </div>
+        </div>
+
+        {/* Additional charge */}
+        <div className="mb-4 p-4 bg-amber-50/40 rounded-lg border border-amber-100">
+          <label className="flex items-center gap-2 cursor-pointer mb-3">
+            <input type="checkbox" checked={addlChargeOn} onChange={e => setAddlChargeOn(e.target.checked)}
+              className="rounded border-gray-300" />
+            <span className="text-xs font-medium text-gray-700">Additional charge (transport, loading, etc.)</span>
+          </label>
+
+          {addlChargeOn && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Amount (₹) *</label>
+                  <input type="number" value={addlCharge} onChange={e => setAddlCharge(e.target.value)}
+                    placeholder="0" min="0" step="0.01"
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200" />
+                </div>
+                <div>
+                  <label className="flex items-center gap-2 cursor-pointer mt-6">
+                    <input type="checkbox" checked={addlGstOn} onChange={e => setAddlGstOn(e.target.checked)}
+                      className="rounded border-gray-300" />
+                    <span className="text-xs text-gray-700">Apply GST to this charge</span>
+                  </label>
+                </div>
+              </div>
+
+              {addlGstOn && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">CGST %</label>
+                    <input type="number" value={addlCgstPct} onChange={e => setAddlCgstPct(e.target.value)}
+                      placeholder="0" min="0" max="100" step="0.01"
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200" />
+                    <div className="text-[11px] text-gray-400 mt-1">{formatINR(addlCgstAmt)}</div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">SGST %</label>
+                    <input type="number" value={addlSgstPct} onChange={e => setAddlSgstPct(e.target.value)}
+                      placeholder="0" min="0" max="100" step="0.01"
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200" />
+                    <div className="text-[11px] text-gray-400 mt-1">{formatINR(addlSgstAmt)}</div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">IGST %</label>
+                    <input type="number" value={addlIgstPct} onChange={e => setAddlIgstPct(e.target.value)}
+                      placeholder="0" min="0" max="100" step="0.01"
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200" />
+                    <div className="text-[11px] text-gray-400 mt-1">{formatINR(addlIgstAmt)}</div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mb-1">
+                <label className="block text-xs text-gray-500 mb-1">Reason *</label>
+                <input value={addlReason} onChange={e => setAddlReason(e.target.value)}
+                  placeholder="e.g. Transport, loading, packing, handling..."
+                  maxLength={500}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200" />
+              </div>
+
+              <div className="mt-2 pt-2 border-t border-amber-200 flex items-center justify-between">
+                <span className="text-xs text-gray-600">Additional line total</span>
+                <span className="text-sm font-medium text-amber-800">{formatINR(addlLineTotal)}</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Grand total */}
+        <div className="mb-4 flex items-center justify-between px-4 py-3 bg-[#1a3c5e]/5 rounded-lg">
+          <span className="text-sm font-medium text-gray-700">Total Invoice Amount</span>
+          <span className="text-lg font-semibold text-[#1a3c5e]">{formatINR(totalAmount)}</span>
         </div>
 
         <div className="mb-4">

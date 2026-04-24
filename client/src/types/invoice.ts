@@ -1,3 +1,5 @@
+export type DisputeSeverity = 'minor' | 'major';
+
 export interface Invoice {
   id: string;
   sl_no: number;
@@ -15,6 +17,16 @@ export interface Invoice {
   cgst_pct: number;
   sgst_pct: number;
   igst_pct: number;
+  additional_charge: number;
+  additional_charge_cgst_pct: number;
+  additional_charge_sgst_pct: number;
+  additional_charge_igst_pct: number;
+  additional_charge_reason: string | null;
+  disputed: boolean;
+  dispute_severity: DisputeSeverity | null;
+  dispute_reason: string | null;
+  disputed_by: string | null;
+  disputed_at: string | null;
   payment_status?: string;    // excluded for site role
   remarks: string | null;
   pushed: boolean;
@@ -25,6 +37,8 @@ export interface Invoice {
   created_at: string;
   updated_at: string;
   attachment_count?: number;
+  allocated_credits?: number;
+  effective_payable?: number;
   deleted_at?: string | null;
   deleted_by?: string | null;
 }
@@ -43,5 +57,10 @@ export interface CreateInvoiceData {
   cgst_pct?: number;
   sgst_pct?: number;
   igst_pct?: number;
+  additional_charge?: number;
+  additional_charge_cgst_pct?: number;
+  additional_charge_sgst_pct?: number;
+  additional_charge_igst_pct?: number;
+  additional_charge_reason?: string | null;
   remarks?: string | null;
 }

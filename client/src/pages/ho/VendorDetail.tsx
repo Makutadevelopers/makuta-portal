@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getVendorDetail, VendorDetailResponse } from '../../api/vendors';
+import { getVendorCreditBalance } from '../../api/creditNotes';
+import { VendorCreditBalance } from '../../types/creditNote';
 import { formatINR, formatDate } from '../../utils/formatters';
 import AppShell from '../../components/layout/AppShell';
 
@@ -14,6 +16,7 @@ export default function VendorDetail() {
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
   const [orderType, setOrderType] = useState<OrderType>('All');
+  const [creditBalance, setCreditBalance] = useState<VendorCreditBalance | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -23,6 +26,7 @@ export default function VendorDetail() {
       .then(setData)
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to load vendor'))
       .finally(() => setLoading(false));
+    getVendorCreditBalance(id).then(setCreditBalance).catch(() => setCreditBalance(null));
   }, [id]);
 
   if (loading) {
@@ -120,6 +124,24 @@ export default function VendorDetail() {
             </div>
           ))}
         </div>
+
+        {/* Credit notes summary */}
+        {creditBalance && creditBalance.total_credit > 0 && (
+          <div className="mb-6 p-4 bg-purple-50 border border-purple-100 rounded-xl flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <div className="text-xs font-medium text-purple-800 uppercase tracking-wider mb-1">Credit notes</div>
+              <div className="text-sm text-purple-900">
+                Total credits issued: <span className="font-semibold">{formatINR(creditBalance.total_credit)}</span>
+                &nbsp;·&nbsp;Applied: {formatINR(creditBalance.allocated)}
+                &nbsp;·&nbsp;Unallocated:{' '}
+                <span className={creditBalance.unallocated_balance > 0 ? 'font-semibold text-amber-700' : 'text-purple-700'}>
+                  {formatINR(creditBalance.unallocated_balance)}
+                </span>
+              </div>
+            </div>
+            <Link to="/credit-notes" className="text-xs text-purple-700 hover:underline">View all credit notes →</Link>
+          </div>
+        )}
 
         {/* Filter tabs */}
         <div className="flex items-center gap-2 mb-4 flex-wrap">

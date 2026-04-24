@@ -7,6 +7,7 @@
 import { readFileSync } from 'fs';
 import { parse } from 'csv-parse/sync';
 import { query, queryOne } from './query.js';
+import { paymentStatusCase } from '../services/payment.service.js';
 import { randomUUID } from 'crypto';
 
 interface CsvRow {
@@ -222,15 +223,9 @@ async function main() {
         ]
       );
       paymentsCreated++;
-      // Recompute status
+      // Recompute status (accounts for CN allocations)
       await query(
-        `UPDATE invoices SET payment_status = (
-          CASE
-            WHEN (SELECT COALESCE(SUM(amount),0) FROM payments WHERE invoice_id = $1) >= invoice_amount THEN 'Paid'
-            WHEN (SELECT COALESCE(SUM(amount),0) FROM payments WHERE invoice_id = $1) > 0 THEN 'Partial'
-            ELSE 'Not Paid'
-          END
-        ), updated_at = NOW() WHERE id = $1`,
+        `UPDATE invoices SET payment_status = ${paymentStatusCase('invoices')}, updated_at = NOW() WHERE id = $1`,
         [inv!.id]
       );
     }

@@ -11,20 +11,28 @@ interface AuditEntry {
   userId: string;
   action: string;
   invoiceId?: string | null;
+  creditNoteId?: string | null;
   metadata?: Record<string, unknown> | null;
 }
 
 export async function logAudit(entry: AuditEntry): Promise<void> {
   try {
     await queryOne(
-      `INSERT INTO audit_logs (user_id, action, invoice_id, metadata)
-       VALUES ($1, $2, $3, $4)`,
-      [entry.userId, entry.action, entry.invoiceId ?? null, entry.metadata ? JSON.stringify(entry.metadata) : null]
+      `INSERT INTO audit_logs (user_id, action, invoice_id, credit_note_id, metadata)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        entry.userId,
+        entry.action,
+        entry.invoiceId ?? null,
+        entry.creditNoteId ?? null,
+        entry.metadata ? JSON.stringify(entry.metadata) : null,
+      ]
     );
   } catch (err) {
     console.error('[audit] failed to write log entry:', {
       action: entry.action,
       invoiceId: entry.invoiceId,
+      creditNoteId: entry.creditNoteId,
       error: err instanceof Error ? err.message : String(err),
     });
     // swallow — auditing must never break business flow

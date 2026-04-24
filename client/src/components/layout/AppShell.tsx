@@ -3,14 +3,16 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { getAlerts, getAlertCount, resolveAlert, Alert } from '../../api/alerts';
 import { getPendingCount } from '../../utils/offlineSync';
+import CalculatorWidget from '../shared/CalculatorWidget';
 
 const HO_TABS = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/invoices', label: 'All Invoices' },
+  { to: '/credit-notes', label: 'Credit Notes' },
   { to: '/payment-aging', label: 'Payment Aging' },
   { to: '/cashflow', label: 'Cashflow' },
   { to: '/vendors', label: 'Vendor Master' },
-  { to: '/bank-reconciliation', label: 'Bank Reconsideration' },
+  { to: '/bank-reconciliation', label: 'Bank Reconciliation' },
   { to: '/petty-cash', label: 'Petty Cash' },
   { to: '/audit', label: 'Audit Trail' },
   { to: '/bin', label: 'Bin' },
@@ -20,13 +22,16 @@ const MGMT_TABS = [
   { to: '/overview', label: 'Overview' },
   { to: '/vendor-aging', label: 'Vendor Aging' },
   { to: '/mgmt-cashflow', label: 'Cashflow' },
-  { to: '/mgmt-bank-reconciliation', label: 'Bank Reconsideration' },
+  { to: '/mgmt-bank-reconciliation', label: 'Bank Reconciliation' },
+  { to: '/credit-notes', label: 'Credit Notes' },
   { to: '/employees', label: 'Employees' },
+  { to: '/bin', label: 'Bin' },
 ];
 
 const SITE_TABS = [
   { to: '/site-dashboard', label: 'Dashboard' },
   { to: '/my-invoices', label: 'My Invoices' },
+  { to: '/credit-notes', label: 'Credit Notes' },
   { to: '/site-expenditure', label: 'Expenditure' },
   { to: '/site-petty-cash', label: 'Petty Cash' },
   { to: '/vendors', label: 'Vendor Master' },
@@ -261,6 +266,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Content */}
       <main className="p-4 sm:p-6">{children}</main>
+
+      {/* Floating calculator (hidden for MD inside the widget itself) */}
+      <CalculatorWidget />
     </div>
   );
 }

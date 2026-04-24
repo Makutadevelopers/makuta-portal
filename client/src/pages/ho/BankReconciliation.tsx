@@ -40,7 +40,7 @@ export default function BankReconciliation() {
     <AppShell>
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
-          <div className="text-lg font-medium text-gray-900">Bank Reconsideration</div>
+          <div className="text-lg font-medium text-gray-900">Bank Reconciliation</div>
           <div className="text-xs text-gray-500">Cheque &amp; transaction allocations across invoices</div>
         </div>
       </div>

@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { query, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
 import { notifyPaymentRecorded } from '../services/email.service';
+import { paymentStatusCase } from '../services/payment.service';
 
 const MINOR_LIMIT = 50000;
 
@@ -85,13 +86,16 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
         return { status: 403, body: { error: 'Forbidden', message: 'Finalized invoices can only be paid by Head Office' } };
       }
 
-      // Sum existing payments inside the same transaction so we see the latest state
-      const sumRows = await tx.query<{ total: string }>(
-        'SELECT COALESCE(SUM(amount), 0)::TEXT AS total FROM payments WHERE invoice_id = $1',
+      // Sum existing payments + CN allocations inside the same transaction so we see the latest state
+      const sumRows = await tx.query<{ total: string; allocated: string }>(
+        `SELECT
+           COALESCE((SELECT SUM(amount) FROM payments WHERE invoice_id = $1), 0)::TEXT AS total,
+           COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = $1), 0)::TEXT AS allocated`,
         [invoiceId]
       );
       const alreadyPaid = Number(sumRows[0]?.total ?? 0);
-      const balance = Number(invoice.invoice_amount) - alreadyPaid;
+      const allocated = Number(sumRows[0]?.allocated ?? 0);
+      const balance = Number(invoice.invoice_amount) - alreadyPaid - allocated;
       if (data.amount > balance) {
         return {
           status: 400,
@@ -117,15 +121,11 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
         );
       }
 
-      // Recompute payment_status inside the same transaction
+      // Recompute payment_status inside the same transaction, accounting for CN allocations
       const statusRow = await tx.queryOne<{ payment_status: string }>(
         `UPDATE invoices
-         SET payment_status = CASE
-           WHEN (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = $1) >= invoice_amount THEN 'Paid'
-           WHEN (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = $1) > 0 THEN 'Partial'
-           ELSE 'Not Paid'
-         END,
-         updated_at = NOW()
+         SET payment_status = ${paymentStatusCase('invoices')},
+             updated_at = NOW()
          WHERE id = $1
          RETURNING payment_status`,
         [invoiceId]

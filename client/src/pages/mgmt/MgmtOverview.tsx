@@ -1,9 +1,20 @@
+import { useMemo } from 'react';
 import { useDashboardData } from '../../hooks/useDashboardData';
+import { useInvoices } from '../../hooks/useInvoices';
 import { formatINR, formatDate } from '../../utils/formatters';
 import AppShell from '../../components/layout/AppShell';
 
 export default function MgmtOverview() {
   const data = useDashboardData();
+  const { invoices } = useInvoices();
+
+  const disputeSummary = useMemo(() => {
+    const disputed = invoices.filter(i => i.disputed);
+    const major = disputed.filter(i => i.dispute_severity === 'major');
+    const minor = disputed.filter(i => i.dispute_severity === 'minor');
+    const amount = disputed.reduce((s, i) => s + Number(i.invoice_amount ?? 0), 0);
+    return { disputed, major, minor, amount };
+  }, [invoices]);
 
   const todayStr = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',
@@ -27,13 +38,22 @@ export default function MgmtOverview() {
         ) : (
           <div className="space-y-6">
             {/* KPI Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               {[
                 { label: 'Total Invoiced', value: formatINR(data.kpis.totalInvoiced), sub: 'all time · all sites', accent: '#1a3c5e', bg: '#e8eef5' },
                 { label: 'Total Paid', value: formatINR(data.kpis.totalPaid), sub: 'payments made to date', accent: '#15803d', bg: '#dcfce7' },
                 { label: 'Outstanding', value: formatINR(data.kpis.outstanding), sub: 'balance owed to vendors', accent: '#1a3c5e', bg: '#eff6ff' },
                 { label: 'Overdue', value: formatINR(data.kpis.overdueAmount), sub: `${data.kpis.overdueCount} invoices past due`, accent: '#dc2626', bg: '#fef2f2' },
                 { label: 'Part-Paid Invoices', value: String(data.kpis.partPaidCount), sub: 'invoices with partial payment', accent: '#c2410c', bg: '#fff7ed' },
+                {
+                  label: 'Disputed',
+                  value: String(disputeSummary.disputed.length),
+                  sub: disputeSummary.disputed.length === 0
+                    ? 'no disputes raised'
+                    : `${disputeSummary.major.length} major · ${disputeSummary.minor.length} minor`,
+                  accent: disputeSummary.major.length > 0 ? '#b91c1c' : '#b45309',
+                  bg: disputeSummary.major.length > 0 ? '#fef2f2' : '#fffbeb',
+                },
               ].map(c => (
                 <div key={c.label} className="rounded-xl p-3 sm:p-5" style={{ background: c.bg, border: `1px solid ${c.accent}22` }}>
                   <div className="text-[10px] sm:text-[11px] font-medium uppercase tracking-wider mb-1.5 sm:mb-2.5" style={{ color: c.accent }}>{c.label}</div>
@@ -142,6 +162,52 @@ export default function MgmtOverview() {
                 ))}
               </div>
             </div>
+
+            {/* Disputed Invoices */}
+            {disputeSummary.disputed.length > 0 && (
+              <div className="bg-white rounded-xl border border-red-200 overflow-hidden">
+                <div className="px-5 py-4 border-b border-red-200 bg-red-50 flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-red-700">Disputed Invoices</div>
+                    <div className="text-[11px] text-red-600 opacity-70 mt-0.5">
+                      {disputeSummary.disputed.length} flagged · {formatINR(disputeSummary.amount)} total
+                      {disputeSummary.major.length > 0 && ` · ${disputeSummary.major.length} major`}
+                    </div>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[13px]">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        {['Severity', 'Vendor', 'Invoice', 'Site', 'Amount', 'Reason', 'Flagged'].map((h, i) => (
+                          <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap ${i === 4 ? 'text-right' : 'text-left'}`}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...disputeSummary.major, ...disputeSummary.minor].map(inv => (
+                        <tr
+                          key={inv.id}
+                          className={`border-t border-gray-100 ${inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400'}`}
+                        >
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                              inv.dispute_severity === 'major' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                            }`}>{inv.dispute_severity}</span>
+                          </td>
+                          <td className="px-4 py-3 font-medium text-gray-900">{inv.vendor_name}</td>
+                          <td className="px-4 py-3 text-gray-600">{inv.invoice_no ?? inv.internal_no ?? '—'}</td>
+                          <td className="px-4 py-3 text-gray-500">{inv.site}</td>
+                          <td className="px-4 py-3 text-right font-medium">{formatINR(Number(inv.invoice_amount))}</td>
+                          <td className="px-4 py-3 text-xs text-gray-600 max-w-[320px] truncate" title={inv.dispute_reason ?? ''}>{inv.dispute_reason ?? '—'}</td>
+                          <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{inv.disputed_at ? formatDate(inv.disputed_at) : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

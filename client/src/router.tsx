@@ -28,6 +28,9 @@ import MyInvoices from './pages/site/MyInvoices';
 import SiteExpenditure from './pages/site/SiteExpenditure';
 import SitePettyCash from './pages/site/SitePettyCash';
 
+// Shared pages
+import CreditNotes from './pages/shared/CreditNotes';
+
 function ProtectedRoute({ children, allowed }: { children: React.ReactNode; allowed: Role[] }) {
   const { isAuthenticated, user } = useAuth();
 
@@ -69,7 +72,7 @@ export default function AppRouter() {
         <Route path="/vendors" element={<ProtectedRoute allowed={['ho', 'site']}><VendorMaster /></ProtectedRoute>} />
         <Route path="/vendors/:id" element={<ProtectedRoute allowed={['ho', 'mgmt']}><VendorDetail /></ProtectedRoute>} />
         <Route path="/audit" element={<ProtectedRoute allowed={['ho']}><AuditTrail /></ProtectedRoute>} />
-        <Route path="/bin" element={<ProtectedRoute allowed={['ho']}><Bin /></ProtectedRoute>} />
+        <Route path="/bin" element={<ProtectedRoute allowed={['ho', 'mgmt']}><Bin /></ProtectedRoute>} />
         <Route path="/bank-reconciliation" element={<ProtectedRoute allowed={['ho']}><BankReconciliation /></ProtectedRoute>} />
         <Route path="/petty-cash" element={<ProtectedRoute allowed={['ho']}><PettyCash /></ProtectedRoute>} />
 
@@ -85,6 +88,9 @@ export default function AppRouter() {
         <Route path="/my-invoices" element={<ProtectedRoute allowed={['site']}><MyInvoices /></ProtectedRoute>} />
         <Route path="/site-expenditure" element={<ProtectedRoute allowed={['site']}><SiteExpenditure /></ProtectedRoute>} />
         <Route path="/site-petty-cash" element={<ProtectedRoute allowed={['site']}><SitePettyCash /></ProtectedRoute>} />
+
+        {/* Shared: Credit Notes (ho + site entry, mgmt view-only) */}
+        <Route path="/credit-notes" element={<ProtectedRoute allowed={['ho', 'site', 'mgmt']}><CreditNotes /></ProtectedRoute>} />
 
         {/* Catch-all */}
         <Route path="*" element={<Navigate to="/" replace />} />

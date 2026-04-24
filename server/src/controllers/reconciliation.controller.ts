@@ -15,6 +15,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { query, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
+import { paymentStatusCase } from '../services/payment.service';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
   .refine(v => !isNaN(new Date(v).getTime()), 'Invalid calendar date');
@@ -95,12 +96,15 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
           return { status: 404, body: { error: 'Not Found', message: `Invoice ${invoice.invoice_no} has been deleted` } };
         }
 
-        const sumRow = await tx.query<{ total: string }>(
-          'SELECT COALESCE(SUM(amount), 0)::TEXT AS total FROM payments WHERE invoice_id = $1',
+        const sumRow = await tx.query<{ total: string; allocated: string }>(
+          `SELECT
+             COALESCE((SELECT SUM(amount) FROM payments WHERE invoice_id = $1), 0)::TEXT AS total,
+             COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = $1), 0)::TEXT AS allocated`,
           [alloc.invoice_id]
         );
         const alreadyPaid = Number(sumRow[0]?.total ?? 0);
-        const balance = Number(invoice.invoice_amount) - alreadyPaid;
+        const allocatedCredits = Number(sumRow[0]?.allocated ?? 0);
+        const balance = Number(invoice.invoice_amount) - alreadyPaid - allocatedCredits;
         if (alloc.amount > balance + 0.009) {
           return {
             status: 400,
@@ -119,12 +123,8 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
 
         await tx.query(
           `UPDATE invoices
-           SET payment_status = CASE
-             WHEN (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = $1) >= invoice_amount THEN 'Paid'
-             WHEN (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = $1) > 0 THEN 'Partial'
-             ELSE 'Not Paid'
-           END,
-           updated_at = NOW()
+           SET payment_status = ${paymentStatusCase('invoices')},
+               updated_at = NOW()
            WHERE id = $1`,
           [alloc.invoice_id]
         );

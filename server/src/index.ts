@@ -25,6 +25,8 @@ import alertsRoutes from './routes/alerts.routes';
 import reconciliationRoutes from './routes/reconciliation.routes';
 import userRoutes from './routes/user.routes';
 import pettyCashRoutes from './routes/petty-cash.routes';
+import creditNoteRoutes from './routes/credit-note.routes';
+import creditNoteAttachmentRoutes from './routes/credit-note-attachment.routes';
 import cron from 'node-cron';
 
 console.log('Imported routes:', { authRoutes, vendorRoutes });
@@ -81,6 +83,8 @@ app.use('/api/alerts', alertsRoutes);
 app.use('/api/reconciliation', reconciliationRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/petty-cash', pettyCashRoutes);
+app.use('/api/credit-notes/:id/attachments', creditNoteAttachmentRoutes);
+app.use('/api/credit-notes', creditNoteRoutes);
 app.use('/api/cron', cronRoutes);
 
 // Error handler (must be after all routes)

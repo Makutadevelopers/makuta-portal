@@ -10,6 +10,7 @@ import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
 import { query, queryOne } from '../db/query';
 import { logAudit } from '../services/audit.service';
+import { paymentStatusCase, recomputeInvoiceStatus } from '../services/payment.service';
 
 interface CsvRow {
   [key: string]: string;
@@ -713,17 +714,8 @@ export async function importPayments(req: Request, res: Response, next: NextFunc
              parseMonthColumn(rawPaymentMonth) || monthDate]
           );
 
-          // Recompute status
-          await query(
-            `UPDATE invoices SET payment_status = (
-              CASE
-                WHEN (SELECT COALESCE(SUM(amount),0) FROM payments WHERE invoice_id = $1) >= invoice_amount THEN 'Paid'
-                WHEN (SELECT COALESCE(SUM(amount),0) FROM payments WHERE invoice_id = $1) > 0 THEN 'Partial'
-                ELSE 'Not Paid'
-              END
-            ), updated_at = NOW() WHERE id = $1`,
-            [invoice.id]
-          );
+          // Recompute status (accounting for CN allocations)
+          await recomputeInvoiceStatus(invoice.id);
         }
 
         imported++;
@@ -858,14 +850,8 @@ export async function undoBatchImport(req: Request, res: Response, next: NextFun
     // Recompute payment status for invoices that had payments removed
     // (in case payments from this batch were linked to invoices from another batch)
     await query(
-      `UPDATE invoices SET payment_status = (
-        CASE
-          WHEN (SELECT COALESCE(SUM(amount),0) FROM payments WHERE invoice_id = invoices.id) >= invoice_amount THEN 'Paid'
-          WHEN (SELECT COALESCE(SUM(amount),0) FROM payments WHERE invoice_id = invoices.id) > 0 THEN 'Partial'
-          ELSE 'Not Paid'
-        END
-      ), updated_at = NOW()
-      WHERE id IN (SELECT DISTINCT invoice_id FROM payments WHERE batch_id IS NULL OR batch_id != $1)`,
+      `UPDATE invoices SET payment_status = ${paymentStatusCase('invoices')}, updated_at = NOW()
+       WHERE id IN (SELECT DISTINCT invoice_id FROM payments WHERE batch_id IS NULL OR batch_id != $1)`,
       [batchId]
     );
 

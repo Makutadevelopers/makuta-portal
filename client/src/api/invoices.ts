@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import { Invoice, CreateInvoiceData } from '../types/invoice';
+import { Invoice, CreateInvoiceData, DisputeSeverity } from '../types/invoice';
 
 export function getInvoices(): Promise<Invoice[]> {
   return apiFetch<Invoice[]>('/invoices');
@@ -45,6 +45,24 @@ export function permanentDeleteInvoice(id: string): Promise<{ message: string }>
 
 export function purgeBin(): Promise<{ purged: number }> {
   return apiFetch('/invoices/bin/purge', { method: 'POST' });
+}
+
+export function markInvoiceDisputed(
+  id: string,
+  severity: DisputeSeverity,
+  reason: string,
+): Promise<Invoice> {
+  return apiFetch<Invoice>(`/invoices/${id}/dispute`, {
+    method: 'POST',
+    body: JSON.stringify({ severity, reason }),
+  });
+}
+
+export function clearInvoiceDispute(id: string, reason?: string): Promise<Invoice> {
+  return apiFetch<Invoice>(`/invoices/${id}/dispute`, {
+    method: 'DELETE',
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
 }
 
 export function bulkFinalizeInvoices(ids: string[]): Promise<{ finalized: number; total: number }> {

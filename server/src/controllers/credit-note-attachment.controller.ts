@@ -1,0 +1,172 @@
+// credit-note-attachment.controller.ts
+// Parallels attachment.controller.ts but scoped to credit_notes instead of invoices.
+// POST   /api/credit-notes/:id/attachments                          — upload
+// GET    /api/credit-notes/:id/attachments                          — list + URLs
+// GET    /api/credit-notes/:id/attachments/:attachmentId/download   — serve local file (dev)
+// DELETE /api/credit-notes/:id/attachments/:attachmentId            — delete
+
+import { Request, Response, NextFunction } from 'express';
+import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { query, queryOne } from '../db/query';
+import { s3, S3_BUCKET } from '../config/s3';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const UPLOADS_DIR = path.resolve(__dirname, '../../uploads');
+const isLocalDev = !s3;
+
+if (isLocalDev && !fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+
+interface AttachmentRow {
+  id: string;
+  invoice_id: string | null;
+  credit_note_id: string | null;
+  file_name: string;
+  file_size: number | null;
+  mime_type: string | null;
+  s3_key: string;
+  s3_bucket: string;
+  uploaded_by: string | null;
+  uploaded_at: string;
+}
+
+export async function uploadCreditNoteAttachment(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const cnId = req.params.id as string;
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: 'Bad Request', message: 'No file uploaded' });
+      return;
+    }
+
+    const cn = await queryOne<{ id: string }>(
+      'SELECT id FROM credit_notes WHERE id = $1 AND deleted_at IS NULL',
+      [cnId]
+    );
+    if (!cn) {
+      res.status(404).json({ error: 'Not Found', message: 'Credit note not found' });
+      return;
+    }
+
+    const sanitizedName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 255);
+    const s3Key = `credit-notes/${cnId}/${Date.now()}_${sanitizedName}`;
+
+    if (isLocalDev) {
+      const fullPath = path.join(UPLOADS_DIR, s3Key);
+      const dir = path.dirname(fullPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(fullPath, file.buffer);
+    } else {
+      await s3!.send(
+        new PutObjectCommand({
+          Bucket: S3_BUCKET,
+          Key: s3Key,
+          Body: file.buffer,
+          ContentType: file.mimetype,
+        })
+      );
+    }
+
+    const attachment = await queryOne<AttachmentRow>(
+      `INSERT INTO attachments (credit_note_id, file_name, file_size, mime_type, s3_key, s3_bucket, uploaded_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [cnId, file.originalname, file.size, file.mimetype, s3Key, isLocalDev ? 'local' : S3_BUCKET, req.user!.id]
+    );
+
+    res.status(201).json(attachment);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getCreditNoteAttachments(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const cnId = req.params.id as string;
+
+    const attachments = await query<AttachmentRow>(
+      'SELECT * FROM attachments WHERE credit_note_id = $1 ORDER BY uploaded_at',
+      [cnId]
+    );
+
+    const withUrls = await Promise.all(
+      attachments.map(async (att) => {
+        let url: string;
+        if (att.s3_bucket === 'local') {
+          url = `/api/credit-notes/${cnId}/attachments/${att.id}/download`;
+        } else {
+          url = await getSignedUrl(
+            s3!,
+            new GetObjectCommand({ Bucket: att.s3_bucket, Key: att.s3_key }),
+            { expiresIn: 900 }
+          );
+        }
+        return { ...att, url };
+      })
+    );
+
+    res.json(withUrls);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function downloadCreditNoteAttachment(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const cnId = req.params.id as string;
+    const attachmentId = req.params.attachmentId as string;
+
+    const att = await queryOne<AttachmentRow>(
+      'SELECT * FROM attachments WHERE id = $1 AND credit_note_id = $2',
+      [attachmentId, cnId]
+    );
+    if (!att) {
+      res.status(404).json({ error: 'Not Found', message: 'Attachment not found' });
+      return;
+    }
+
+    const filePath = path.join(UPLOADS_DIR, att.s3_key);
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: 'Not Found', message: 'File not found on disk' });
+      return;
+    }
+
+    const disposition = req.query.download === '1' ? 'attachment' : 'inline';
+    res.setHeader('Content-Type', att.mime_type ?? 'application/octet-stream');
+    res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(att.file_name)}`);
+    fs.createReadStream(filePath).pipe(res);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteCreditNoteAttachment(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const cnId = req.params.id as string;
+    const attachmentId = req.params.attachmentId as string;
+
+    const att = await queryOne<AttachmentRow>(
+      'SELECT * FROM attachments WHERE id = $1 AND credit_note_id = $2',
+      [attachmentId, cnId]
+    );
+    if (!att) {
+      res.status(404).json({ error: 'Not Found', message: 'Attachment not found' });
+      return;
+    }
+
+    if (isLocalDev) {
+      const filePath = path.join(UPLOADS_DIR, att.s3_key);
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch { /* ignore */ }
+    }
+
+    await query('DELETE FROM attachments WHERE id = $1', [attachmentId]);
+    res.json({ message: 'Attachment deleted' });
+  } catch (err) {
+    next(err);
+  }
+}

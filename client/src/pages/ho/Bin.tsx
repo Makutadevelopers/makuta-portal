@@ -4,6 +4,7 @@ import { Invoice } from '../../types/invoice';
 import { formatINR, formatDate } from '../../utils/formatters';
 import AppShell from '../../components/layout/AppShell';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../hooks/useAuth';
 
 interface BinInvoice extends Invoice {
   deleted_by_name: string | null;
@@ -13,6 +14,9 @@ export default function Bin() {
   const [invoices, setInvoices] = useState<BinInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const { notify } = useToast();
+  const { user } = useAuth();
+  const canPermanentDelete = user?.role === 'mgmt';
+  const canRestore = user?.role === 'ho';
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,7 +75,7 @@ export default function Bin() {
           <div className="text-lg font-medium text-gray-900">Bin</div>
           <div className="text-xs text-gray-500 mt-0.5">Deleted invoices are auto-purged after 30 days</div>
         </div>
-        {invoices.length > 0 && (
+        {invoices.length > 0 && canPermanentDelete && (
           <button onClick={handlePurge}
             className="px-3 py-2 border border-red-200 rounded-lg text-sm text-red-600 hover:bg-red-50">
             Purge Old (30+ days)
@@ -119,8 +123,15 @@ export default function Bin() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <button onClick={() => handleRestore(inv)} className="text-xs text-blue-600 hover:underline">Restore</button>
-                      <button onClick={() => handlePermanentDelete(inv)} className="text-xs text-red-500 hover:underline">Delete Forever</button>
+                      {canRestore && (
+                        <button onClick={() => handleRestore(inv)} className="text-xs text-blue-600 hover:underline">Restore</button>
+                      )}
+                      {canPermanentDelete && (
+                        <button onClick={() => handlePermanentDelete(inv)} className="text-xs text-red-500 hover:underline">Delete Forever</button>
+                      )}
+                      {!canRestore && !canPermanentDelete && (
+                        <span className="text-xs text-gray-400">View only</span>
+                      )}
                     </div>
                   </td>
                 </tr>

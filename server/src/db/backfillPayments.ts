@@ -9,7 +9,7 @@
 //   3. Insert ONE payments row per invoice in the group, linked via bank_txn_id.
 //   4. Rows with a blank payment_ref (cash, no details) get individual transactions.
 //
-// This makes the Bank Reconsideration tab populate with one row per cheque
+// This makes the Bank Reconciliation tab populate with one row per cheque
 // and the Cashflow (Payments) tab populate grouped by payment_date.
 //
 // Usage:  cd server && npx tsx src/db/backfillPayments.ts /absolute/path/to/payments.csv
@@ -22,6 +22,7 @@ import fs from 'fs';
 import path from 'path';
 import { parse } from 'csv-parse/sync';
 import { query, queryOne, withTransaction } from './query.js';
+import { paymentStatusCase } from '../services/payment.service.js';
 
 interface CsvRow {
   'Sl.No'?: string;
@@ -245,14 +246,10 @@ async function main(): Promise<void> {
         paymentsInserted++;
       }
 
-      // Recompute payment_status on each affected invoice
+      // Recompute payment_status on each affected invoice (accounts for CN allocations)
       for (const r of resolved) {
         await tx.query(
-          `UPDATE invoices SET payment_status = CASE
-             WHEN (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = $1) >= invoice_amount THEN 'Paid'
-             WHEN (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = $1) > 0 THEN 'Partial'
-             ELSE 'Not Paid'
-           END, updated_at = NOW()
+          `UPDATE invoices SET payment_status = ${paymentStatusCase('invoices')}, updated_at = NOW()
            WHERE id = $1`,
           [r.invoiceId]
         );

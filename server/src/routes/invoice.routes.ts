@@ -17,6 +17,8 @@ import {
   restoreInvoice,
   permanentDeleteInvoice,
   purgeOldBinInvoices,
+  markDisputed,
+  clearDispute,
 } from '../controllers/invoice.controller';
 
 const router = Router();
@@ -24,15 +26,17 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', getInvoices);
-router.get('/bin', requireRole(['ho']), getBinInvoices);
-router.post('/bin/purge', requireRole(['ho']), purgeOldBinInvoices);
+router.get('/bin', requireRole(['ho', 'mgmt']), getBinInvoices);
+router.post('/bin/purge', requireRole(['mgmt']), purgeOldBinInvoices);
 router.post('/bin/:id/restore', requireRole(['ho']), restoreInvoice);
-router.delete('/bin/:id', requireRole(['ho']), permanentDeleteInvoice);
+router.delete('/bin/:id', requireRole(['mgmt']), permanentDeleteInvoice);
 router.post('/', requireRole(['ho', 'site']), createInvoice);
 router.post('/bulk-finalize', requireRole(['ho']), bulkPushInvoices);
 router.patch('/:id', requireRole(['ho', 'site']), updateInvoice);
 router.post('/:id/push', requireRole(['ho']), pushInvoice);
 router.post('/:id/undo-push', requireRole(['ho']), undoPushInvoice);
+router.post('/:id/dispute', requireRole(['ho', 'site']), markDisputed);
+router.delete('/:id/dispute', requireRole(['ho', 'site']), clearDispute);
 router.delete('/:id', requireRole(['ho']), deleteInvoice);
 
 export default router;

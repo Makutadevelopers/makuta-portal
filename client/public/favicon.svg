@@ -1,4 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="80" fill="#1a3c5e"/>
-  <text x="256" y="340" font-family="Arial,sans-serif" font-size="280" font-weight="bold" fill="white" text-anchor="middle">M</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7a5816"/>
+      <stop offset="25%" stop-color="#c9a24a"/>
+      <stop offset="55%" stop-color="#e9c774"/>
+      <stop offset="80%" stop-color="#b88a32"/>
+      <stop offset="100%" stop-color="#6b4a10"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#gold)" d="M 14 222 L 52 88 L 88 160 L 112 14 L 128 186 L 144 14 L 168 160 L 204 88 L 242 222 Z"/>
 </svg>

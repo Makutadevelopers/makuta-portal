@@ -9,6 +9,7 @@ import { formatINR, formatDate } from '../../utils/formatters';
 import { PURPOSES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
 import BulkImportModal from '../../components/shared/BulkImportModal';
+import DisputeModal from '../../components/shared/DisputeModal';
 import { useToast } from '../../context/ToastContext';
 
 export default function MyInvoices() {
@@ -20,7 +21,10 @@ export default function MyInvoices() {
   const [showForm, setShowForm] = useState(false);
   const [editInv, setEditInv] = useState<Invoice | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [disputeInv, setDisputeInv] = useState<Invoice | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const { notify } = useToast();
+  const selectedInvoice = selectedId ? invoices.find(i => i.id === selectedId) ?? null : null;
 
   const filtered = useMemo(() => invoices.filter(i => {
     if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
@@ -36,6 +40,17 @@ export default function MyInvoices() {
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div className="text-lg font-medium text-gray-900">My Invoices</div>
         <div className="flex items-center gap-2">
+          {selectedInvoice && (
+            <button
+              onClick={() => setDisputeInv(selectedInvoice)}
+              className={`px-3 py-2 text-white text-sm font-medium rounded-lg ${
+                selectedInvoice.disputed ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+              }`}
+              title={`${selectedInvoice.disputed ? 'Clear dispute on' : 'Raise dispute on'} #${selectedInvoice.invoice_no}`}
+            >
+              {selectedInvoice.disputed ? 'Clear Dispute' : 'Raise Dispute'}
+            </button>
+          )}
           <button onClick={() => setShowImport(true)}
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
             Bulk Import
@@ -54,6 +69,20 @@ export default function MyInvoices() {
         <BulkImportModal
           onClose={() => setShowImport(false)}
           onDone={() => { setShowImport(false); refresh(); }}
+        />
+      )}
+
+      {/* Dispute modal */}
+      {disputeInv && (
+        <DisputeModal
+          invoice={disputeInv}
+          onClose={() => setDisputeInv(null)}
+          onDone={() => {
+            const wasDisputed = disputeInv.disputed;
+            setDisputeInv(null);
+            notify(wasDisputed ? 'Dispute cleared' : 'Invoice disputed');
+            refresh();
+          }}
         />
       )}
 
@@ -91,6 +120,7 @@ export default function MyInvoices() {
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
+                <th className="px-4 py-2.5 w-8"></th>
                 {['#', 'Int. No', 'Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Amount', 'Status', 'Actions'].map(h => (
                   <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap ${h === 'Amount' ? 'text-right' : 'text-left'}`}>
                     {h}
@@ -100,7 +130,17 @@ export default function MyInvoices() {
             </thead>
             <tbody>
               {filtered.map(inv => (
-                <tr key={inv.id} className="border-t border-gray-50 hover:bg-gray-50/50">
+                <tr key={inv.id} className={`border-t border-gray-50 hover:bg-gray-50/50 ${selectedId === inv.id ? 'bg-blue-50/60' : ''} ${inv.disputed ? (inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400') : ''}`}>
+                  <td className="px-4 py-3">
+                    <input
+                      type="radio"
+                      name="selected-invoice"
+                      checked={selectedId === inv.id}
+                      onChange={() => setSelectedId(inv.id)}
+                      onClick={() => selectedId === inv.id && setSelectedId(null)}
+                      className="border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
+                    />
+                  </td>
                   <td className="px-4 py-3 text-gray-400">{inv.sl_no}</td>
                   <td className="px-4 py-3 text-xs font-mono text-gray-500">{inv.internal_no ?? '—'}</td>
                   <td className="px-4 py-3 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
@@ -108,12 +148,29 @@ export default function MyInvoices() {
                   <td className="px-4 py-3">{inv.invoice_no}</td>
                   <td className="px-4 py-3 text-gray-500 max-w-[140px] truncate" title={inv.po_number ?? ''}>{inv.po_number ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-500">{inv.purpose}</td>
-                  <td className="px-4 py-3 text-right font-medium">{formatINR(Number(inv.invoice_amount))}</td>
+                  <td className="px-4 py-3 text-right font-medium">
+                    {formatINR(Number(inv.invoice_amount))}
+                    {Number(inv.allocated_credits ?? 0) > 0 && (
+                      <div className="text-[10px] font-normal text-purple-600" title={`Credit note applied: ₹${Number(inv.allocated_credits).toLocaleString('en-IN')}`}>
+                        − CN {formatINR(Number(inv.allocated_credits))}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 flex-wrap">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
                         inv.pushed ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
                       }`}>{inv.pushed ? 'Finalized' : 'Draft'}</span>
+                      {inv.disputed && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                            inv.dispute_severity === 'major' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                          }`}
+                          title={inv.dispute_reason ?? ''}
+                        >
+                          Disputed · {inv.dispute_severity}
+                        </span>
+                      )}
                       {inv.payment_status && (() => {
                         const label = inv.payment_status === 'Not Paid' ? 'Pending' : inv.payment_status;
                         const tone =
@@ -125,17 +182,19 @@ export default function MyInvoices() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    {!inv.pushed && (
-                      <span
-                        onClick={() => { setEditInv(inv); setShowForm(true); }}
-                        className="text-xs text-blue-600 cursor-pointer hover:underline"
-                      >Edit</span>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {!inv.pushed && (
+                        <span
+                          onClick={() => { setEditInv(inv); setShowForm(true); }}
+                          className="text-xs text-blue-600 cursor-pointer hover:underline"
+                        >Edit</span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={10} className="px-4 py-10 text-center text-gray-400 text-sm">No invoices match your filters.</td></tr>
+                <tr><td colSpan={11} className="px-4 py-10 text-center text-gray-400 text-sm">No invoices match your filters.</td></tr>
               )}
             </tbody>
           </table>
@@ -176,6 +235,22 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
   const [sgstPct, setSgstPct] = useState(editInvoice ? String(editInvoice.sgst_pct ?? 0) : '0');
   const [igstPct, setIgstPct] = useState(editInvoice ? String(editInvoice.igst_pct ?? 0) : '0');
 
+  const [addlChargeOn, setAddlChargeOn] = useState(!!editInvoice && Number(editInvoice.additional_charge) > 0);
+  const [addlCharge, setAddlCharge] = useState(
+    editInvoice && Number(editInvoice.additional_charge) > 0 ? String(editInvoice.additional_charge) : ''
+  );
+  const [addlGstOn, setAddlGstOn] = useState(
+    !!editInvoice && (
+      Number(editInvoice.additional_charge_cgst_pct) > 0 ||
+      Number(editInvoice.additional_charge_sgst_pct) > 0 ||
+      Number(editInvoice.additional_charge_igst_pct) > 0
+    )
+  );
+  const [addlCgstPct, setAddlCgstPct] = useState(editInvoice ? String(editInvoice.additional_charge_cgst_pct ?? 0) : '0');
+  const [addlSgstPct, setAddlSgstPct] = useState(editInvoice ? String(editInvoice.additional_charge_sgst_pct ?? 0) : '0');
+  const [addlIgstPct, setAddlIgstPct] = useState(editInvoice ? String(editInvoice.additional_charge_igst_pct ?? 0) : '0');
+  const [addlReason, setAddlReason] = useState(editInvoice?.additional_charge_reason ?? '');
+
   const baseNum = Number(baseAmount) || 0;
   const cgstNum = Number(cgstPct) || 0;
   const sgstNum = Number(sgstPct) || 0;
@@ -183,7 +258,15 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
   const cgstAmt = +(baseNum * cgstNum / 100).toFixed(2);
   const sgstAmt = +(baseNum * sgstNum / 100).toFixed(2);
   const igstAmt = +(baseNum * igstNum / 100).toFixed(2);
-  const totalAmount = +(baseNum + cgstAmt + sgstAmt + igstAmt).toFixed(2);
+  const addlChargeNum = addlChargeOn ? (Number(addlCharge) || 0) : 0;
+  const addlCgstNum = addlChargeOn && addlGstOn ? (Number(addlCgstPct) || 0) : 0;
+  const addlSgstNum = addlChargeOn && addlGstOn ? (Number(addlSgstPct) || 0) : 0;
+  const addlIgstNum = addlChargeOn && addlGstOn ? (Number(addlIgstPct) || 0) : 0;
+  const addlCgstAmt = +(addlChargeNum * addlCgstNum / 100).toFixed(2);
+  const addlSgstAmt = +(addlChargeNum * addlSgstNum / 100).toFixed(2);
+  const addlIgstAmt = +(addlChargeNum * addlIgstNum / 100).toFixed(2);
+  const addlLineTotal = +(addlChargeNum + addlCgstAmt + addlSgstAmt + addlIgstAmt).toFixed(2);
+  const totalAmount = +(baseNum + cgstAmt + sgstAmt + igstAmt + addlLineTotal).toFixed(2);
   const [remarks, setRemarks] = useState(editInvoice?.remarks ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -224,6 +307,10 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
     if (!invoiceNo.trim()) { setError('Invoice number is required'); return; }
     if (baseNum <= 0) { setError('Enter a valid base amount'); return; }
     if (totalAmount <= 0) { setError('Total amount must be greater than zero'); return; }
+    if (addlChargeOn && addlChargeNum > 0 && !addlReason.trim()) {
+      setError('Reason is required when additional charge is entered');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -241,6 +328,11 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
         cgst_pct: cgstNum,
         sgst_pct: sgstNum,
         igst_pct: igstNum,
+        additional_charge: addlChargeNum,
+        additional_charge_cgst_pct: addlCgstNum,
+        additional_charge_sgst_pct: addlSgstNum,
+        additional_charge_igst_pct: addlIgstNum,
+        additional_charge_reason: addlChargeNum > 0 ? addlReason.trim() : null,
         remarks: remarks.trim() || null,
       };
 
@@ -470,9 +562,108 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
             </div>
           </div>
           <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between">
-            <span className="text-sm text-gray-600">Total Invoice Amount</span>
-            <span className="text-lg font-semibold text-[#1a3c5e]">{formatINR(totalAmount)}</span>
+            <span className="text-sm text-gray-600">Sub-total (base + GST)</span>
+            <span className="text-sm font-medium text-gray-800">
+              {formatINR(+(baseNum + cgstAmt + sgstAmt + igstAmt).toFixed(2))}
+            </span>
           </div>
+        </div>
+
+        {/* Additional charge */}
+        <div className="mb-4 p-4 bg-amber-50/40 rounded-lg border border-amber-100">
+          <label className="flex items-center gap-2 cursor-pointer mb-3">
+            <input
+              type="checkbox"
+              checked={addlChargeOn}
+              onChange={e => setAddlChargeOn(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            <span className="text-xs font-medium text-gray-700">Additional charge (transport, loading, etc.)</span>
+          </label>
+
+          {addlChargeOn && (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Amount (₹) *</label>
+                  <input
+                    type="number"
+                    value={addlCharge}
+                    onChange={e => setAddlCharge(e.target.value)}
+                    placeholder="0"
+                    min="0"
+                    step="0.01"
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200"
+                  />
+                </div>
+                <div>
+                  <label className="flex items-center gap-2 cursor-pointer mt-6">
+                    <input
+                      type="checkbox"
+                      checked={addlGstOn}
+                      onChange={e => setAddlGstOn(e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    <span className="text-xs text-gray-700">Apply GST to this charge</span>
+                  </label>
+                </div>
+              </div>
+
+              {addlGstOn && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">CGST %</label>
+                    <input
+                      type="number" value={addlCgstPct} onChange={e => setAddlCgstPct(e.target.value)}
+                      placeholder="0" min="0" max="100" step="0.01"
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200"
+                    />
+                    <div className="text-[11px] text-gray-400 mt-1">{formatINR(addlCgstAmt)}</div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">SGST %</label>
+                    <input
+                      type="number" value={addlSgstPct} onChange={e => setAddlSgstPct(e.target.value)}
+                      placeholder="0" min="0" max="100" step="0.01"
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200"
+                    />
+                    <div className="text-[11px] text-gray-400 mt-1">{formatINR(addlSgstAmt)}</div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">IGST %</label>
+                    <input
+                      type="number" value={addlIgstPct} onChange={e => setAddlIgstPct(e.target.value)}
+                      placeholder="0" min="0" max="100" step="0.01"
+                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200"
+                    />
+                    <div className="text-[11px] text-gray-400 mt-1">{formatINR(addlIgstAmt)}</div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mb-1">
+                <label className="block text-xs text-gray-500 mb-1">Reason *</label>
+                <input
+                  value={addlReason}
+                  onChange={e => setAddlReason(e.target.value)}
+                  placeholder="e.g. Transport, loading, packing, handling..."
+                  maxLength={500}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200"
+                />
+              </div>
+
+              <div className="mt-2 pt-2 border-t border-amber-200 flex items-center justify-between">
+                <span className="text-xs text-gray-600">Additional line total</span>
+                <span className="text-sm font-medium text-amber-800">{formatINR(addlLineTotal)}</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Grand total */}
+        <div className="mb-4 flex items-center justify-between px-4 py-3 bg-[#1a3c5e]/5 rounded-lg">
+          <span className="text-sm font-medium text-gray-700">Total Invoice Amount</span>
+          <span className="text-lg font-semibold text-[#1a3c5e]">{formatINR(totalAmount)}</span>
         </div>
 
         {/* Row 5: Remarks */}

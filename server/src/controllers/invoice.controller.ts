@@ -35,6 +35,13 @@ const createInvoiceSchema = z.object({
   cgst_pct: z.number().min(0).max(100).optional(),
   sgst_pct: z.number().min(0).max(100).optional(),
   igst_pct: z.number().min(0).max(100).optional(),
+  // Additional charge (e.g. transport, loading). Separate GST % from the base.
+  // Reason is required at the controller level when additional_charge > 0.
+  additional_charge: z.number().nonnegative('Additional charge must be ≥ 0').max(1e12).optional(),
+  additional_charge_cgst_pct: z.number().min(0).max(100).optional(),
+  additional_charge_sgst_pct: z.number().min(0).max(100).optional(),
+  additional_charge_igst_pct: z.number().min(0).max(100).optional(),
+  additional_charge_reason: z.string().max(500).nullable().optional(),
   remarks: z.string().max(2000).nullable().optional(),
   // H5: client sets this to true only after user confirms the duplicate warning
   confirm_duplicate: z.boolean().optional(),
@@ -48,6 +55,9 @@ const SITE_COLUMNS = `
   id, sl_no, internal_no, month, invoice_date, vendor_id, vendor_name,
   invoice_no, po_number, purpose, site, invoice_amount,
   base_amount, cgst_pct, sgst_pct, igst_pct,
+  additional_charge, additional_charge_cgst_pct, additional_charge_sgst_pct,
+  additional_charge_igst_pct, additional_charge_reason,
+  disputed, dispute_severity, dispute_reason, disputed_by, disputed_at,
   payment_status,
   remarks, pushed, pushed_at, minor_payment,
   created_by, created_at, updated_at
@@ -65,10 +75,16 @@ export async function getInvoices(req: Request, res: Response, next: NextFunctio
   try {
     const { role, site } = req.user!;
 
+    // Computed fields shared by all roles: allocated_credits + effective_payable
+    const CN_FIELDS = `
+      COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = invoices.id), 0)::NUMERIC(14,2) AS allocated_credits,
+      (invoice_amount - COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = invoices.id), 0))::NUMERIC(14,2) AS effective_payable
+    `;
+
     if (role === 'site') {
       // Site: own site only, NO payment data
       const invoices = await query<InvoiceRow>(
-        `SELECT ${SITE_COLUMNS},
+        `SELECT ${SITE_COLUMNS}, ${CN_FIELDS},
            (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = invoices.id)::int AS attachment_count
          FROM invoices WHERE site = $1 AND deleted_at IS NULL ORDER BY invoice_date DESC`,
         [site]
@@ -77,7 +93,7 @@ export async function getInvoices(req: Request, res: Response, next: NextFunctio
     } else {
       // ho + mgmt: all invoices, full data
       const invoices = await query<InvoiceRow>(
-        `SELECT ${FULL_COLUMNS},
+        `SELECT ${FULL_COLUMNS}, ${CN_FIELDS},
            (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = invoices.id)::int AS attachment_count
          FROM invoices WHERE deleted_at IS NULL ORDER BY invoice_date DESC`
       );
@@ -154,18 +170,36 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
     const cgstPct = data.cgst_pct ?? 0;
     const sgstPct = data.sgst_pct ?? 0;
     const igstPct = data.igst_pct ?? 0;
+    const addlCharge = data.additional_charge ?? 0;
+    const addlCgstPct = data.additional_charge_cgst_pct ?? 0;
+    const addlSgstPct = data.additional_charge_sgst_pct ?? 0;
+    const addlIgstPct = data.additional_charge_igst_pct ?? 0;
+    const addlReason = data.additional_charge_reason?.trim() || null;
+
+    // Reason is mandatory when additional charge > 0 (agreed business rule)
+    if (addlCharge > 0 && !addlReason) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'Reason is required when additional charge is entered',
+      });
+      return;
+    }
 
     const invoice = await queryOne<InvoiceRow>(
       `INSERT INTO invoices (
         month, invoice_date, vendor_id, vendor_name, invoice_no, po_number,
         purpose, site, invoice_amount, base_amount, cgst_pct, sgst_pct, igst_pct,
+        additional_charge, additional_charge_cgst_pct, additional_charge_sgst_pct,
+        additional_charge_igst_pct, additional_charge_reason,
         remarks, created_by, internal_no
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                $14, $15, $16, $17, $18, $19, $20, $21)
       RETURNING *`,
       [
         data.month, data.invoice_date, data.vendor_id, data.vendor_name,
         data.invoice_no, data.po_number ?? null, data.purpose, data.site,
         data.invoice_amount, baseAmount, cgstPct, sgstPct, igstPct,
+        addlCharge, addlCgstPct, addlSgstPct, addlIgstPct, addlReason,
         data.remarks ?? null, userId, internalNo,
       ]
     );
@@ -218,8 +252,31 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
     const ALLOWED_UPDATE_FIELDS = [
       'month', 'invoice_date', 'vendor_id', 'vendor_name', 'invoice_no',
       'po_number', 'purpose', 'site', 'invoice_amount',
-      'base_amount', 'cgst_pct', 'sgst_pct', 'igst_pct', 'remarks',
+      'base_amount', 'cgst_pct', 'sgst_pct', 'igst_pct',
+      'additional_charge', 'additional_charge_cgst_pct',
+      'additional_charge_sgst_pct', 'additional_charge_igst_pct',
+      'additional_charge_reason',
+      'remarks',
     ];
+
+    // If additional_charge is being set > 0, require a reason either in this
+    // update or already on the row.
+    if (data.additional_charge !== undefined && data.additional_charge > 0) {
+      const incomingReason = (data.additional_charge_reason ?? '').trim();
+      if (!incomingReason) {
+        const existingReason = await queryOne<{ additional_charge_reason: string | null }>(
+          'SELECT additional_charge_reason FROM invoices WHERE id = $1',
+          [id]
+        );
+        if (!existingReason?.additional_charge_reason) {
+          res.status(400).json({
+            error: 'Bad Request',
+            message: 'Reason is required when additional charge is entered',
+          });
+          return;
+        }
+      }
+    }
 
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -470,6 +527,103 @@ export async function purgeOldBinInvoices(_req: Request, res: Response, next: Ne
     }
 
     res.json({ purged: purgedCount });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const markDisputeSchema = z.object({
+  severity: z.enum(['minor', 'major']),
+  reason: z.string().min(1, 'Dispute reason is required').max(1000),
+});
+
+const clearDisputeSchema = z.object({
+  reason: z.string().min(1, 'Clearance reason is required').max(1000).optional(),
+});
+
+export async function markDisputed(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const id = req.params.id as string;
+    const data = markDisputeSchema.parse(req.body);
+    const { role, site, id: userId } = req.user!;
+
+    const existing = await queryOne<InvoiceRow>(
+      'SELECT id, site, invoice_no FROM invoices WHERE id = $1 AND deleted_at IS NULL',
+      [id]
+    );
+    if (!existing) {
+      res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
+      return;
+    }
+    if (role === 'site' && existing.site !== site) {
+      res.status(403).json({
+        error: 'Forbidden',
+        message: 'You can only dispute invoices for your own site',
+      });
+      return;
+    }
+
+    const invoice = await queryOne<InvoiceRow>(
+      `UPDATE invoices
+       SET disputed = TRUE, dispute_severity = $1, dispute_reason = $2,
+           disputed_by = $3, disputed_at = NOW(), updated_at = NOW()
+       WHERE id = $4
+       RETURNING *`,
+      [data.severity, data.reason, userId, id]
+    );
+
+    await logAudit({
+      userId,
+      action: `Disputed invoice #${existing.invoice_no ?? id} (${data.severity}) — ${data.reason}`,
+      invoiceId: id,
+      metadata: { severity: data.severity, reason: data.reason },
+    });
+
+    res.json(invoice);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function clearDispute(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const id = req.params.id as string;
+    const data = clearDisputeSchema.parse(req.body ?? {});
+    const { role, site, id: userId } = req.user!;
+
+    const existing = await queryOne<InvoiceRow>(
+      'SELECT id, site, invoice_no FROM invoices WHERE id = $1 AND deleted_at IS NULL',
+      [id]
+    );
+    if (!existing) {
+      res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
+      return;
+    }
+    if (role === 'site' && existing.site !== site) {
+      res.status(403).json({
+        error: 'Forbidden',
+        message: 'You can only clear disputes for your own site',
+      });
+      return;
+    }
+
+    const invoice = await queryOne<InvoiceRow>(
+      `UPDATE invoices
+       SET disputed = FALSE, dispute_severity = NULL, dispute_reason = NULL,
+           disputed_by = NULL, disputed_at = NULL, updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+
+    await logAudit({
+      userId,
+      action: `Cleared dispute on invoice #${existing.invoice_no ?? id}${data.reason ? ` — ${data.reason}` : ''}`,
+      invoiceId: id,
+      metadata: data.reason ? { clearance_reason: data.reason } : undefined,
+    });
+
+    res.json(invoice);
   } catch (err) {
     next(err);
   }
