@@ -11,6 +11,7 @@ const HO_TABS = [
   { to: '/cashflow', label: 'Cashflow' },
   { to: '/vendors', label: 'Vendor Master' },
   { to: '/bank-reconciliation', label: 'Bank Reconsideration' },
+  { to: '/petty-cash', label: 'Petty Cash' },
   { to: '/audit', label: 'Audit Trail' },
   { to: '/bin', label: 'Bin' },
 ];
@@ -27,6 +28,7 @@ const SITE_TABS = [
   { to: '/site-dashboard', label: 'Dashboard' },
   { to: '/my-invoices', label: 'My Invoices' },
   { to: '/site-expenditure', label: 'Expenditure' },
+  { to: '/site-petty-cash', label: 'Petty Cash' },
   { to: '/vendors', label: 'Vendor Master' },
 ];
 

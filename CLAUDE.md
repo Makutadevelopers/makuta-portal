@@ -22,6 +22,16 @@ invoices. Head Office processes payments. MD views executive dashboards.
 - Overdue = today > due_date AND balance > 0
 - All server responses must filter data by role — never trust client role claims
 
+## Petty cash
+- HO hands a per-site cash float to site accountants; site logs expenses
+  against it. Balance per site = Σ(disbursements) − Σ(expenses).
+- A petty-cash expense may optionally pay a site's invoice (≤ ₹50k for site
+  role); in that case a `payments` row is created with payment_type =
+  'petty_cash' so invoice.payment_status auto-recomputes.
+- Visibility: HO sees all sites; site sees own site only; MD has no access.
+- No approval workflow, no receipts required, no close-out — float rolls
+  forward indefinitely.
+
 ## Tech stack
 - Frontend: React 18 + TypeScript + Tailwind CSS + Vite
 - Backend: Node.js + Express + TypeScript

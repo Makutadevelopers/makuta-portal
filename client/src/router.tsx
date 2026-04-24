@@ -13,6 +13,7 @@ import VendorDetail from './pages/ho/VendorDetail';
 import AuditTrail from './pages/ho/AuditTrail';
 import Bin from './pages/ho/Bin';
 import BankReconciliation from './pages/ho/BankReconciliation';
+import PettyCash from './pages/ho/PettyCash';
 
 // Mgmt pages
 import MgmtOverview from './pages/mgmt/MgmtOverview';
@@ -25,6 +26,7 @@ import EmployeeManagement from './pages/mgmt/EmployeeManagement';
 import SiteDashboard from './pages/site/SiteDashboard';
 import MyInvoices from './pages/site/MyInvoices';
 import SiteExpenditure from './pages/site/SiteExpenditure';
+import SitePettyCash from './pages/site/SitePettyCash';
 
 function ProtectedRoute({ children, allowed }: { children: React.ReactNode; allowed: Role[] }) {
   const { isAuthenticated, user } = useAuth();
@@ -69,6 +71,7 @@ export default function AppRouter() {
         <Route path="/audit" element={<ProtectedRoute allowed={['ho']}><AuditTrail /></ProtectedRoute>} />
         <Route path="/bin" element={<ProtectedRoute allowed={['ho']}><Bin /></ProtectedRoute>} />
         <Route path="/bank-reconciliation" element={<ProtectedRoute allowed={['ho']}><BankReconciliation /></ProtectedRoute>} />
+        <Route path="/petty-cash" element={<ProtectedRoute allowed={['ho']}><PettyCash /></ProtectedRoute>} />
 
         {/* Mgmt routes */}
         <Route path="/overview" element={<ProtectedRoute allowed={['mgmt']}><MgmtOverview /></ProtectedRoute>} />
@@ -81,6 +84,7 @@ export default function AppRouter() {
         <Route path="/site-dashboard" element={<ProtectedRoute allowed={['site']}><SiteDashboard /></ProtectedRoute>} />
         <Route path="/my-invoices" element={<ProtectedRoute allowed={['site']}><MyInvoices /></ProtectedRoute>} />
         <Route path="/site-expenditure" element={<ProtectedRoute allowed={['site']}><SiteExpenditure /></ProtectedRoute>} />
+        <Route path="/site-petty-cash" element={<ProtectedRoute allowed={['site']}><SitePettyCash /></ProtectedRoute>} />
 
         {/* Catch-all */}
         <Route path="*" element={<Navigate to="/" replace />} />
