@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, FormEvent, DragEvent, ChangeEvent } from 'react';
+import { useState, useMemo, useEffect, useRef, Fragment, FormEvent, DragEvent, ChangeEvent } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useVendors } from '../../hooks/useVendors';
@@ -19,7 +19,7 @@ export default function MyInvoices() {
   const [search, setSearch] = useState('');
   const [fPurpose, setFPurpose] = useState('All');
   const [showForm, setShowForm] = useState(false);
-  const [editInv, setEditInv] = useState<Invoice | null>(null);
+  const [expandedEditId, setExpandedEditId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [disputeInv, setDisputeInv] = useState<Invoice | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -56,7 +56,7 @@ export default function MyInvoices() {
             Bulk Import
           </button>
           <button
-            onClick={() => { setEditInv(null); setShowForm(true); }}
+            onClick={() => { setExpandedEditId(null); setShowForm(true); }}
             className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]"
           >
             + New Invoice
@@ -86,15 +86,15 @@ export default function MyInvoices() {
         />
       )}
 
-      {/* Invoice Form */}
+      {/* New Invoice Form (top). Edit opens inline below the row — see table below. */}
       {showForm && (
         <InvoiceForm
-          key={editInv?.id ?? 'new'}
+          key="new"
           site={user?.site ?? ''}
           vendors={vendors}
-          editInvoice={editInv}
-          onCancel={() => { setShowForm(false); setEditInv(null); }}
-          onSaved={() => { setShowForm(false); setEditInv(null); notify(editInv ? 'Invoice updated' : 'Invoice added'); refresh(); }}
+          editInvoice={null}
+          onCancel={() => setShowForm(false)}
+          onSaved={() => { setShowForm(false); notify('Invoice added'); refresh(); }}
         />
       )}
 
@@ -130,7 +130,8 @@ export default function MyInvoices() {
             </thead>
             <tbody>
               {filtered.map(inv => (
-                <tr key={inv.id} className={`border-t border-gray-50 hover:bg-gray-50/50 ${selectedId === inv.id ? 'bg-blue-50/60' : ''} ${inv.disputed ? (inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400') : ''}`}>
+                <Fragment key={inv.id}>
+                <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${selectedId === inv.id ? 'bg-blue-50/60' : ''} ${inv.disputed ? (inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400') : ''}`}>
                   <td className="px-4 py-3">
                     <input
                       type="radio"
@@ -185,13 +186,28 @@ export default function MyInvoices() {
                     <div className="flex items-center gap-3">
                       {!inv.pushed && (
                         <span
-                          onClick={() => { setEditInv(inv); setShowForm(true); }}
+                          onClick={() => setExpandedEditId(expandedEditId === inv.id ? null : inv.id)}
                           className="text-xs text-blue-600 cursor-pointer hover:underline"
-                        >Edit</span>
+                        >{expandedEditId === inv.id ? 'Close' : 'Edit'}</span>
                       )}
                     </div>
                   </td>
                 </tr>
+                {expandedEditId === inv.id && (
+                  <tr className="bg-gray-50/60 border-t border-gray-100">
+                    <td colSpan={11} className="px-4 py-4">
+                      <InvoiceForm
+                        key={`edit-${inv.id}`}
+                        site={user?.site ?? ''}
+                        vendors={vendors}
+                        editInvoice={inv}
+                        onCancel={() => setExpandedEditId(null)}
+                        onSaved={() => { setExpandedEditId(null); notify('Invoice updated'); refresh(); }}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
               {filtered.length === 0 && (
                 <tr><td colSpan={11} className="px-4 py-10 text-center text-gray-400 text-sm">No invoices match your filters.</td></tr>
