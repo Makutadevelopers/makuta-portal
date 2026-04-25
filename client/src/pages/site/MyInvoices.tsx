@@ -11,6 +11,7 @@ import AppShell from '../../components/layout/AppShell';
 import BulkImportModal from '../../components/shared/BulkImportModal';
 import DisputeModal from '../../components/shared/DisputeModal';
 import PayFromPettyCashModal from '../../components/shared/PayFromPettyCashModal';
+import SiteBulkPayModal from '../../components/shared/SiteBulkPayModal';
 import { useToast } from '../../context/ToastContext';
 
 const MINOR_LIMIT = 50000;
@@ -26,9 +27,24 @@ export default function MyInvoices() {
   const [showImport, setShowImport] = useState(false);
   const [disputeInv, setDisputeInv] = useState<Invoice | null>(null);
   const [payInv, setPayInv] = useState<Invoice | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [bulkPayOpen, setBulkPayOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const { notify } = useToast();
-  const selectedInvoice = selectedId ? invoices.find(i => i.id === selectedId) ?? null : null;
+  const selectedInvoices = useMemo(
+    () => invoices.filter(i => selectedIds.has(i.id)),
+    [invoices, selectedIds]
+  );
+  const selectedInvoice = selectedIds.size === 1 ? selectedInvoices[0] ?? null : null;
+  const bulkPayable = selectedInvoices.filter(i => !i.pushed && i.payment_status !== 'Paid');
+
+  function toggleSelected(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function clearSelection() { setSelectedIds(new Set()); }
 
   const filtered = useMemo(() => invoices.filter(i => {
     if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
@@ -43,7 +59,21 @@ export default function MyInvoices() {
     <AppShell>
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div className="text-lg font-medium text-gray-900">My Invoices</div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {selectedIds.size > 0 && (
+            <span className="text-xs text-gray-500 mr-1">
+              {selectedIds.size} selected · <button type="button" onClick={clearSelection} className="text-blue-600 hover:underline">clear</button>
+            </span>
+          )}
+          {bulkPayable.length > 0 && (
+            <button
+              onClick={() => setBulkPayOpen(true)}
+              className="px-3 py-2 bg-green-700 text-white text-sm font-medium rounded-lg hover:bg-green-800"
+              title="Pay selected invoices from petty cash (each ≤ ₹50,000)"
+            >
+              Pay Selected ({bulkPayable.length})
+            </button>
+          )}
           {selectedInvoice && (
             <button
               onClick={() => setDisputeInv(selectedInvoice)}
@@ -104,6 +134,22 @@ export default function MyInvoices() {
         />
       )}
 
+      {/* Bulk pay from petty cash modal */}
+      {bulkPayOpen && bulkPayable.length > 0 && (
+        <SiteBulkPayModal
+          invoices={bulkPayable}
+          site={user?.site ?? ''}
+          onClose={() => setBulkPayOpen(false)}
+          onDone={(paid, failed) => {
+            setBulkPayOpen(false);
+            clearSelection();
+            if (failed === 0) notify(`Paid ${paid} invoice${paid > 1 ? 's' : ''} from petty cash`);
+            else notify(`${paid} paid, ${failed} failed`, 'error');
+            refresh();
+          }}
+        />
+      )}
+
       {/* New Invoice Form (top). Edit opens inline below the row — see table below. */}
       {showForm && (
         <InvoiceForm
@@ -138,7 +184,27 @@ export default function MyInvoices() {
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-2.5 w-8"></th>
+                <th className="px-4 py-2.5 w-8">
+                  {(() => {
+                    const eligible = filtered.filter(i => !i.pushed && i.payment_status !== 'Paid');
+                    const allSelected = eligible.length > 0 && eligible.every(i => selectedIds.has(i.id));
+                    const someSelected = eligible.some(i => selectedIds.has(i.id));
+                    return (
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                        disabled={eligible.length === 0}
+                        onChange={() => {
+                          if (allSelected) clearSelection();
+                          else setSelectedIds(new Set(eligible.map(i => i.id)));
+                        }}
+                        className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
+                        title="Select all draft, unpaid invoices"
+                      />
+                    );
+                  })()}
+                </th>
                 {['#', 'Int. No', 'Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Amount', 'Status', 'Actions'].map(h => (
                   <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap ${h === 'Amount' ? 'text-right' : 'text-left'}`}>
                     {h}
@@ -149,12 +215,12 @@ export default function MyInvoices() {
             <tbody>
               {filtered.map(inv => (
                 <Fragment key={inv.id}>
-                <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${selectedId === inv.id ? 'bg-blue-50/60' : ''} ${inv.disputed ? (inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400') : ''}`}>
+                <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${selectedIds.has(inv.id) ? 'bg-blue-50/60' : ''} ${inv.disputed ? (inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400') : ''}`}>
                   <td className="px-4 py-3">
                     <input
                       type="checkbox"
-                      checked={selectedId === inv.id}
-                      onChange={() => setSelectedId(selectedId === inv.id ? null : inv.id)}
+                      checked={selectedIds.has(inv.id)}
+                      onChange={() => toggleSelected(inv.id)}
                       className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
                     />
                   </td>
