@@ -384,6 +384,33 @@ export async function bulkPushInvoices(req: Request, res: Response, next: NextFu
   }
 }
 
+export async function bulkDeleteInvoices(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const bulkSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) });
+    const { ids } = bulkSchema.parse(req.body);
+    const userId = req.user!.id;
+
+    // Soft-delete only draft (non-pushed) invoices that aren't already in the bin.
+    // Finalized invoices must be undone first — silently skipped here, count surfaces in response.
+    const result = await query<InvoiceRow>(
+      `UPDATE invoices
+       SET deleted_at = NOW(), deleted_by = $1
+       WHERE id = ANY($2) AND pushed = FALSE AND deleted_at IS NULL
+       RETURNING id, invoice_no`,
+      [userId, ids]
+    );
+
+    await logAudit({
+      userId,
+      action: `Bulk moved ${result.length} invoice(s) to bin`,
+    });
+
+    res.json({ deleted: result.length, total: ids.length });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function deleteInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const id = req.params.id as string;

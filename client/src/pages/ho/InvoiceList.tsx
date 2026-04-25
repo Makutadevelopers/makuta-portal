@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { useVendors } from '../../hooks/useVendors';
-import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, getInvoiceHistory, AuditLogEntry, createInvoice, updateInvoice, deleteInvoice as deleteInvoiceApi } from '../../api/invoices';
+import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, bulkDeleteInvoices, getInvoiceHistory, AuditLogEntry, createInvoice, updateInvoice, deleteInvoice as deleteInvoiceApi } from '../../api/invoices';
 import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
 import { createPayment, getPayments } from '../../api/payments';
 import { bulkPayInvoices } from '../../api/reconciliation';
@@ -177,6 +177,28 @@ export default function InvoiceList() {
     }
   }
 
+  async function handleBulkDelete() {
+    // Bulk delete only applies to draft (non-pushed) invoices — finalized ones must be undone first.
+    const draftIds = Array.from(selected).filter(id => {
+      const inv = invoices.find(x => x.id === id);
+      return inv && !inv.pushed;
+    });
+    const skipped = selected.size - draftIds.length;
+    if (draftIds.length === 0) { notify('No draft invoices in selection to delete'); return; }
+    if (!confirm(`Move ${draftIds.length} invoice${draftIds.length > 1 ? 's' : ''} to bin?${skipped > 0 ? `\n(${skipped} finalized invoice${skipped > 1 ? 's' : ''} will be skipped)` : ''}\n\nYou can restore from Bin within 30 days.`)) return;
+    setBulkLoading(true);
+    try {
+      const result = await bulkDeleteInvoices(draftIds);
+      notify(`Moved ${result.deleted} invoice${result.deleted > 1 ? 's' : ''} to bin${skipped > 0 ? ` · ${skipped} skipped` : ''}`);
+      setSelected(new Set());
+      refresh();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Bulk delete failed');
+    } finally {
+      setBulkLoading(false);
+    }
+  }
+
   async function handlePush(id: string) {
     await pushInvoice(id);
     notify('Invoice finalized');
@@ -294,6 +316,11 @@ export default function InvoiceList() {
           <button onClick={() => setShowBulkPay(true)}
             className="px-4 py-1.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700">
             Bulk Pay (1 Cheque / Txn)
+          </button>
+          <button onClick={handleBulkDelete} disabled={bulkLoading}
+            className="px-4 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50"
+            title="Move selected draft invoices to bin (finalized ones are skipped)">
+            Delete {selected.size}
           </button>
           {selected.size === 1 && (() => {
             const inv = invoices.find(i => selected.has(i.id));

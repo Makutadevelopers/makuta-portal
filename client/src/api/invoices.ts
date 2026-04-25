@@ -72,6 +72,13 @@ export function bulkFinalizeInvoices(ids: string[]): Promise<{ finalized: number
   });
 }
 
+export function bulkDeleteInvoices(ids: string[]): Promise<{ deleted: number; total: number }> {
+  return apiFetch('/invoices/bulk-delete', {
+    method: 'POST',
+    body: JSON.stringify({ ids }),
+  });
+}
+
 export interface AuditLogEntry {
   id: string;
   user_id: string;
