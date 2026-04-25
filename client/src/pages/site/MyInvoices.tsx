@@ -10,7 +10,10 @@ import { PURPOSES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
 import BulkImportModal from '../../components/shared/BulkImportModal';
 import DisputeModal from '../../components/shared/DisputeModal';
+import PayFromPettyCashModal from '../../components/shared/PayFromPettyCashModal';
 import { useToast } from '../../context/ToastContext';
+
+const MINOR_LIMIT = 50000;
 
 export default function MyInvoices() {
   const { user } = useAuth();
@@ -22,6 +25,7 @@ export default function MyInvoices() {
   const [expandedEditId, setExpandedEditId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [disputeInv, setDisputeInv] = useState<Invoice | null>(null);
+  const [payInv, setPayInv] = useState<Invoice | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const { notify } = useToast();
   const selectedInvoice = selectedId ? invoices.find(i => i.id === selectedId) ?? null : null;
@@ -86,6 +90,20 @@ export default function MyInvoices() {
         />
       )}
 
+      {/* Pay from petty cash modal */}
+      {payInv && (
+        <PayFromPettyCashModal
+          invoice={payInv}
+          onClose={() => setPayInv(null)}
+          onDone={() => {
+            const amt = Number(payInv.invoice_amount);
+            setPayInv(null);
+            notify(`Paid ${formatINR(amt)} from petty cash`);
+            refresh();
+          }}
+        />
+      )}
+
       {/* New Invoice Form (top). Edit opens inline below the row — see table below. */}
       {showForm && (
         <InvoiceForm
@@ -134,12 +152,10 @@ export default function MyInvoices() {
                 <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${selectedId === inv.id ? 'bg-blue-50/60' : ''} ${inv.disputed ? (inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400') : ''}`}>
                   <td className="px-4 py-3">
                     <input
-                      type="radio"
-                      name="selected-invoice"
+                      type="checkbox"
                       checked={selectedId === inv.id}
-                      onChange={() => setSelectedId(inv.id)}
-                      onClick={() => selectedId === inv.id && setSelectedId(null)}
-                      className="border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
+                      onChange={() => setSelectedId(selectedId === inv.id ? null : inv.id)}
+                      className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
                     />
                   </td>
                   <td className="px-4 py-3 text-gray-400">{inv.sl_no}</td>
@@ -189,6 +205,15 @@ export default function MyInvoices() {
                           onClick={() => setExpandedEditId(expandedEditId === inv.id ? null : inv.id)}
                           className="text-xs text-blue-600 cursor-pointer hover:underline"
                         >{expandedEditId === inv.id ? 'Close' : 'Edit'}</span>
+                      )}
+                      {!inv.pushed
+                        && inv.payment_status !== 'Paid'
+                        && Number(inv.effective_payable ?? inv.invoice_amount) <= MINOR_LIMIT && (
+                        <span
+                          onClick={() => setPayInv(inv)}
+                          className="text-xs text-green-700 cursor-pointer hover:underline"
+                          title="Pay this invoice from your petty cash float"
+                        >Pay</span>
                       )}
                     </div>
                   </td>
@@ -247,9 +272,9 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
   const [baseAmount, setBaseAmount] = useState(
     editInvoice ? String(editInvoice.base_amount ?? editInvoice.invoice_amount) : ''
   );
-  const [cgstPct, setCgstPct] = useState(editInvoice ? String(editInvoice.cgst_pct ?? 0) : '0');
-  const [sgstPct, setSgstPct] = useState(editInvoice ? String(editInvoice.sgst_pct ?? 0) : '0');
-  const [igstPct, setIgstPct] = useState(editInvoice ? String(editInvoice.igst_pct ?? 0) : '0');
+  const [cgstPct, setCgstPct] = useState(editInvoice && Number(editInvoice.cgst_pct) ? String(editInvoice.cgst_pct) : '');
+  const [sgstPct, setSgstPct] = useState(editInvoice && Number(editInvoice.sgst_pct) ? String(editInvoice.sgst_pct) : '');
+  const [igstPct, setIgstPct] = useState(editInvoice && Number(editInvoice.igst_pct) ? String(editInvoice.igst_pct) : '');
 
   const [addlChargeOn, setAddlChargeOn] = useState(!!editInvoice && Number(editInvoice.additional_charge) > 0);
   const [addlCharge, setAddlCharge] = useState(
@@ -262,9 +287,9 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
       Number(editInvoice.additional_charge_igst_pct) > 0
     )
   );
-  const [addlCgstPct, setAddlCgstPct] = useState(editInvoice ? String(editInvoice.additional_charge_cgst_pct ?? 0) : '0');
-  const [addlSgstPct, setAddlSgstPct] = useState(editInvoice ? String(editInvoice.additional_charge_sgst_pct ?? 0) : '0');
-  const [addlIgstPct, setAddlIgstPct] = useState(editInvoice ? String(editInvoice.additional_charge_igst_pct ?? 0) : '0');
+  const [addlCgstPct, setAddlCgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_cgst_pct) ? String(editInvoice.additional_charge_cgst_pct) : '');
+  const [addlSgstPct, setAddlSgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_sgst_pct) ? String(editInvoice.additional_charge_sgst_pct) : '');
+  const [addlIgstPct, setAddlIgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_igst_pct) ? String(editInvoice.additional_charge_igst_pct) : '');
   const [addlReason, setAddlReason] = useState(editInvoice?.additional_charge_reason ?? '');
 
   const baseNum = Number(baseAmount) || 0;
@@ -372,7 +397,9 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
 
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      const msg = err instanceof Error ? err.message : 'Failed to save';
+      setError(msg);
+      notify(msg);
     } finally {
       setSaving(false);
     }
@@ -806,6 +833,13 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
             </div>
           )}
         </div>
+
+        {/* Inline error right above the actions so it's never out of view */}
+        {error && (
+          <div className="mb-3 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+            {error}
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex items-center gap-3">

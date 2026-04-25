@@ -910,9 +910,9 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   const [baseAmount, setBaseAmount] = useState(
     editInvoice ? String(editInvoice.base_amount ?? editInvoice.invoice_amount) : ''
   );
-  const [cgstPct, setCgstPct] = useState(editInvoice ? String(editInvoice.cgst_pct ?? 0) : '0');
-  const [sgstPct, setSgstPct] = useState(editInvoice ? String(editInvoice.sgst_pct ?? 0) : '0');
-  const [igstPct, setIgstPct] = useState(editInvoice ? String(editInvoice.igst_pct ?? 0) : '0');
+  const [cgstPct, setCgstPct] = useState(editInvoice && Number(editInvoice.cgst_pct) ? String(editInvoice.cgst_pct) : '');
+  const [sgstPct, setSgstPct] = useState(editInvoice && Number(editInvoice.sgst_pct) ? String(editInvoice.sgst_pct) : '');
+  const [igstPct, setIgstPct] = useState(editInvoice && Number(editInvoice.igst_pct) ? String(editInvoice.igst_pct) : '');
 
   const [addlChargeOn, setAddlChargeOn] = useState(!!editInvoice && Number(editInvoice.additional_charge) > 0);
   const [addlCharge, setAddlCharge] = useState(
@@ -925,9 +925,9 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
       Number(editInvoice.additional_charge_igst_pct) > 0
     )
   );
-  const [addlCgstPct, setAddlCgstPct] = useState(editInvoice ? String(editInvoice.additional_charge_cgst_pct ?? 0) : '0');
-  const [addlSgstPct, setAddlSgstPct] = useState(editInvoice ? String(editInvoice.additional_charge_sgst_pct ?? 0) : '0');
-  const [addlIgstPct, setAddlIgstPct] = useState(editInvoice ? String(editInvoice.additional_charge_igst_pct ?? 0) : '0');
+  const [addlCgstPct, setAddlCgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_cgst_pct) ? String(editInvoice.additional_charge_cgst_pct) : '');
+  const [addlSgstPct, setAddlSgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_sgst_pct) ? String(editInvoice.additional_charge_sgst_pct) : '');
+  const [addlIgstPct, setAddlIgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_igst_pct) ? String(editInvoice.additional_charge_igst_pct) : '');
   const [addlReason, setAddlReason] = useState(editInvoice?.additional_charge_reason ?? '');
 
   const baseNum = Number(baseAmount) || 0;
@@ -1018,7 +1018,9 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
       }
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      const msg = err instanceof Error ? err.message : 'Failed to save';
+      setError(msg);
+      notify(msg);
     } finally {
       setSaving(false);
     }
@@ -1305,6 +1307,13 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
             </div>
           )}
         </div>
+
+        {/* Inline error right above the actions so it's never out of view */}
+        {error && (
+          <div className="mb-3 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+            {error}
+          </div>
+        )}
 
         <div className="flex items-center gap-3">
           <button type="submit" disabled={saving || uploading}

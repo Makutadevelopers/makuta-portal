@@ -212,9 +212,9 @@ function CreditNoteForm({
   const [cnDate, setCnDate] = useState(today);
   const [site, setSite] = useState(defaultSite);
   const [baseAmount, setBaseAmount] = useState('');
-  const [cgstPct, setCgstPct] = useState('0');
-  const [sgstPct, setSgstPct] = useState('0');
-  const [igstPct, setIgstPct] = useState('0');
+  const [cgstPct, setCgstPct] = useState('');
+  const [sgstPct, setSgstPct] = useState('');
+  const [igstPct, setIgstPct] = useState('');
   const [remarks, setRemarks] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -296,7 +296,9 @@ function CreditNoteForm({
       notify(`Credit note #${cn.cn_no} saved`);
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      const msg = err instanceof Error ? err.message : 'Failed to save';
+      setError(msg);
+      notify(msg);
     } finally {
       setSaving(false);
     }
@@ -542,6 +544,13 @@ function CreditNoteForm({
             <div className="mt-2 text-xs text-gray-500">{pendingFiles.length} file(s) selected</div>
           )}
         </div>
+
+        {/* Inline error right above the actions so it's never out of view */}
+        {error && (
+          <div className="mb-3 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+            {error}
+          </div>
+        )}
 
         <div className="flex gap-3">
           <button
