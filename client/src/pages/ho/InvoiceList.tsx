@@ -36,6 +36,7 @@ export default function InvoiceList() {
   const [timeline, setTimeline] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [sortBy, setSortBy] = useState<'invoice_date' | 'created_at'>('invoice_date');
   const [expandedEditId, setExpandedEditId] = useState<string | null>(null);
 
   // Sync search from URL query param
@@ -109,14 +110,30 @@ export default function InvoiceList() {
 
   const filtered = useMemo(() => {
     const range = getTimelineRange(timeline);
-    return invoices.filter(i => {
+    // When sorting by upload date, the timeline filter ("Today" / "This Week" / etc.)
+    // should match against the upload time too — otherwise an invoice uploaded today
+    // with a back-dated invoice_date is hidden from the "Today" view.
+    // created_at is a UTC TIMESTAMP; format it in IST so "Today" lines up with what
+    // the user sees in the audit trail.
+    const dateForRange = (i: Invoice): string => {
+      if (sortBy === 'created_at') {
+        const ts = i.created_at;
+        if (!ts) return '';
+        const d = new Date(ts);
+        return isNaN(d.getTime())
+          ? ''
+          : d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+      }
+      return (i.invoice_date || '').slice(0, 10);
+    };
+    const result = invoices.filter(i => {
       if (fSite !== 'All' && i.site !== fSite) return false;
       if (fStatus !== 'All' && i.payment_status !== fStatus) return false;
       if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
       if (range) {
-        const invDate = (i.invoice_date || '').slice(0, 10);
-        if (range.from && invDate < range.from) return false;
-        if (range.to && invDate > range.to) return false;
+        const cmp = dateForRange(i);
+        if (range.from && cmp < range.from) return false;
+        if (range.to && cmp > range.to) return false;
       } else if (fMonth) {
         const invMonth = (i.month || i.invoice_date || '').slice(0, 7);
         if (invMonth !== fMonth) return false;
@@ -127,7 +144,11 @@ export default function InvoiceList() {
       }
       return true;
     });
-  }, [invoices, fSite, fStatus, fPurpose, fMonth, search, timeline, dateFrom, dateTo]);
+    if (sortBy === 'created_at') {
+      result.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    }
+    return result;
+  }, [invoices, fSite, fStatus, fPurpose, fMonth, search, timeline, dateFrom, dateTo, sortBy]);
 
   // Selectable = filtered invoices that still need action
   // (draft → eligible for bulk finalize, unpaid → eligible for bulk pay).
@@ -302,6 +323,12 @@ export default function InvoiceList() {
         </select>
         <input type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        <select value={sortBy} onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at')}
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
+          title="Sort order">
+          <option value="invoice_date">Sort: Invoice date</option>
+          <option value="created_at">Sort: Upload date</option>
+        </select>
         <span className="text-xs text-gray-400 ml-auto">{filtered.length} records</span>
       </div>
 
