@@ -28,6 +28,7 @@ export default function MyInvoices() {
   const [disputeInv, setDisputeInv] = useState<Invoice | null>(null);
   const [payInv, setPayInv] = useState<Invoice | null>(null);
   const [bulkPayOpen, setBulkPayOpen] = useState(false);
+  const [duplicateFrom, setDuplicateFrom] = useState<Invoice | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const { notify } = useToast();
   const selectedInvoices = useMemo(
@@ -153,12 +154,18 @@ export default function MyInvoices() {
       {/* New Invoice Form (top). Edit opens inline below the row — see table below. */}
       {showForm && (
         <InvoiceForm
-          key="new"
+          key={duplicateFrom ? `dup-${duplicateFrom.id}` : 'new'}
           site={user?.site ?? ''}
           vendors={vendors}
           editInvoice={null}
-          onCancel={() => setShowForm(false)}
-          onSaved={() => { setShowForm(false); notify('Invoice added'); refresh(); }}
+          prefillFrom={duplicateFrom}
+          onCancel={() => { setShowForm(false); setDuplicateFrom(null); }}
+          onSaved={() => {
+            setShowForm(false);
+            notify(duplicateFrom ? 'Invoice duplicated' : 'Invoice added');
+            setDuplicateFrom(null);
+            refresh();
+          }}
         />
       )}
 
@@ -281,6 +288,16 @@ export default function MyInvoices() {
                           title="Pay this invoice from your petty cash float"
                         >Pay</span>
                       )}
+                      <span
+                        onClick={() => {
+                          setExpandedEditId(null);
+                          setDuplicateFrom(inv);
+                          setShowForm(true);
+                          if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className="text-xs text-purple-600 cursor-pointer hover:underline"
+                        title="Copy this invoice's details into a new entry"
+                      >Duplicate</span>
                     </div>
                   </td>
                 </tr>
@@ -314,14 +331,18 @@ export default function MyInvoices() {
 // ── Invoice Form ────────────────────────────────────────────────────────────
 interface Vendor { id: string; name: string; payment_terms: number; category: string | null; }
 
-function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
+function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSaved }: {
   site: string;
   vendors: Vendor[];
   editInvoice: Invoice | null;
+  prefillFrom?: Invoice | null;
   onCancel: () => void;
   onSaved: () => void;
 }) {
   const isEdit = !!editInvoice;
+  const isDuplicate = !isEdit && !!prefillFrom;
+  // Treat prefillFrom like editInvoice for initial values, but still create (not update) on save.
+  const seed: Invoice | null = editInvoice ?? prefillFrom ?? null;
   const { notify } = useToast();
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
@@ -329,10 +350,11 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
 
   // Read draft synchronously on the first render so initial state matches it,
   // avoiding a race with the persist effect under React.StrictMode.
+  // Skip drafts when editing or duplicating — we want the source values, not a stale draft.
   const draftRef = useRef<Record<string, unknown> | null | undefined>(undefined);
   if (draftRef.current === undefined) {
     draftRef.current = null;
-    if (!isEdit) {
+    if (!isEdit && !isDuplicate) {
       try {
         const saved = typeof window !== 'undefined' ? window.localStorage.getItem(DRAFT_KEY) : null;
         if (saved) draftRef.current = JSON.parse(saved) as Record<string, unknown>;
@@ -347,39 +369,40 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
   const dBool = (k: string, fallback = false) =>
     typeof dInit?.[k] === 'boolean' ? (dInit[k] as boolean) : fallback;
 
-  const [vendorId, setVendorId] = useState(editInvoice?.vendor_id ?? dStr('vendorId'));
-  const [vendorName, setVendorName] = useState(editInvoice?.vendor_name ?? dStr('vendorName'));
+  const [vendorId, setVendorId] = useState(seed?.vendor_id ?? dStr('vendorId'));
+  const [vendorName, setVendorName] = useState(seed?.vendor_name ?? dStr('vendorName'));
   const [freeTextMode, setFreeTextMode] = useState(dBool('freeTextMode'));
   const [vendorDropdownOpen, setVendorDropdownOpen] = useState(false);
-  const [invoiceNo, setInvoiceNo] = useState(editInvoice?.invoice_no ?? dStr('invoiceNo'));
-  const [poNumber, setPoNumber] = useState(editInvoice?.po_number ?? dStr('poNumber'));
-  const [purpose, setPurpose] = useState(editInvoice?.purpose ?? dStr('purpose', 'Steel'));
-  const [invoiceDate, setInvoiceDate] = useState(editInvoice?.invoice_date?.split('T')[0] ?? dStr('invoiceDate', today));
-  const [month, setMonth] = useState(editInvoice?.month?.split('T')[0] ?? dStr('month', `${currentMonth}-01`));
+  // When duplicating, clear invoice_no — the user must assign a new one.
+  const [invoiceNo, setInvoiceNo] = useState(isDuplicate ? '' : (seed?.invoice_no ?? dStr('invoiceNo')));
+  const [poNumber, setPoNumber] = useState(seed?.po_number ?? dStr('poNumber'));
+  const [purpose, setPurpose] = useState(seed?.purpose ?? dStr('purpose', 'Steel'));
+  const [invoiceDate, setInvoiceDate] = useState(seed?.invoice_date?.split('T')[0] ?? dStr('invoiceDate', today));
+  const [month, setMonth] = useState(seed?.month?.split('T')[0] ?? dStr('month', `${currentMonth}-01`));
   const [baseAmount, setBaseAmount] = useState(
-    editInvoice ? String(editInvoice.base_amount ?? editInvoice.invoice_amount) : dStr('baseAmount')
+    seed ? String(seed.base_amount ?? seed.invoice_amount) : dStr('baseAmount')
   );
-  const [cgstPct, setCgstPct] = useState(editInvoice && Number(editInvoice.cgst_pct) ? String(editInvoice.cgst_pct) : dStr('cgstPct'));
-  const [sgstPct, setSgstPct] = useState(editInvoice && Number(editInvoice.sgst_pct) ? String(editInvoice.sgst_pct) : dStr('sgstPct'));
-  const [igstPct, setIgstPct] = useState(editInvoice && Number(editInvoice.igst_pct) ? String(editInvoice.igst_pct) : dStr('igstPct'));
+  const [cgstPct, setCgstPct] = useState(seed && Number(seed.cgst_pct) ? String(seed.cgst_pct) : dStr('cgstPct'));
+  const [sgstPct, setSgstPct] = useState(seed && Number(seed.sgst_pct) ? String(seed.sgst_pct) : dStr('sgstPct'));
+  const [igstPct, setIgstPct] = useState(seed && Number(seed.igst_pct) ? String(seed.igst_pct) : dStr('igstPct'));
 
   const [addlChargeOn, setAddlChargeOn] = useState(
-    editInvoice ? Number(editInvoice.additional_charge) > 0 : dBool('addlChargeOn')
+    seed ? Number(seed.additional_charge) > 0 : dBool('addlChargeOn')
   );
   const [addlCharge, setAddlCharge] = useState(
-    editInvoice && Number(editInvoice.additional_charge) > 0 ? String(editInvoice.additional_charge) : dStr('addlCharge')
+    seed && Number(seed.additional_charge) > 0 ? String(seed.additional_charge) : dStr('addlCharge')
   );
   const [addlGstOn, setAddlGstOn] = useState(
-    editInvoice
-      ? Number(editInvoice.additional_charge_cgst_pct) > 0 ||
-        Number(editInvoice.additional_charge_sgst_pct) > 0 ||
-        Number(editInvoice.additional_charge_igst_pct) > 0
+    seed
+      ? Number(seed.additional_charge_cgst_pct) > 0 ||
+        Number(seed.additional_charge_sgst_pct) > 0 ||
+        Number(seed.additional_charge_igst_pct) > 0
       : dBool('addlGstOn')
   );
-  const [addlCgstPct, setAddlCgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_cgst_pct) ? String(editInvoice.additional_charge_cgst_pct) : dStr('addlCgstPct'));
-  const [addlSgstPct, setAddlSgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_sgst_pct) ? String(editInvoice.additional_charge_sgst_pct) : dStr('addlSgstPct'));
-  const [addlIgstPct, setAddlIgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_igst_pct) ? String(editInvoice.additional_charge_igst_pct) : dStr('addlIgstPct'));
-  const [addlReason, setAddlReason] = useState(editInvoice?.additional_charge_reason ?? dStr('addlReason'));
+  const [addlCgstPct, setAddlCgstPct] = useState(seed && Number(seed.additional_charge_cgst_pct) ? String(seed.additional_charge_cgst_pct) : dStr('addlCgstPct'));
+  const [addlSgstPct, setAddlSgstPct] = useState(seed && Number(seed.additional_charge_sgst_pct) ? String(seed.additional_charge_sgst_pct) : dStr('addlSgstPct'));
+  const [addlIgstPct, setAddlIgstPct] = useState(seed && Number(seed.additional_charge_igst_pct) ? String(seed.additional_charge_igst_pct) : dStr('addlIgstPct'));
+  const [addlReason, setAddlReason] = useState(seed?.additional_charge_reason ?? dStr('addlReason'));
 
   const baseNum = Number(baseAmount) || 0;
   const cgstNum = Number(cgstPct) || 0;
@@ -397,7 +420,7 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
   const addlIgstAmt = +(addlChargeNum * addlIgstNum / 100).toFixed(2);
   const addlLineTotal = +(addlChargeNum + addlCgstAmt + addlSgstAmt + addlIgstAmt).toFixed(2);
   const totalAmount = +(baseNum + cgstAmt + sgstAmt + igstAmt + addlLineTotal).toFixed(2);
-  const [remarks, setRemarks] = useState(editInvoice?.remarks ?? dStr('remarks'));
+  const [remarks, setRemarks] = useState(seed?.remarks ?? dStr('remarks'));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
@@ -417,7 +440,9 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
   // If the form has no user-entered content, remove the key so a fresh visit
   // doesn't show a "Draft restored" banner over an empty form.
   useEffect(() => {
-    if (isEdit) return;
+    // Don't persist while editing or duplicating — those start from a known
+    // server-side row, not a session-scoped draft.
+    if (isEdit || isDuplicate) return;
     const hasContent =
       !!vendorId || !!vendorName.trim() ||
       !!invoiceNo.trim() || !!poNumber.trim() ||
@@ -441,7 +466,7 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
       }
     } catch {}
   }, [
-    isEdit, DRAFT_KEY,
+    isEdit, isDuplicate, DRAFT_KEY,
     vendorId, vendorName, freeTextMode,
     invoiceNo, poNumber, purpose,
     invoiceDate, month,
@@ -555,8 +580,15 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-6 mb-6">
       <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
-        <div className="text-base font-medium text-gray-900">{isEdit ? 'Edit Invoice' : 'New Invoice Entry'}</div>
-        {!isEdit && draftRestored && (
+        <div className="text-base font-medium text-gray-900">
+          {isEdit ? 'Edit Invoice' : isDuplicate ? 'Duplicate Invoice' : 'New Invoice Entry'}
+        </div>
+        {isDuplicate && prefillFrom && (
+          <div className="text-xs text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-lg">
+            Copied from #{prefillFrom.invoice_no} · {prefillFrom.vendor_name} — assign a new invoice number before saving
+          </div>
+        )}
+        {!isEdit && !isDuplicate && draftRestored && (
           <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg flex items-center gap-2">
             <span>Draft restored from your last session</span>
             <button type="button" onClick={discardDraft} className="text-red-600 hover:underline">Discard</button>
