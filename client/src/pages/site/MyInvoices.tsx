@@ -325,38 +325,61 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
   const { notify } = useToast();
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
+  const DRAFT_KEY = `makuta:invoice-draft:${site}`;
 
-  const [vendorId, setVendorId] = useState(editInvoice?.vendor_id ?? '');
-  const [vendorName, setVendorName] = useState(editInvoice?.vendor_name ?? '');
-  const [freeTextMode, setFreeTextMode] = useState(false);
+  // Read draft synchronously on the first render so initial state matches it,
+  // avoiding a race with the persist effect under React.StrictMode.
+  const draftRef = useRef<Record<string, unknown> | null | undefined>(undefined);
+  if (draftRef.current === undefined) {
+    draftRef.current = null;
+    if (!isEdit) {
+      try {
+        const saved = typeof window !== 'undefined' ? window.localStorage.getItem(DRAFT_KEY) : null;
+        if (saved) draftRef.current = JSON.parse(saved) as Record<string, unknown>;
+      } catch {
+        /* ignore corrupted drafts */
+      }
+    }
+  }
+  const dInit = draftRef.current;
+  const dStr = (k: string, fallback = '') =>
+    typeof dInit?.[k] === 'string' ? (dInit[k] as string) : fallback;
+  const dBool = (k: string, fallback = false) =>
+    typeof dInit?.[k] === 'boolean' ? (dInit[k] as boolean) : fallback;
+
+  const [vendorId, setVendorId] = useState(editInvoice?.vendor_id ?? dStr('vendorId'));
+  const [vendorName, setVendorName] = useState(editInvoice?.vendor_name ?? dStr('vendorName'));
+  const [freeTextMode, setFreeTextMode] = useState(dBool('freeTextMode'));
   const [vendorDropdownOpen, setVendorDropdownOpen] = useState(false);
-  const [invoiceNo, setInvoiceNo] = useState(editInvoice?.invoice_no ?? '');
-  const [poNumber, setPoNumber] = useState(editInvoice?.po_number ?? '');
-  const [purpose, setPurpose] = useState(editInvoice?.purpose ?? 'Steel');
-  const [invoiceDate, setInvoiceDate] = useState(editInvoice?.invoice_date?.split('T')[0] ?? today);
-  const [month, setMonth] = useState(editInvoice?.month?.split('T')[0] ?? `${currentMonth}-01`);
+  const [invoiceNo, setInvoiceNo] = useState(editInvoice?.invoice_no ?? dStr('invoiceNo'));
+  const [poNumber, setPoNumber] = useState(editInvoice?.po_number ?? dStr('poNumber'));
+  const [purpose, setPurpose] = useState(editInvoice?.purpose ?? dStr('purpose', 'Steel'));
+  const [invoiceDate, setInvoiceDate] = useState(editInvoice?.invoice_date?.split('T')[0] ?? dStr('invoiceDate', today));
+  const [month, setMonth] = useState(editInvoice?.month?.split('T')[0] ?? dStr('month', `${currentMonth}-01`));
   const [baseAmount, setBaseAmount] = useState(
-    editInvoice ? String(editInvoice.base_amount ?? editInvoice.invoice_amount) : ''
+    editInvoice ? String(editInvoice.base_amount ?? editInvoice.invoice_amount) : dStr('baseAmount')
   );
-  const [cgstPct, setCgstPct] = useState(editInvoice && Number(editInvoice.cgst_pct) ? String(editInvoice.cgst_pct) : '');
-  const [sgstPct, setSgstPct] = useState(editInvoice && Number(editInvoice.sgst_pct) ? String(editInvoice.sgst_pct) : '');
-  const [igstPct, setIgstPct] = useState(editInvoice && Number(editInvoice.igst_pct) ? String(editInvoice.igst_pct) : '');
+  const [cgstPct, setCgstPct] = useState(editInvoice && Number(editInvoice.cgst_pct) ? String(editInvoice.cgst_pct) : dStr('cgstPct'));
+  const [sgstPct, setSgstPct] = useState(editInvoice && Number(editInvoice.sgst_pct) ? String(editInvoice.sgst_pct) : dStr('sgstPct'));
+  const [igstPct, setIgstPct] = useState(editInvoice && Number(editInvoice.igst_pct) ? String(editInvoice.igst_pct) : dStr('igstPct'));
 
-  const [addlChargeOn, setAddlChargeOn] = useState(!!editInvoice && Number(editInvoice.additional_charge) > 0);
+  const [addlChargeOn, setAddlChargeOn] = useState(
+    editInvoice ? Number(editInvoice.additional_charge) > 0 : dBool('addlChargeOn')
+  );
   const [addlCharge, setAddlCharge] = useState(
-    editInvoice && Number(editInvoice.additional_charge) > 0 ? String(editInvoice.additional_charge) : ''
+    editInvoice && Number(editInvoice.additional_charge) > 0 ? String(editInvoice.additional_charge) : dStr('addlCharge')
   );
   const [addlGstOn, setAddlGstOn] = useState(
-    !!editInvoice && (
-      Number(editInvoice.additional_charge_cgst_pct) > 0 ||
-      Number(editInvoice.additional_charge_sgst_pct) > 0 ||
-      Number(editInvoice.additional_charge_igst_pct) > 0
-    )
+    editInvoice
+      ? Number(editInvoice.additional_charge_cgst_pct) > 0 ||
+        Number(editInvoice.additional_charge_sgst_pct) > 0 ||
+        Number(editInvoice.additional_charge_igst_pct) > 0
+      : dBool('addlGstOn')
   );
-  const [addlCgstPct, setAddlCgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_cgst_pct) ? String(editInvoice.additional_charge_cgst_pct) : '');
-  const [addlSgstPct, setAddlSgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_sgst_pct) ? String(editInvoice.additional_charge_sgst_pct) : '');
-  const [addlIgstPct, setAddlIgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_igst_pct) ? String(editInvoice.additional_charge_igst_pct) : '');
-  const [addlReason, setAddlReason] = useState(editInvoice?.additional_charge_reason ?? '');
+  const [addlCgstPct, setAddlCgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_cgst_pct) ? String(editInvoice.additional_charge_cgst_pct) : dStr('addlCgstPct'));
+  const [addlSgstPct, setAddlSgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_sgst_pct) ? String(editInvoice.additional_charge_sgst_pct) : dStr('addlSgstPct'));
+  const [addlIgstPct, setAddlIgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_igst_pct) ? String(editInvoice.additional_charge_igst_pct) : dStr('addlIgstPct'));
+  const [addlReason, setAddlReason] = useState(editInvoice?.additional_charge_reason ?? dStr('addlReason'));
 
   const baseNum = Number(baseAmount) || 0;
   const cgstNum = Number(cgstPct) || 0;
@@ -374,12 +397,13 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
   const addlIgstAmt = +(addlChargeNum * addlIgstNum / 100).toFixed(2);
   const addlLineTotal = +(addlChargeNum + addlCgstAmt + addlSgstAmt + addlIgstAmt).toFixed(2);
   const totalAmount = +(baseNum + cgstAmt + sgstAmt + igstAmt + addlLineTotal).toFixed(2);
-  const [remarks, setRemarks] = useState(editInvoice?.remarks ?? '');
+  const [remarks, setRemarks] = useState(editInvoice?.remarks ?? dStr('remarks'));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [existingAttachments, setExistingAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(!isEdit && !!dInit);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load existing attachments when editing
@@ -388,6 +412,55 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
       getAttachments(editInvoice.id).then(setExistingAttachments).catch(() => {});
     }
   }, [editInvoice]);
+
+  // Persist draft on every change (new invoice only).
+  // If the form has no user-entered content, remove the key so a fresh visit
+  // doesn't show a "Draft restored" banner over an empty form.
+  useEffect(() => {
+    if (isEdit) return;
+    const hasContent =
+      !!vendorId || !!vendorName.trim() ||
+      !!invoiceNo.trim() || !!poNumber.trim() ||
+      !!baseAmount || !!cgstPct || !!sgstPct || !!igstPct ||
+      addlChargeOn || !!addlCharge || !!addlReason.trim() ||
+      !!remarks.trim();
+    try {
+      if (hasContent) {
+        const draft = {
+          vendorId, vendorName, freeTextMode,
+          invoiceNo, poNumber, purpose,
+          invoiceDate, month,
+          baseAmount, cgstPct, sgstPct, igstPct,
+          addlChargeOn, addlCharge, addlGstOn,
+          addlCgstPct, addlSgstPct, addlIgstPct, addlReason,
+          remarks,
+        };
+        window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      } else {
+        window.localStorage.removeItem(DRAFT_KEY);
+      }
+    } catch {}
+  }, [
+    isEdit, DRAFT_KEY,
+    vendorId, vendorName, freeTextMode,
+    invoiceNo, poNumber, purpose,
+    invoiceDate, month,
+    baseAmount, cgstPct, sgstPct, igstPct,
+    addlChargeOn, addlCharge, addlGstOn,
+    addlCgstPct, addlSgstPct, addlIgstPct, addlReason,
+    remarks,
+  ]);
+
+  function discardDraft() {
+    try { window.localStorage.removeItem(DRAFT_KEY); } catch {}
+    setVendorId(''); setVendorName(''); setFreeTextMode(false);
+    setInvoiceNo(''); setPoNumber(''); setPurpose('Steel');
+    setInvoiceDate(today); setMonth(`${currentMonth}-01`);
+    setBaseAmount(''); setCgstPct(''); setSgstPct(''); setIgstPct('');
+    setAddlChargeOn(false); setAddlCharge(''); setAddlGstOn(false);
+    setAddlCgstPct(''); setAddlSgstPct(''); setAddlIgstPct(''); setAddlReason('');
+    setRemarks(''); setPendingFiles([]); setDraftRestored(false);
+  }
 
   function handleVendorChange(id: string) {
     setVendorId(id);
@@ -461,6 +534,9 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
         setUploading(false);
       }
 
+      if (!isEdit) {
+        try { window.localStorage.removeItem(DRAFT_KEY); } catch {}
+      }
       onSaved();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to save';
@@ -478,7 +554,15 @@ function InvoiceForm({ site, vendors, editInvoice, onCancel, onSaved }: {
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-6 mb-6">
-      <div className="text-base font-medium text-gray-900 mb-5">{isEdit ? 'Edit Invoice' : 'New Invoice Entry'}</div>
+      <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
+        <div className="text-base font-medium text-gray-900">{isEdit ? 'Edit Invoice' : 'New Invoice Entry'}</div>
+        {!isEdit && draftRestored && (
+          <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg flex items-center gap-2">
+            <span>Draft restored from your last session</span>
+            <button type="button" onClick={discardDraft} className="text-red-600 hover:underline">Discard</button>
+          </div>
+        )}
+      </div>
 
       {error && (
         <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>
