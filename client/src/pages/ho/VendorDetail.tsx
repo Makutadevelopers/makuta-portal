@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getVendorDetail, VendorDetailResponse } from '../../api/vendors';
 import { getVendorCreditBalance } from '../../api/creditNotes';
@@ -17,6 +17,8 @@ export default function VendorDetail() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
   const [orderType, setOrderType] = useState<OrderType>('All');
   const [creditBalance, setCreditBalance] = useState<VendorCreditBalance | null>(null);
+  const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
+  const [showAllFiles, setShowAllFiles] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -56,6 +58,13 @@ export default function VendorDetail() {
     if (orderType === 'WO' && !(inv.po_number || '').toUpperCase().includes('/WO/')) return false;
     return true;
   });
+
+  const allAttachments = useMemo(
+    () => invoices.flatMap(inv =>
+      inv.attachments.map(att => ({ ...att, _invoiceNo: inv.invoice_no, _date: inv.invoice_date }))
+    ),
+    [invoices]
+  );
 
   const statusCounts = {
     All: invoices.length,
@@ -175,45 +184,167 @@ export default function VendorDetail() {
             </button>
           ))}
 
+          {allAttachments.length > 0 && (
+            <button
+              onClick={() => setShowAllFiles(v => !v)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                showAllFiles
+                  ? 'bg-purple-600 text-white border-purple-600'
+                  : 'bg-white text-purple-700 border-purple-200 hover:bg-purple-50'
+              }`}
+              title="See every uploaded invoice copy for this vendor in one list"
+            >
+              {showAllFiles ? 'Hide all files' : `All files (${allAttachments.length})`}
+            </button>
+          )}
+
           <span className="text-xs text-gray-400 ml-auto">{filtered.length} invoice{filtered.length !== 1 ? 's' : ''}</span>
         </div>
+
+        {/* All-files aggregated view */}
+        {showAllFiles && allAttachments.length > 0 && (
+          <div className="mb-4 bg-purple-50/60 border border-purple-100 rounded-xl p-4">
+            <div className="text-xs font-medium text-purple-800 uppercase tracking-wider mb-3">
+              All uploaded invoice copies ({allAttachments.length})
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {allAttachments.map(att => (
+                <a
+                  key={att.id}
+                  href={att.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-purple-100 hover:border-purple-300 hover:shadow-sm transition-shadow min-w-0"
+                  title={`From invoice ${att._invoiceNo ?? '—'} (${formatDate(att._date)})`}
+                >
+                  <span className="text-red-500 flex-shrink-0">&#128196;</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-gray-900 truncate">{att.file_name}</div>
+                    <div className="text-[11px] text-gray-500 truncate">
+                      {att._invoiceNo ?? '—'} · {formatDate(att._date)}
+                      {att.file_size ? ` · ${Math.round(att.file_size / 1024)} KB` : ''}
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Invoice Table */}
         <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
-                {['Date', 'Inv No', 'PO No', 'Category', 'Site', 'Amount', 'Balance', 'Status'].map((h, i) => (
-                  <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap ${i >= 5 ? 'text-right' : 'text-left'}`}>
+                <th className="px-4 py-2.5 w-8"></th>
+                {['Date', 'Inv No', 'PO No', 'Category', 'Site', 'Amount', 'Balance', 'Status', 'Files'].map((h) => (
+                  <th
+                    key={h}
+                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap ${
+                      h === 'Amount' || h === 'Balance' || h === 'Status' || h === 'Files' ? 'text-right' : 'text-left'
+                    }`}
+                  >
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.map(inv => (
-                <tr key={inv.id} className="border-t border-gray-50 hover:bg-gray-50/50">
-                  <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900">{inv.invoice_no || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600">{inv.po_number || '—'}</td>
-                  <td className="px-4 py-3 text-gray-600">{inv.purpose}</td>
-                  <td className="px-4 py-3 text-gray-700">{inv.site}</td>
-                  <td className="px-4 py-3 text-right font-medium text-gray-900">{formatINR(Number(inv.invoice_amount))}</td>
-                  <td className="px-4 py-3 text-right font-medium">
-                    <span className={Number(inv.balance) > 0 ? 'text-red-600' : 'text-green-600'}>
-                      {formatINR(Number(inv.balance))}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-medium border ${statusBadge(inv.payment_status)}`}>
-                      {inv.payment_status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map(inv => {
+                const expanded = expandedInvoiceId === inv.id;
+                const hasFiles = inv.attachments.length > 0;
+                return (
+                  <Fragment key={inv.id}>
+                    <tr className="border-t border-gray-50 hover:bg-gray-50/50">
+                      <td className="px-4 py-3 text-center">
+                        {hasFiles && (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedInvoiceId(expanded ? null : inv.id)}
+                            className="text-gray-400 hover:text-blue-600 text-sm leading-none"
+                            title={expanded ? 'Collapse files' : 'Show files'}
+                          >
+                            {expanded ? '▾' : '▸'}
+                          </button>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">{inv.invoice_no || '—'}</td>
+                      <td className="px-4 py-3 text-gray-600">{inv.po_number || '—'}</td>
+                      <td className="px-4 py-3 text-gray-600">{inv.purpose}</td>
+                      <td className="px-4 py-3 text-gray-700">{inv.site}</td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900">{formatINR(Number(inv.invoice_amount))}</td>
+                      <td className="px-4 py-3 text-right font-medium">
+                        <span className={Number(inv.balance) > 0 ? 'text-red-600' : 'text-green-600'}>
+                          {formatINR(Number(inv.balance))}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-medium border ${statusBadge(inv.payment_status)}`}>
+                          {inv.payment_status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {hasFiles ? (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedInvoiceId(expanded ? null : inv.id)}
+                            className="text-xs text-blue-600 hover:underline"
+                          >
+                            &#128206; {inv.attachments.length}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-300">—</span>
+                        )}
+                      </td>
+                    </tr>
+                    {expanded && hasFiles && (
+                      <tr className="bg-gray-50/60 border-t border-gray-100">
+                        <td colSpan={10} className="px-4 py-3">
+                          <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">
+                            Attachments for invoice {inv.invoice_no || '—'}
+                          </div>
+                          <div className="space-y-1.5">
+                            {inv.attachments.map(att => (
+                              <div
+                                key={att.id}
+                                className="flex items-center justify-between gap-2 px-3 py-2 bg-white rounded-lg border border-gray-100"
+                              >
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  <span className="text-red-500">&#128196;</span>
+                                  <span className="text-sm font-medium text-gray-900 truncate">{att.file_name}</span>
+                                  <span className="text-xs text-gray-400 flex-shrink-0">
+                                    {att.file_size ? `${Math.round(att.file_size / 1024)} KB` : ''}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  <a
+                                    href={att.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded"
+                                  >
+                                    View
+                                  </a>
+                                  <a
+                                    href={`${att.url}${att.url.includes('?') ? '&' : '?'}download=1`}
+                                    className="px-2 py-1 text-xs text-green-600 hover:bg-green-50 rounded"
+                                  >
+                                    Download
+                                  </a>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-gray-400 text-sm">
+                  <td colSpan={10} className="px-4 py-10 text-center text-gray-400 text-sm">
                     {invoices.length === 0 ? 'No invoices for this vendor.' : 'No invoices match the selected filter.'}
                   </td>
                 </tr>

@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { apiFetch, getApiToken, getApiOrigin } from './client';
 import { Vendor } from '../types/vendor';
 
 export interface VendorDetailStats {
@@ -7,6 +7,16 @@ export interface VendorDetailStats {
   paidAmount: number;
   outstandingAmount: number;
   oldestUnpaid: string | null;
+}
+
+export interface VendorDetailAttachment {
+  id: string;
+  invoice_id: string;
+  file_name: string;
+  file_size: number | null;
+  mime_type: string | null;
+  url: string;
+  uploaded_at: string;
 }
 
 export interface VendorDetailInvoice {
@@ -19,6 +29,7 @@ export interface VendorDetailInvoice {
   invoice_amount: number;
   payment_status: string;
   balance: number;
+  attachments: VendorDetailAttachment[];
 }
 
 export interface VendorDetailResponse {
@@ -27,8 +38,24 @@ export interface VendorDetailResponse {
   invoices: VendorDetailInvoice[];
 }
 
-export function getVendorDetail(id: string): Promise<VendorDetailResponse> {
-  return apiFetch<VendorDetailResponse>(`/vendors/${id}/detail`);
+export async function getVendorDetail(id: string): Promise<VendorDetailResponse> {
+  const data = await apiFetch<VendorDetailResponse>(`/vendors/${id}/detail`);
+  // Local-disk attachments come back with a relative `/api/...` path; the browser would
+  // resolve that against the Vercel origin (which doesn't host the API), so prepend the
+  // API origin and append the JWT as ?token=... so direct-tab opens work.
+  const token = getApiToken();
+  const origin = getApiOrigin();
+  data.invoices = data.invoices.map(inv => ({
+    ...inv,
+    // Server may not yet expose attachments (older deploy) — default to [] so the UI doesn't crash.
+    attachments: (inv.attachments ?? []).map(att => {
+      if (!att.url.startsWith('/api/')) return att;
+      const sep = att.url.includes('?') ? '&' : '?';
+      const tokenSuffix = token ? `${sep}token=${token}` : '';
+      return { ...att, url: `${origin}${att.url}${tokenSuffix}` };
+    }),
+  }));
+  return data;
 }
 
 export function getVendors(): Promise<Vendor[]> {

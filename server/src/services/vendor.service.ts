@@ -1,7 +1,10 @@
 // vendor.service.ts
 // Business logic for vendor CRUD. All SQL lives here.
 
+import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { query, queryOne } from '../db/query';
+import { s3 } from '../config/s3';
 
 export interface VendorRow {
   id: string;
@@ -143,6 +146,16 @@ export interface VendorDetailStats {
   oldestUnpaid: string | null;
 }
 
+export interface VendorDetailAttachment {
+  id: string;
+  invoice_id: string;
+  file_name: string;
+  file_size: number | null;
+  mime_type: string | null;
+  url: string;
+  uploaded_at: string;
+}
+
 export interface VendorDetailInvoice {
   id: string;
   invoice_date: string;
@@ -153,6 +166,7 @@ export interface VendorDetailInvoice {
   invoice_amount: number;
   payment_status: string;
   balance: number;
+  attachments: VendorDetailAttachment[];
 }
 
 export interface VendorDetailResult {
@@ -161,11 +175,22 @@ export interface VendorDetailResult {
   invoices: VendorDetailInvoice[];
 }
 
+interface AttachmentRow {
+  id: string;
+  invoice_id: string;
+  file_name: string;
+  file_size: number | null;
+  mime_type: string | null;
+  s3_key: string;
+  s3_bucket: string;
+  uploaded_at: string;
+}
+
 export async function getVendorDetail(id: string): Promise<VendorDetailResult | null> {
   const vendor = await getVendorById(id);
   if (!vendor) return null;
 
-  const invoiceRows = await query<VendorDetailInvoice>(
+  const invoiceRows = await query<Omit<VendorDetailInvoice, 'attachments'>>(
     `SELECT
        i.id,
        i.invoice_date,
@@ -185,18 +210,57 @@ export async function getVendorDetail(id: string): Promise<VendorDetailResult | 
     [id]
   );
 
-  const totalInvoices = invoiceRows.length;
-  const totalAmount = invoiceRows.reduce((sum, inv) => sum + Number(inv.invoice_amount), 0);
-  const paidAmount = invoiceRows.reduce((sum, inv) => sum + (Number(inv.invoice_amount) - Number(inv.balance)), 0);
-  const outstandingAmount = invoiceRows.reduce((sum, inv) => sum + Number(inv.balance), 0);
+  const invoiceIds = invoiceRows.map(r => r.id);
+  const attachmentRows = invoiceIds.length
+    ? await query<AttachmentRow>(
+        `SELECT id, invoice_id, file_name, file_size, mime_type, s3_key, s3_bucket, uploaded_at
+         FROM attachments
+         WHERE invoice_id = ANY($1::uuid[])
+         ORDER BY uploaded_at`,
+        [invoiceIds]
+      )
+    : [];
 
-  // Find the oldest unpaid invoice date
-  const unpaidInvoices = invoiceRows.filter(inv => Number(inv.balance) > 0);
-  let oldestUnpaid: string | null = null;
-  if (unpaidInvoices.length > 0) {
-    // invoiceRows are ordered DESC, so oldest unpaid is the last one with balance > 0
-    oldestUnpaid = unpaidInvoices[unpaidInvoices.length - 1].invoice_date;
-  }
+  const attachmentsByInvoice = new Map<string, VendorDetailAttachment[]>();
+  await Promise.all(attachmentRows.map(async (att) => {
+    let url: string;
+    if (att.s3_bucket === 'local') {
+      url = `/api/invoices/${att.invoice_id}/attachments/${att.id}/download`;
+    } else {
+      url = await getSignedUrl(
+        s3!,
+        new GetObjectCommand({ Bucket: att.s3_bucket, Key: att.s3_key }),
+        { expiresIn: 900 }
+      );
+    }
+    const slim: VendorDetailAttachment = {
+      id: att.id,
+      invoice_id: att.invoice_id,
+      file_name: att.file_name,
+      file_size: att.file_size,
+      mime_type: att.mime_type,
+      url,
+      uploaded_at: att.uploaded_at,
+    };
+    const list = attachmentsByInvoice.get(att.invoice_id) ?? [];
+    list.push(slim);
+    attachmentsByInvoice.set(att.invoice_id, list);
+  }));
+
+  const invoicesWithAttachments: VendorDetailInvoice[] = invoiceRows.map(inv => ({
+    ...inv,
+    attachments: attachmentsByInvoice.get(inv.id) ?? [],
+  }));
+
+  const totalInvoices = invoicesWithAttachments.length;
+  const totalAmount = invoicesWithAttachments.reduce((sum, inv) => sum + Number(inv.invoice_amount), 0);
+  const paidAmount = invoicesWithAttachments.reduce((sum, inv) => sum + (Number(inv.invoice_amount) - Number(inv.balance)), 0);
+  const outstandingAmount = invoicesWithAttachments.reduce((sum, inv) => sum + Number(inv.balance), 0);
+
+  const unpaidInvoices = invoicesWithAttachments.filter(inv => Number(inv.balance) > 0);
+  const oldestUnpaid = unpaidInvoices.length > 0
+    ? unpaidInvoices[unpaidInvoices.length - 1].invoice_date
+    : null;
 
   return {
     vendor,
@@ -207,7 +271,7 @@ export async function getVendorDetail(id: string): Promise<VendorDetailResult | 
       outstandingAmount,
       oldestUnpaid,
     },
-    invoices: invoiceRows,
+    invoices: invoicesWithAttachments,
   };
 }
 
