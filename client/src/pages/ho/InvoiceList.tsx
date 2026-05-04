@@ -1068,7 +1068,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
     setSaving(true);
     try {
       const data = {
-        month, invoice_date: invoiceDate, vendor_id: vendorId || undefined, vendor_name: vendorName,
+        month, invoice_date: invoiceDate, vendor_id: vendorId, vendor_name: vendorName,
         invoice_no: invoiceNo.trim(), po_number: poNumber.trim() || null,
         purpose, site, invoice_amount: totalAmount,
         base_amount: baseNum, cgst_pct: cgstNum, sgst_pct: sgstNum, igst_pct: igstNum,
@@ -1127,27 +1127,42 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
         <div className="mb-4">
           <label className="block text-xs text-gray-500 mb-1">
             Vendor Name *
-            {vendorId && <span className="text-green-600 ml-2">&#10003; {vendorName}</span>}
-            {!vendorId && vendorName && <span className="text-amber-600 ml-2">(not in vendor master)</span>}
+            {vendorId && (() => {
+              const v = localVendors.find(v => v.id === vendorId);
+              return v ? <span className="text-green-600 ml-2">&#10003; {v.name} · {v.payment_terms}-day terms</span> : null;
+            })()}
           </label>
           <div className="relative">
             <input value={vendorSearch}
-              onChange={e => { setVendorSearch(e.target.value); if (!e.target.value) { setVendorId(''); setVendorName(''); } else { setVendorName(e.target.value); } }}
+              onChange={e => { setVendorSearch(e.target.value); setVendorId(''); }}
               placeholder={vendorName || 'Type to search vendor...'}
               onFocus={() => setVendorSearch(vendorSearch || vendorName)}
-              onBlur={() => setTimeout(() => { if (vendorSearch && !vendorId) setVendorName(vendorSearch); setVendorSearch(''); }, 200)}
+              onBlur={() => setTimeout(() => setVendorSearch(''), 200)}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
             {vendorSearch && (
               <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                {vendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase())).map(v => (
-                  <div key={v.id} onMouseDown={() => { handleVendorChange(v.id); setVendorSearch(''); }}
+                {localVendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase())).map(v => (
+                  <div key={v.id}
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={() => { handleVendorChange(v.id); setVendorSearch(''); }}
                     className="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between">
                     <span className="text-sm text-gray-900">{v.name}</span>
                     <span className="text-xs text-gray-400">{v.category} · {v.payment_terms}d</span>
                   </div>
                 ))}
-                {vendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase())).length === 0 && (
-                  <div className="px-3 py-2 text-xs text-gray-400">No matching vendor</div>
+                {localVendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase())).length === 0 && (
+                  <div className="px-3 py-2">
+                    <div className="text-xs text-gray-400 mb-1">No matching vendor found</div>
+                    <button
+                      type="button"
+                      disabled={creatingVendor}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleCreateVendor(vendorSearch)}
+                      className="text-xs text-blue-600 hover:underline disabled:opacity-50"
+                    >
+                      {creatingVendor ? 'Creating...' : `+ Create vendor "${vendorSearch.trim()}" (30-day terms)`}
+                    </button>
+                  </div>
                 )}
               </div>
             )}
