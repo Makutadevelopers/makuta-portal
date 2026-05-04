@@ -3,6 +3,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useVendors } from '../../hooks/useVendors';
 import { createInvoice, updateInvoice } from '../../api/invoices';
+import { createVendor } from '../../api/vendors';
 import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
 import { Invoice } from '../../types/invoice';
 import { formatINR, formatDate } from '../../utils/formatters';
@@ -371,8 +372,10 @@ function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSave
 
   const [vendorId, setVendorId] = useState(seed?.vendor_id ?? dStr('vendorId'));
   const [vendorName, setVendorName] = useState(seed?.vendor_name ?? dStr('vendorName'));
-  const [freeTextMode, setFreeTextMode] = useState(dBool('freeTextMode'));
   const [vendorDropdownOpen, setVendorDropdownOpen] = useState(false);
+  const [creatingVendor, setCreatingVendor] = useState(false);
+  const [localVendors, setLocalVendors] = useState<Vendor[]>(vendors);
+  useEffect(() => { setLocalVendors(vendors); }, [vendors]);
   // When duplicating, clear invoice_no — the user must assign a new one.
   const [invoiceNo, setInvoiceNo] = useState(isDuplicate ? '' : (seed?.invoice_no ?? dStr('invoiceNo')));
   const [poNumber, setPoNumber] = useState(seed?.po_number ?? dStr('poNumber'));
@@ -452,7 +455,7 @@ function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSave
     try {
       if (hasContent) {
         const draft = {
-          vendorId, vendorName, freeTextMode,
+          vendorId, vendorName,
           invoiceNo, poNumber, purpose,
           invoiceDate, month,
           baseAmount, cgstPct, sgstPct, igstPct,
@@ -467,7 +470,7 @@ function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSave
     } catch {}
   }, [
     isEdit, isDuplicate, DRAFT_KEY,
-    vendorId, vendorName, freeTextMode,
+    vendorId, vendorName,
     invoiceNo, poNumber, purpose,
     invoiceDate, month,
     baseAmount, cgstPct, sgstPct, igstPct,
@@ -478,7 +481,7 @@ function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSave
 
   function discardDraft() {
     try { window.localStorage.removeItem(DRAFT_KEY); } catch {}
-    setVendorId(''); setVendorName(''); setFreeTextMode(false);
+    setVendorId(''); setVendorName('');
     setInvoiceNo(''); setPoNumber(''); setPurpose('Steel');
     setInvoiceDate(today); setMonth(`${currentMonth}-01`);
     setBaseAmount(''); setCgstPct(''); setSgstPct(''); setIgstPct('');
@@ -489,10 +492,30 @@ function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSave
 
   function handleVendorChange(id: string) {
     setVendorId(id);
-    const v = vendors.find(v => v.id === id);
+    const v = localVendors.find(v => v.id === id);
     if (v) {
       setVendorName(v.name);
       if (v.category) setPurpose(v.category);
+    }
+  }
+
+  async function handleCreateVendor(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setCreatingVendor(true);
+    try {
+      const created = await createVendor({ name: trimmed, payment_terms: 30, category: purpose || undefined });
+      setLocalVendors(prev => [...prev, created]);
+      setVendorId(created.id);
+      setVendorName(created.name);
+      setVendorDropdownOpen(false);
+      notify(`Vendor "${created.name}" created (30-day terms)`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to create vendor';
+      setError(msg);
+      notify(msg);
+    } finally {
+      setCreatingVendor(false);
     }
   }
 
@@ -508,7 +531,7 @@ function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSave
     e.preventDefault();
     setError('');
 
-    if (!vendorId && !vendorName.trim()) { setError('Select or enter a vendor name'); return; }
+    if (!vendorId) { setError('Pick a vendor from the dropdown, or click "+ Create vendor" if it isn\'t in Vendor Master yet.'); return; }
     if (!invoiceNo.trim()) { setError('Invoice number is required'); return; }
     if (baseNum <= 0) { setError('Enter a valid base amount'); return; }
     if (totalAmount <= 0) { setError('Total amount must be greater than zero'); return; }
@@ -522,7 +545,7 @@ function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSave
       const data = {
         month,
         invoice_date: invoiceDate,
-        vendor_id: vendorId || undefined,
+        vendor_id: vendorId,
         vendor_name: vendorName,
         invoice_no: invoiceNo.trim(),
         po_number: poNumber.trim() || null,
@@ -624,67 +647,56 @@ function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSave
         <div className="mb-4">
           <label className="block text-xs text-gray-500 mb-1">
             Vendor Name *
-            {vendorId && !freeTextMode && (() => {
-              const v = vendors.find(v => v.id === vendorId);
+            {vendorId && (() => {
+              const v = localVendors.find(v => v.id === vendorId);
               return v ? <span className="text-green-600 ml-2">&#10003; In Vendor Master · {v.payment_terms}-day terms</span> : null;
             })()}
-            {freeTextMode && vendorName.trim() && (
-              <span className="text-orange-600 ml-2">&#9888; Not in Vendor Master — will default to 30-day terms</span>
-            )}
           </label>
-          {freeTextMode ? (
-            <div className="flex gap-2">
-              <input
-                value={vendorName}
-                onChange={e => { setVendorName(e.target.value); setVendorId(''); }}
-                placeholder="Enter vendor name..."
-                className="w-full px-3 py-2.5 border-2 border-orange-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-200 bg-orange-50"
-              />
-              <button type="button" onClick={() => { setFreeTextMode(false); setVendorName(''); setVendorId(''); }}
-                className="text-xs text-blue-600 whitespace-nowrap hover:underline px-2">Back to list</button>
-            </div>
-          ) : (
-            <div className="relative">
-              <input
-                value={vendorName}
-                onChange={e => {
-                  setVendorName(e.target.value);
-                  setVendorId('');
-                  setVendorDropdownOpen(true);
-                }}
-                onFocus={() => setVendorDropdownOpen(true)}
-                onBlur={() => setTimeout(() => setVendorDropdownOpen(false), 150)}
-                placeholder="Type to search or select vendor..."
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
-              />
-              {vendorDropdownOpen && (
-                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                  {vendors
-                    .filter(v => v.name.toLowerCase().includes(vendorName.toLowerCase()))
-                    .map(v => (
-                      <div
-                        key={v.id}
-                        onMouseDown={e => e.preventDefault()}
-                        onClick={() => { handleVendorChange(v.id); setVendorDropdownOpen(false); }}
-                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between"
-                      >
-                        <span className="text-sm text-gray-900">{v.name}</span>
-                        <span className="text-xs text-gray-400">{v.category} · {v.payment_terms}d</span>
-                      </div>
-                    ))}
-                  {vendorName.trim() && vendors.filter(v => v.name.toLowerCase().includes(vendorName.toLowerCase())).length === 0 && (
-                    <div className="px-3 py-2">
-                      <div className="text-xs text-gray-400 mb-1">No matching vendor found</div>
-                      <button type="button"
-                        onMouseDown={e => e.preventDefault()}
-                        onClick={() => { setFreeTextMode(true); setVendorId(''); setVendorDropdownOpen(false); }}
-                        className="text-xs text-orange-600 hover:underline">Enter "{vendorName}" as new vendor</button>
+          <div className="relative">
+            <input
+              value={vendorName}
+              onChange={e => {
+                setVendorName(e.target.value);
+                setVendorId('');
+                setVendorDropdownOpen(true);
+              }}
+              onFocus={() => setVendorDropdownOpen(true)}
+              onBlur={() => setTimeout(() => setVendorDropdownOpen(false), 150)}
+              placeholder="Type to search or select vendor..."
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
+            {vendorDropdownOpen && (
+              <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                {localVendors
+                  .filter(v => v.name.toLowerCase().includes(vendorName.toLowerCase()))
+                  .map(v => (
+                    <div
+                      key={v.id}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => { handleVendorChange(v.id); setVendorDropdownOpen(false); }}
+                      className="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between"
+                    >
+                      <span className="text-sm text-gray-900">{v.name}</span>
+                      <span className="text-xs text-gray-400">{v.category} · {v.payment_terms}d</span>
                     </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+                  ))}
+                {vendorName.trim() && localVendors.filter(v => v.name.toLowerCase().includes(vendorName.toLowerCase())).length === 0 && (
+                  <div className="px-3 py-2">
+                    <div className="text-xs text-gray-400 mb-1">No matching vendor found</div>
+                    <button
+                      type="button"
+                      disabled={creatingVendor}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleCreateVendor(vendorName)}
+                      className="text-xs text-blue-600 hover:underline disabled:opacity-50"
+                    >
+                      {creatingVendor ? 'Creating...' : `+ Create vendor "${vendorName.trim()}" (30-day terms)`}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Row 3: Invoice No + PO + Category */}

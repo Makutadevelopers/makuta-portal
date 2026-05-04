@@ -9,6 +9,7 @@ import { createPayment, getPayments } from '../../api/payments';
 import { bulkPayInvoices } from '../../api/reconciliation';
 import { getInvoiceCreditSuggestions, addAllocation } from '../../api/creditNotes';
 import { InvoiceCreditSuggestions } from '../../types/creditNote';
+import { createVendor } from '../../api/vendors';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES, PURPOSES, PAYMENT_TYPES, BANKS } from '../../utils/constants';
 import { Invoice } from '../../types/invoice';
@@ -955,6 +956,9 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   const [vendorId, setVendorId] = useState(editInvoice?.vendor_id ?? '');
   const [vendorName, setVendorName] = useState(editInvoice?.vendor_name ?? '');
   const [vendorSearch, setVendorSearch] = useState('');
+  const [creatingVendor, setCreatingVendor] = useState(false);
+  const [localVendors, setLocalVendors] = useState<Vendor[]>(vendors);
+  useEffect(() => { setLocalVendors(vendors); }, [vendors]);
   const [invoiceNo, setInvoiceNo] = useState(editInvoice?.invoice_no ?? '');
   const [poNumber, setPoNumber] = useState(editInvoice?.po_number ?? '');
   const [purpose, setPurpose] = useState(editInvoice?.purpose ?? 'Steel');
@@ -1017,10 +1021,30 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
 
   function handleVendorChange(id: string) {
     setVendorId(id);
-    const v = vendors.find(v => v.id === id);
+    const v = localVendors.find(v => v.id === id);
     if (v) {
       setVendorName(v.name);
       if (v.category) setPurpose(v.category);
+    }
+  }
+
+  async function handleCreateVendor(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setCreatingVendor(true);
+    try {
+      const created = await createVendor({ name: trimmed, payment_terms: 30, category: purpose || undefined });
+      setLocalVendors(prev => [...prev, created]);
+      setVendorId(created.id);
+      setVendorName(created.name);
+      setVendorSearch('');
+      notify(`Vendor "${created.name}" created (30-day terms)`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to create vendor';
+      setError(msg);
+      notify(msg);
+    } finally {
+      setCreatingVendor(false);
     }
   }
 
@@ -1032,7 +1056,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
-    if (!vendorId && !vendorName.trim()) { setError('Select a vendor'); return; }
+    if (!vendorId) { setError('Pick a vendor from the dropdown, or click "+ Create vendor" if it isn\'t in Vendor Master yet.'); return; }
     if (!invoiceNo.trim()) { setError('Invoice number is required'); return; }
     if (baseNum <= 0) { setError('Enter a valid base amount'); return; }
     if (totalAmount <= 0) { setError('Total amount must be greater than zero'); return; }
