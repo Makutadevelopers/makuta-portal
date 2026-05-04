@@ -36,7 +36,7 @@ export default function InvoiceList() {
   const [timeline, setTimeline] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [sortBy, setSortBy] = useState<'invoice_date' | 'created_at'>('invoice_date');
+  const [sortBy, setSortBy] = useState<'invoice_date' | 'created_at'>('created_at');
   const [expandedEditId, setExpandedEditId] = useState<string | null>(null);
 
   // Sync search from URL query param

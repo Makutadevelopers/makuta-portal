@@ -15,6 +15,15 @@ export function getApiToken(): string | null {
   return tokenRef;
 }
 
+// Origin of the API server (no trailing /api) — used to build absolute URLs for
+// resources like attachment downloads that are referenced directly by the browser
+// (e.g. <img src=...>) rather than fetched through apiFetch. In production
+// VITE_API_BASE_URL is the Render backend URL; in dev it falls back to '/api'
+// (relative to the Vite dev server, which proxies /api to the local backend).
+export function getApiOrigin(): string {
+  return API_BASE.replace(/\/api\/?$/, '');
+}
+
 /** Register a callback that will run when any API call returns 401 Unauthorized. */
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   unauthorizedHandler = handler;

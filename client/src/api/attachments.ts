@@ -1,4 +1,4 @@
-import { apiFetch, getApiToken } from './client';
+import { apiFetch, getApiToken, getApiOrigin } from './client';
 
 export interface Attachment {
   id: string;
@@ -15,12 +15,18 @@ export interface Attachment {
 
 export async function getAttachments(invoiceId: string): Promise<Attachment[]> {
   const list = await apiFetch<Attachment[]>(`/invoices/${invoiceId}/attachments`);
-  // Append JWT as ?token=... so the download URL works when opened directly in a browser tab
+  // S3-stored attachments come back with an absolute presigned URL — leave those alone.
+  // Local-disk attachments come back with a relative `/api/...` path; the browser would
+  // resolve that against the Vercel origin (which doesn't host the API), so prepend the
+  // API origin and append the JWT as ?token=... so <img src=...> and direct-tab opens work.
   const token = getApiToken();
-  return list.map(att => ({
-    ...att,
-    url: token && att.url.startsWith('/api/') ? `${att.url}${att.url.includes('?') ? '&' : '?'}token=${token}` : att.url,
-  }));
+  const origin = getApiOrigin();
+  return list.map(att => {
+    if (!att.url.startsWith('/api/')) return att;
+    const sep = att.url.includes('?') ? '&' : '?';
+    const tokenSuffix = token ? `${sep}token=${token}` : '';
+    return { ...att, url: `${origin}${att.url}${tokenSuffix}` };
+  });
 }
 
 export async function uploadAttachment(invoiceId: string, file: File): Promise<Attachment> {

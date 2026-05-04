@@ -21,7 +21,9 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM
 const createInvoiceSchema = z.object({
   month: isoDate,
   invoice_date: isoDate,
-  vendor_id: z.string().uuid().nullable().optional().or(z.literal('')).transform(v => v || null),
+  // vendor_id is required — every invoice must point at a Vendor Master row.
+  // Free-text vendor names are no longer accepted from the manual form.
+  vendor_id: z.string().uuid('Pick a vendor from Vendor Master, or create a new one'),
   vendor_name: z.string().min(1, 'Vendor name is required').max(500, 'Vendor name too long'),
   // M1: invoice_no is optional — imports and contractor work orders often have no number.
   // The DB column is nullable (migration 010). We still enforce max length when present.
@@ -83,10 +85,13 @@ export async function getInvoices(req: Request, res: Response, next: NextFunctio
 
     if (role === 'site') {
       // Site: own site only, NO payment data
+      // created_at tiebreaker so a back-dated invoice added today still
+      // appears above older rows with the same invoice_date.
       const invoices = await query<InvoiceRow>(
         `SELECT ${SITE_COLUMNS}, ${CN_FIELDS},
            (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = invoices.id)::int AS attachment_count
-         FROM invoices WHERE site = $1 AND deleted_at IS NULL ORDER BY invoice_date DESC`,
+         FROM invoices WHERE site = $1 AND deleted_at IS NULL
+         ORDER BY invoice_date DESC, created_at DESC`,
         [site]
       );
       res.json(invoices);
@@ -95,7 +100,8 @@ export async function getInvoices(req: Request, res: Response, next: NextFunctio
       const invoices = await query<InvoiceRow>(
         `SELECT ${FULL_COLUMNS}, ${CN_FIELDS},
            (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = invoices.id)::int AS attachment_count
-         FROM invoices WHERE deleted_at IS NULL ORDER BY invoice_date DESC`
+         FROM invoices WHERE deleted_at IS NULL
+         ORDER BY invoice_date DESC, created_at DESC`
       );
       res.json(invoices);
     }
@@ -114,6 +120,18 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
       res.status(403).json({ error: 'Forbidden', message: 'You can only create invoices for your own site' });
       return;
     }
+
+    // Vendor must exist in Vendor Master. Pull the canonical name from the master row
+    // so the denormalized invoice.vendor_name can never drift from vendors.name.
+    const masterVendor = await queryOne<{ id: string; name: string }>(
+      'SELECT id, name FROM vendors WHERE id = $1',
+      [data.vendor_id]
+    );
+    if (!masterVendor) {
+      res.status(400).json({ error: 'Bad Request', message: 'Selected vendor is not in Vendor Master' });
+      return;
+    }
+    data.vendor_name = masterVendor.name;
 
     // H5: Duplicate check — same invoice_no + same vendor (case-insensitive), not deleted.
     // If invoice_no is null/blank, fall back to vendor + amount + date match.
@@ -247,6 +265,19 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
     if (role === 'site' && data.site !== undefined && data.site !== existing.site) {
       res.status(403).json({ error: 'Forbidden', message: 'Site accountants cannot change the site of an invoice' });
       return;
+    }
+
+    // If vendor_id is being changed, verify the new vendor exists and pull its canonical name
+    if (data.vendor_id !== undefined) {
+      const masterVendor = await queryOne<{ id: string; name: string }>(
+        'SELECT id, name FROM vendors WHERE id = $1',
+        [data.vendor_id]
+      );
+      if (!masterVendor) {
+        res.status(400).json({ error: 'Bad Request', message: 'Selected vendor is not in Vendor Master' });
+        return;
+      }
+      data.vendor_name = masterVendor.name;
     }
 
     const ALLOWED_UPDATE_FIELDS = [

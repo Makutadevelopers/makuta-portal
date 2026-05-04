@@ -1,0 +1,25 @@
+# Makuta Portal API — production image
+# Runs the Express server with tsx (matches the dev runtime — no separate tsc step).
+# Build context is the repo root so we can COPY server/.
+
+FROM node:22-alpine
+
+WORKDIR /app
+
+# wget is used by docker-compose healthcheck; tini for proper PID 1 signal handling.
+RUN apk add --no-cache wget tini
+
+COPY server/package.json server/package-lock.json* ./
+RUN npm ci --no-audit --no-fund
+
+COPY server/tsconfig.json ./
+COPY server/src ./src
+
+# Server creates server/uploads/ for local-disk fallback when S3 is unset.
+# We always set S3 in prod, but the path must exist for multer's diskStorage init.
+RUN mkdir -p /app/uploads
+
+EXPOSE 4000
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["npx", "tsx", "src/index.ts"]

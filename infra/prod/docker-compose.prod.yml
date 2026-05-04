@@ -1,0 +1,78 @@
+# Makuta Portal — Production Docker Compose
+#
+# Lives at /opt/makuta-portal on the EC2 box (54.3.199.149).
+# Co-tenant with the existing CRM stack at /opt/makuta/crm. Joins the CRM's
+# external Docker network so the CRM nginx (the public 80/443 reverse proxy)
+# can route invoice.makutadevelopers.com to portal-api / portal-web.
+#
+# DB is AWS RDS Postgres (us-east-1) — set DB_HOST / DB_PASSWORD in .env.
+# S3 is real AWS S3 (us-east-1) — set AWS_* in .env.
+#
+# Build context is the repo root (../..) so Dockerfiles can COPY client/ + server/.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  # ── API (Express + tsx runtime) ─────────────────────────────────────────
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/prod/Dockerfile.api
+    image: makuta-portal-api:latest
+    container_name: makuta_portal_api_prod
+    restart: always
+    env_file:
+      - .env
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:4000/api/health']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - portal_uploads:/app/uploads
+    logging: *default-logging
+    networks:
+      crm_net:
+        aliases:
+          - portal-api
+
+  # ── Web (Vite SPA → nginx:alpine static server) ─────────────────────────
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/prod/Dockerfile.web
+      args:
+        VITE_API_BASE_URL: /api
+    image: makuta-portal-web:latest
+    container_name: makuta_portal_web_prod
+    restart: always
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost/']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *default-logging
+    networks:
+      crm_net:
+        aliases:
+          - portal-web
+
+volumes:
+  portal_uploads:
+    driver: local
+
+# Attach to the CRM's existing bridge network so the CRM nginx can resolve
+# our containers by their network alias (portal-api, portal-web).
+networks:
+  crm_net:
+    name: crm_makuta_prod_net
+    external: true

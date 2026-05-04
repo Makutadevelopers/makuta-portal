@@ -11,6 +11,9 @@ interface AuditRow {
   user_name: string;
   action: string;
   invoice_id: string | null;
+  invoice_no: string | null;
+  invoice_site: string | null;
+  vendor_name: string | null;
   metadata: Record<string, unknown> | null;
   created_at: string;
 }
@@ -20,9 +23,13 @@ export async function getAuditLogs(_req: Request, res: Response, next: NextFunct
     const logs = await query<AuditRow>(
       `SELECT
          a.id, a.user_id, u.name AS user_name,
-         a.action, a.invoice_id, a.metadata, a.created_at
+         a.action, a.invoice_id, a.metadata, a.created_at,
+         i.invoice_no AS invoice_no,
+         i.site       AS invoice_site,
+         i.vendor_name AS vendor_name
        FROM audit_logs a
-       LEFT JOIN users u ON u.id = a.user_id
+       LEFT JOIN users u    ON u.id = a.user_id
+       LEFT JOIN invoices i ON i.id = a.invoice_id
        ORDER BY a.created_at DESC`
     );
     res.json(logs);

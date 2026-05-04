@@ -8,6 +8,7 @@ import { formatINR } from '../../utils/formatters';
 import { PURPOSES } from '../../utils/constants';
 import { Vendor } from '../../types/vendor';
 import AppShell from '../../components/layout/AppShell';
+import BulkImportModal from '../../components/shared/BulkImportModal';
 import { useToast } from '../../context/ToastContext';
 
 const TERM_OPTIONS = [7, 10, 14, 15, 21, 30, 45, 60, 75, 90];
@@ -24,6 +25,7 @@ export default function VendorMaster() {
   const [editVendor, setEditVendor] = useState<Vendor | null>(null);
   const [initialName, setInitialName] = useState('');
   const [showUnmastered, setShowUnmastered] = useState(true);
+  const [showImport, setShowImport] = useState(false);
   const { notify } = useToast();
 
   const vendorStats = new Map<string, number>();
@@ -73,11 +75,24 @@ export default function VendorMaster() {
           <div className="text-lg font-medium text-gray-900">Vendor Master</div>
           <div className="text-xs text-gray-500 mt-1">Set payment terms per vendor — used to calculate due dates in Payment Aging</div>
         </div>
-        <button onClick={() => { setEditVendor(null); setInitialName(''); setShowForm(true); }}
-          className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
-          + Add Vendor
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowImport(true)}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+            Bulk Import
+          </button>
+          <button onClick={() => { setEditVendor(null); setInitialName(''); setShowForm(true); }}
+            className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
+            + Add Vendor
+          </button>
+        </div>
       </div>
+
+      {showImport && (
+        <BulkImportModal
+          onClose={() => setShowImport(false)}
+          onDone={() => { setShowImport(false); refresh(); }}
+        />
+      )}
 
       {/* Unmastered vendor alert */}
       {unmasteredVendors.length > 0 && !showForm && showUnmastered && (
@@ -234,6 +249,11 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) { setError('Vendor name is required'); return; }
+    const phoneDigits = phone.replace(/\D/g, '');
+    if (phoneDigits.length < 7) {
+      setError('Phone number is required');
+      return;
+    }
 
     const data = {
       name: name.trim(),
@@ -241,7 +261,7 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
       category: category || null,
       gstin: gstin.trim() || null,
       contact_name: contactName.trim() || null,
-      phone: phone.trim() || null,
+      phone: phone.trim(),
       email: email.trim() || null,
       notes: notes.trim() || null,
     };
@@ -336,9 +356,15 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Phone</label>
-            <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="9848012345"
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            <label className="block text-xs text-gray-500 mb-1">Phone *</label>
+            <input
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
+              placeholder="9848012345"
+              required
+              inputMode="tel"
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Email</label>

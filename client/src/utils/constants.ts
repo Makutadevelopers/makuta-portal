@@ -5,7 +5,7 @@ export const SITES = [
 ];
 
 export const PURPOSES = [
-  'Steel', 'Cement', 'Bricks', 'Aggregates', 'Hardware', 'Tiles',
+  'Material', 'Steel', 'Cement', 'Bricks', 'Aggregates', 'Hardware', 'Tiles',
   'Plumbing Material', 'Electrical Material', 'Scaffolding', 'Admixtures',
   'Granite', 'Misc', 'RMC Service', 'Painting Materials', 'Doors',
   'Advertisement', 'Water Proofing', 'Consultant', 'Fire Fighting',
