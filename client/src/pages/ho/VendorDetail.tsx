@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment, useMemo } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getVendorDetail, VendorDetailResponse } from '../../api/vendors';
 import { getVendorCreditBalance } from '../../api/creditNotes';
@@ -59,11 +59,8 @@ export default function VendorDetail() {
     return true;
   });
 
-  const allAttachments = useMemo(
-    () => invoices.flatMap(inv =>
-      inv.attachments.map(att => ({ ...att, _invoiceNo: inv.invoice_no, _date: inv.invoice_date }))
-    ),
-    [invoices]
+  const allAttachments = invoices.flatMap(inv =>
+    inv.attachments.map(att => ({ ...att, _invoiceNo: inv.invoice_no, _date: inv.invoice_date }))
   );
 
   const statusCounts = {
