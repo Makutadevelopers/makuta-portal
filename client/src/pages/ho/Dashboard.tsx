@@ -175,9 +175,22 @@ function KpiCards({ kpis, periodLabel }: { kpis: Kpis; periodLabel: string }) {
 }
 
 // ── Vendor Dedup Alert Panel ────────────────────────────────────────────────
+const DISMISSED_DUPES_KEY = 'makuta:dismissed-vendor-dupes';
+
+function loadDismissedFromStorage(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(DISMISSED_DUPES_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? new Set(arr.filter((x): x is string => typeof x === 'string')) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
 function VendorDedupPanel() {
   const [pairs, setPairs] = useState<DuplicatePair[]>([]);
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [dismissed, setDismissed] = useState<Set<string>>(() => loadDismissedFromStorage());
   const [merging, setMerging] = useState<string | null>(null);
   const { notify } = useToast();
 
@@ -199,9 +212,21 @@ function VendorDedupPanel() {
 
   if (visible.length === 0) return null;
 
+  function persistDismissed(next: Set<string>) {
+    try {
+      window.localStorage.setItem(DISMISSED_DUPES_KEY, JSON.stringify(Array.from(next)));
+    } catch {
+      // ignore quota / SecurityError; in-memory state still works for this session
+    }
+  }
+
   function dismiss(pair: DuplicatePair) {
     const key = [pair.vendorA.id, pair.vendorB.id].sort().join(':');
-    setDismissed(prev => new Set(prev).add(key));
+    setDismissed(prev => {
+      const next = new Set(prev).add(key);
+      persistDismissed(next);
+      return next;
+    });
   }
 
   async function handleMerge(keepId: string, removeId: string, keepName: string, pair: DuplicatePair) {
