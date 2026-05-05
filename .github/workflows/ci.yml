@@ -33,7 +33,10 @@ jobs:
         run: cd client && npx tsc --noEmit
 
       - name: Run server tests
-        run: cd server && npx vitest run
+        # Integration tests need a live server + Postgres which CI doesn't
+        # spin up — they're meant for local runs (`npm run dev:server` first).
+        # Tracked: real CI integration coverage in a separate PR.
+        run: cd server && npx vitest run --exclude '**/integration.test.ts'
 
   build:
     runs-on: ubuntu-latest
