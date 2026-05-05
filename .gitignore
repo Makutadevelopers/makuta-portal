@@ -31,3 +31,6 @@ npm-debug.log*
 
 # Local DB backups — can contain real data
 backups/
+
+# Claude Code runtime artifacts (lock files, transient state)
+.claude/scheduled_tasks.lock
