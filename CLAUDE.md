@@ -39,7 +39,7 @@ invoices. Head Office processes payments. MD views executive dashboards.
 - Frontend: React 18 + TypeScript + Tailwind CSS + Vite (deployed to Vercel,
   served at `makuta-portal.vercel.app` via Cloudflare DNS)
 - Backend: Node.js + Express + TypeScript, Dockerised, runs on AWS EC2
-  (`54.3.199.149`, `/opt/makuta-portal`, co-tenant with the CRM stack;
+  (`52.3.199.149`, `/opt/makuta-portal`, co-tenant with the CRM stack;
   fronted by the CRM nginx at `invoice.makutadevelopers.com`)
 - Database: PostgreSQL (AWS RDS, us-east-1, SSL required)
 - File storage: AWS S3 (us-east-1)

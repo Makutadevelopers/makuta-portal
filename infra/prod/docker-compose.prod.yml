@@ -1,6 +1,6 @@
 # Makuta Portal — Production Docker Compose
 #
-# Lives at /opt/makuta-portal on the EC2 box (54.3.199.149).
+# Lives at /opt/makuta-portal on the EC2 box (52.3.199.149).
 # Co-tenant with the existing CRM stack at /opt/makuta/crm. Joins the CRM's
 # external Docker network so the CRM nginx (the public 80/443 reverse proxy)
 # can route invoice.makutadevelopers.com to portal-api / portal-web.
