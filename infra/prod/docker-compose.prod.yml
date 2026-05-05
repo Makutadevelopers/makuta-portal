@@ -28,7 +28,7 @@ services:
     env_file:
       - .env
     healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://localhost:4000/api/health']
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:4000/api/health']
       interval: 30s
       timeout: 10s
       retries: 5
@@ -55,7 +55,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://localhost/']
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1/']
       interval: 30s
       timeout: 5s
       retries: 3

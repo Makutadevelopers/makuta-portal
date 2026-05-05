@@ -11,7 +11,9 @@ import { getAlerts, resolveAlert, getAlertCount } from '../controllers/alerts.co
 const router = Router();
 
 router.use(authenticate);
-router.use(requireRole(['ho']));
+// HO sees its operational alerts (duplicate_invoice, vendor_dedup); MD sees
+// password reset requests. Filtering happens in the controller based on role.
+router.use(requireRole(['ho', 'mgmt']));
 
 router.get('/count', getAlertCount);
 router.get('/', getAlerts);

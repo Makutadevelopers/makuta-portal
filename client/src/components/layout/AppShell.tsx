@@ -73,7 +73,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [alertsLoading, setAlertsLoading] = useState(false);
 
   const loadCount = useCallback(async () => {
-    if (role !== 'ho') return;
+    // HO sees data-hygiene alerts; MD sees password-reset requests.
+    if (role !== 'ho' && role !== 'mgmt') return;
     try {
       const { count } = await getAlertCount();
       setAlertCount(count);
@@ -130,8 +131,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-          {/* Notification bell — HO only */}
-          {role === 'ho' && (
+          {/* Notification bell — HO (data alerts) + MD (password resets) */}
+          {(role === 'ho' || role === 'mgmt') && (
             <div className="relative">
               <button
                 onClick={handleBellClick}
@@ -217,6 +218,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium ${avatarBg}`}>
             {initials}
           </div>
+          <button
+            onClick={() => navigate('/change-password')}
+            className="text-xs px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:text-gray-700 hidden sm:inline"
+            title="Change your password"
+          >
+            Change password
+          </button>
           <button
             onClick={logout}
             className="text-xs px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:text-gray-700"

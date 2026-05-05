@@ -2,6 +2,10 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { Role } from './types/user';
 import LoginPage from './pages/auth/LoginPage';
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
+import ResetPasswordPage from './pages/auth/ResetPasswordPage';
+import SsoHandoff from './pages/auth/SsoHandoff';
+import ChangePasswordPage from './pages/shared/ChangePasswordPage';
 
 // HO pages
 import Dashboard from './pages/ho/Dashboard';
@@ -62,6 +66,10 @@ export default function AppRouter() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/sso" element={<SsoHandoff />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/change-password" element={<ProtectedRoute allowed={['ho', 'mgmt', 'site']}><ChangePasswordPage /></ProtectedRoute>} />
         <Route path="/" element={<RootRedirect />} />
 
         {/* HO routes */}

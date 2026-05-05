@@ -6,6 +6,8 @@ import bcrypt from 'bcrypt';
 import { z } from 'zod';
 import { query, queryOne } from '../db/query';
 import { logAudit } from '../services/audit.service';
+import { generateOtp } from './auth.controller';
+import { notifyTempPassword } from '../services/email.service';
 
 interface UserRow {
   id: string;
@@ -183,6 +185,74 @@ export async function resetPassword(req: Request, res: Response, next: NextFunct
     });
 
     res.json({ message: `Password reset for ${existing.name}` });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// POST /api/users/:id/send-temp-password — generate an OTP, set it as the
+// user's password, resolve the linked password_reset_request alert, and
+// return the OTP so the MD can copy it (also emails it if SMTP is set).
+export async function sendTempPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+
+    const user = await queryOne<{ id: string; name: string; email: string; is_active: boolean }>(
+      'SELECT id, name, email, is_active FROM users WHERE id = $1',
+      [id]
+    );
+    if (!user) {
+      res.status(404).json({ error: 'Not Found', message: 'User not found' });
+      return;
+    }
+    if (!user.is_active) {
+      res.status(400).json({ error: 'Bad Request', message: 'Cannot reset password for a deactivated account' });
+      return;
+    }
+
+    const tempPassword = generateOtp(8);
+    const hash = await bcrypt.hash(tempPassword, 12);
+
+    await query(
+      `UPDATE users
+          SET password_hash = $1,
+              reset_token_hash = NULL,
+              reset_token_expires_at = NULL,
+              updated_at = NOW()
+        WHERE id = $2`,
+      [hash, id]
+    );
+
+    // Resolve any pending password_reset_request alert for this user so the
+    // MD's bell badge clears.
+    await query(
+      `UPDATE alerts
+          SET resolved = TRUE, resolved_by = $1, resolved_at = NOW()
+        WHERE alert_type = 'password_reset_request'
+          AND resolved = FALSE
+          AND metadata->>'userId' = $2`,
+      [req.user!.id, id]
+    );
+
+    // Best-effort email — silently no-ops when SMTP is unconfigured.
+    await notifyTempPassword({
+      name: user.name,
+      email: user.email,
+      tempPassword,
+    });
+
+    await logAudit({
+      userId: req.user!.id,
+      action: `Sent temp password to "${user.name}"`,
+      metadata: { targetUserId: id, method: 'temp-password' },
+    });
+
+    res.json({
+      tempPassword,
+      userName: user.name,
+      userEmail: user.email,
+      message: `Temporary password generated for ${user.name}. Share it via WhatsApp or phone.`,
+    });
   } catch (err) {
     next(err);
   }

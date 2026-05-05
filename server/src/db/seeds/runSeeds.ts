@@ -80,8 +80,9 @@ async function verifyPaymentStatuses(client: PoolClient): Promise<void> {
   for (const row of result.rows) {
     const match = row.payment_status === row.expected_status;
     const symbol = match ? '✓' : '✗';
+    const labelInvoiceNo = (row.invoice_no ?? '(null)').padEnd(15);
     console.log(
-      `  ${symbol} ${row.invoice_no.padEnd(15)} ` +
+      `  ${symbol} ${labelInvoiceNo} ` +
       `amount=${row.invoice_amount} paid=${row.total_paid} ` +
       `status=${row.payment_status} (expected: ${row.expected_status})`
     );

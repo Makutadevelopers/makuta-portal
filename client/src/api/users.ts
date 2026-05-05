@@ -41,3 +41,14 @@ export function updateUser(id: string, data: Partial<{
 export function resetUserPassword(id: string, newPassword: string): Promise<{ message: string }> {
   return apiFetch(`/users/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ newPassword }) });
 }
+
+export interface SendTempPasswordResponse {
+  tempPassword: string;
+  userName: string;
+  userEmail: string;
+  message: string;
+}
+
+export function sendTempPassword(id: string): Promise<SendTempPasswordResponse> {
+  return apiFetch(`/users/${id}/send-temp-password`, { method: 'POST' });
+}

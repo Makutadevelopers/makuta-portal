@@ -40,7 +40,23 @@ app.use(cors({
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'PUT'],
   allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
 }));
-app.use(helmet());
+// Allow the makuta-sales-crm dashboard to embed mgmt-role pages in iframes.
+// Default helmet would set X-Frame-Options: DENY which blocks them entirely.
+// Origins come from CRM_FRAME_ORIGINS env (comma-separated) — fall back to
+// dev-only localhost:3500 so prod is locked down unless explicitly opened.
+const crmFrameOrigins = (process.env.CRM_FRAME_ORIGINS ?? 'http://localhost:3500')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+app.use(helmet({
+  frameguard: false, // X-Frame-Options is superseded by CSP frame-ancestors below
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      'frame-ancestors': ["'self'", ...crmFrameOrigins],
+    },
+  },
+}));
 app.use(express.json({ limit: '2mb' }));
 
 // Global rate limiter — 200 requests per minute per IP

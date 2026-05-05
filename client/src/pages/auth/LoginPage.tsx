@@ -1,7 +1,8 @@
 import { useState, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { loginApi } from '../../api/auth';
 import { useAuth } from '../../hooks/useAuth';
+import PasswordInput from '../../components/shared/PasswordInput';
 
 const SHOW_DEMO = import.meta.env.DEV;
 
@@ -91,10 +92,14 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-xs text-gray-500 mb-1">Password</label>
-            <input
+            <div className="flex items-center justify-between mb-1">
+              <label htmlFor="password" className="block text-xs text-gray-500">Password</label>
+              <Link to="/forgot-password" className="text-xs text-[#1a3c5e] hover:underline">
+                Forgot password?
+              </Link>
+            </div>
+            <PasswordInput
               id="password"
-              type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}

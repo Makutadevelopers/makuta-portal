@@ -87,6 +87,45 @@ export async function notifyPaymentRecorded(params: {
   });
 }
 
+export async function notifyTempPassword(params: {
+  name: string;
+  email: string;
+  tempPassword: string;
+}): Promise<void> {
+  await send({
+    to: params.email,
+    subject: 'Your temporary Makuta Portal password',
+    html: `
+      <h3>Temporary password</h3>
+      <p>Hi ${params.name},</p>
+      <p>Your password has been reset. Sign in with the temporary password below, then change it from the "Change password" button at the top of the screen.</p>
+      <p style="font-size:20px;font-weight:bold;font-family:monospace;letter-spacing:2px;background:#f3f4f6;padding:10px 14px;border-radius:6px;display:inline-block;">${params.tempPassword}</p>
+      <p style="color:#666;font-size:12px;">If you didn't request this, contact your manager immediately.</p>
+      <hr><p style="color:#888;font-size:12px;">Makuta Developers — Invoice & Payment Portal</p>
+    `,
+  });
+}
+
+export async function notifyPasswordReset(params: {
+  name: string;
+  email: string;
+  resetUrl: string;
+}): Promise<void> {
+  await send({
+    to: params.email,
+    subject: 'Reset your Makuta Portal password',
+    html: `
+      <h3>Password reset request</h3>
+      <p>Hi ${params.name},</p>
+      <p>Click the link below to set a new password for the Makuta Accounting Module. This link expires in 30 minutes.</p>
+      <p><a href="${params.resetUrl}" style="background:#1a3c5e;color:white;padding:8px 16px;border-radius:6px;text-decoration:none;display:inline-block;">Reset password</a></p>
+      <p style="color:#666;font-size:12px;">If the button doesn't work, copy and paste this URL into your browser:<br>${params.resetUrl}</p>
+      <p style="color:#666;font-size:12px;">If you didn't request this, you can safely ignore this email.</p>
+      <hr><p style="color:#888;font-size:12px;">Makuta Developers — Invoice & Payment Portal</p>
+    `,
+  });
+}
+
 export async function notifyOverdueAlert(params: {
   overdueCount: number;
   totalOverdue: number;
