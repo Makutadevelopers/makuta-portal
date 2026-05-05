@@ -1,7 +1,7 @@
 variable "aws_region" {
-  description = "AWS region for the backup bucket (keep close to source bucket to minimise transfer cost)."
+  description = "AWS region for the backup bucket. Default matches the production RDS + S3 region (us-east-1) so cross-region transfer cost is zero."
   type        = string
-  default     = "ap-south-1"
+  default     = "us-east-1"
 }
 
 variable "backup_bucket_name" {

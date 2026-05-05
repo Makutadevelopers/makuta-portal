@@ -95,7 +95,7 @@ At **Settings → Secrets and variables → Actions** add:
 | `DATABASE_URL` | Postgres connection string for the dump |
 | `AWS_ACCESS_KEY_ID` | `terraform output backup_user_access_key_id` |
 | `AWS_SECRET_ACCESS_KEY` | `terraform output backup_user_secret_access_key` |
-| `AWS_REGION` | e.g. `ap-south-1` |
+| `AWS_REGION` | `us-east-1` (matches the production RDS + S3 region) |
 | `S3_SOURCE_BUCKET` | server's `S3_BUCKET_NAME` (live invoice bucket) |
 | `S3_BACKUP_BUCKET` | `terraform output backup_bucket_name` |
 

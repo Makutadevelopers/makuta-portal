@@ -17,12 +17,14 @@ lives in `server/src/config/env.ts`.
 
 ## 2. Infrastructure
 
-- [ ] **Database**: AWS RDS PostgreSQL 16 in `ap-south-1`, multi-AZ for production.
+- [ ] **API host**: AWS EC2 (`54.3.199.149`, `/opt/makuta-portal`), Dockerised, co-tenant with the CRM stack and fronted by the CRM nginx at `invoice.makutadevelopers.com`.
+- [ ] **Database**: AWS RDS PostgreSQL 16 in `us-east-1`, multi-AZ for production.
 - [ ] **DB_SSL=true** (ENFORCED) — RDS requires TLS in transit.
-- [ ] **S3 bucket** exists in `ap-south-1`, versioning enabled, public access fully blocked, lifecycle rule for attachments older than ~3 years if desired.
+- [ ] **S3 bucket** exists in `us-east-1`, versioning enabled, public access fully blocked, lifecycle rule for attachments older than ~3 years if desired.
 - [ ] **Private subnets** for EC2/ECS running the Node server; public load balancer in front.
 - [ ] **HTTPS everywhere** — terminate TLS at the ALB. Never serve `/api` over plain HTTP (the JWT would leak).
-- [ ] **Automated backups** — RDS automated backup window set, retention ≥ 7 days.
+- [ ] **Automated backups** — RDS automated backup window set, retention ≥ 7 days. See [BACKUP.md](BACKUP.md) for the application-level backup pipeline (DB dump + S3 file mirror, daily).
+- [ ] **Frontend**: Vercel project deploying `client/` on every push to `main`. DNS via Cloudflare.
 
 ## 3. CORS & client config
 
