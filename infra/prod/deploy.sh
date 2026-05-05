@@ -44,8 +44,10 @@ esac
 
 if [[ $BUILD -eq 1 ]]; then
   echo "[deploy] building images sequentially (low-RAM box)…"
-  # --no-parallel keeps peak memory low on the t3.micro-class box.
-  sudo docker compose -f "$COMPOSE_FILE" build --no-parallel
+  # Compose v5+ dropped --no-parallel; build services one at a time instead
+  # so peak memory stays low on the t3.micro-class box.
+  sudo docker compose -f "$COMPOSE_FILE" build api
+  sudo docker compose -f "$COMPOSE_FILE" build web
 fi
 
 echo "[deploy] starting containers…"
