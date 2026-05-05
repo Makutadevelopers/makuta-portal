@@ -4,13 +4,17 @@
 
 Complete daily backup of everything that matters: the PostgreSQL database
 (all sites, invoices, payments, vendors, audit log, petty cash) **and** the
-S3 invoice-attachment files. Two independent destinations:
+S3 invoice-attachment files. Three independent destinations:
 
-1. **Cloud (GitHub Actions + a separate S3 backup bucket)** — runs daily at
-   20:30 UTC automatically. No manual action needed.
-2. **External hard drive** — runs **on demand** when you plug your backup
-   drive into the Mac and run one command. Nothing is scheduled, so the
-   drive does not need to live attached to the machine.
+1. **AWS S3 backup bucket (`makuta-backup-use1`)** — production EC2 cron
+   runs `pg_dump` at 02:00 UTC, pushes the compressed dump and an S3 file
+   mirror to `s3://makuta-backup-use1/{db,file}-backups/…`. EC2 sits in
+   the same VPC as RDS, so no public-RDS exposure is needed.
+2. **GitHub Actions artifact (off-AWS copy)** — a workflow runs at 05:00
+   UTC, downloads the latest dump from the backup bucket, and stores it
+   as a 90-day GHA artifact. Survives "AWS account lost" scenarios.
+3. **External hard drive** — runs **on demand** when you plug a backup
+   drive into the Mac and run one command. Nothing scheduled.
 
 ## What gets backed up
 
@@ -62,51 +66,77 @@ When it finishes you can unplug the drive and put it away.
 
 ---
 
-## Cloud backup (automatic)
+## Cloud backup (automatic, EC2-driven)
 
-### Step A — provision the backup bucket + IAM user (Terraform)
+The actual `pg_dump` runs on the production EC2 box because RDS is not
+publicly accessible — only resources inside the VPC can reach it. The EC2
+cron writes dumps + S3 file mirrors into a dedicated backup bucket; a
+separate GitHub Actions workflow then mirrors those dumps into a 90-day
+GHA artifact for off-AWS retention.
 
-Self-contained module at [infra/terraform/backup/](infra/terraform/backup/).
-Creates a versioned, encrypted, public-access-blocked bucket with lifecycle
-rules (file snapshots → Glacier IR after 30 days, expire after a year; old
-versions expire after 90 days), plus an IAM user whose policy can **read**
-the source bucket and **put/list** on the backup bucket but cannot delete
-anything on either side.
+### Step A — backup bucket + IAM user (one-time, already provisioned)
 
-```
-cd infra/terraform/backup
-cp terraform.tfvars.example terraform.tfvars
-# edit terraform.tfvars — at minimum set a globally unique backup_bucket_name
-terraform init
-terraform apply
+For this account the backup bucket (`makuta-backup-use1`) and a dedicated
+IAM user (`makuta-backup-automation`) already exist. The IAM user policy
+allows **read** on `makuta-portal-use1` and **put/list** on
+`makuta-backup-use1` — **no `s3:Delete*`** anywhere. For a fresh setup
+elsewhere, [infra/terraform/backup/](infra/terraform/backup/) bootstraps
+the same shape (versioned bucket, encryption, lifecycle rules, scoped
+IAM user).
 
-# grab the outputs
-terraform output -raw backup_bucket_name
-terraform output -raw backup_user_access_key_id
-terraform output -raw backup_user_secret_access_key
-```
+### Step B — install the cron on the EC2 box
 
-### Step B — wire the secrets into GitHub Actions
+1. Generate an access key for `makuta-backup-automation` on your laptop:
+   ```
+   aws iam create-access-key --user-name makuta-backup-automation \
+     | python3 -c "import json,sys,os; \
+         k=json.load(sys.stdin)['AccessKey']; \
+         open('/tmp/makuta-backup-key.env','w').write( \
+           f'AWS_ACCESS_KEY_ID={k[\"AccessKeyId\"]}\n' \
+           f'AWS_SECRET_ACCESS_KEY={k[\"SecretAccessKey\"]}\n' \
+           f'S3_BACKUP_BUCKET=makuta-backup-use1\n' \
+           f'AWS_REGION=us-east-1\n'); \
+         os.chmod('/tmp/makuta-backup-key.env',0o600)"
+   ```
+2. Copy the key file to the EC2 box and install:
+   ```
+   scp /tmp/makuta-backup-key.env ec2-user@52.3.199.149:/tmp/
+   ssh ec2-user@52.3.199.149
+   cd /opt/makuta-portal && git pull
+   sudo bash scripts/install-ec2-backup-cron.sh /tmp/makuta-backup-key.env
+   ```
+   The installer:
+   - moves the key file to `/etc/makuta/backup-creds.env` (root:root, 600)
+   - adds a root crontab entry that fires every day at 02:00 UTC
+   - runs the backup once now to verify
 
-At **Settings → Secrets and variables → Actions** add:
+3. Cleanup on both ends:
+   ```
+   rm /tmp/makuta-backup-key.env       # both your laptop and the EC2 box
+   ```
 
-| Secret | Source |
+After install, daily logs land at `/var/log/makuta/backup-YYYYMMDD.log`.
+
+### Step C — GHA mirror secrets
+
+The mirror workflow at
+[.github/workflows/daily-db-backup.yml](.github/workflows/daily-db-backup.yml)
+needs **read** access to the backup bucket so it can pull the freshest
+dump and store it as a 90-day artifact. Set these repo secrets at
+**Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
 |---|---|
-| `DATABASE_URL` | Postgres connection string for the dump |
-| `AWS_ACCESS_KEY_ID` | `terraform output backup_user_access_key_id` |
-| `AWS_SECRET_ACCESS_KEY` | `terraform output backup_user_secret_access_key` |
-| `AWS_REGION` | `us-east-1` (matches the production RDS + S3 region) |
-| `S3_SOURCE_BUCKET` | server's `S3_BUCKET_NAME` (live invoice bucket) |
-| `S3_BACKUP_BUCKET` | `terraform output backup_bucket_name` |
+| `AWS_ACCESS_KEY_ID` | a key from `makuta-backup-automation` |
+| `AWS_SECRET_ACCESS_KEY` | (matching secret) |
+| `AWS_REGION` | `us-east-1` |
+| `S3_BACKUP_BUCKET` | `makuta-backup-use1` |
 
-The workflow at [.github/workflows/daily-db-backup.yml](.github/workflows/daily-db-backup.yml)
-runs daily and:
+The workflow runs at 05:00 UTC (~3h after the EC2 cron), downloads the
+freshest dump from the bucket, and stores it as `db-backup-<run-number>`.
 
-- dumps the DB to a 90-day GitHub artifact,
-- copies the dump to `s3://$S3_BACKUP_BUCKET/db-backups/YYYY-MM-DD/`,
-- mirrors invoice files to `s3://$S3_BACKUP_BUCKET/file-backups/YYYY-MM-DD/`.
-
-If the AWS secrets are missing, the S3 steps skip gracefully (DB-only backup).
+`DATABASE_URL` is no longer used by the workflow — it can be deleted from
+GH secrets (the EC2 cron uses the production `.env` directly).
 
 ---
 
