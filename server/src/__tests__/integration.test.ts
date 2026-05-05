@@ -6,7 +6,7 @@
 // Run the server first: `npm run dev:server` — then `npm test` from the server package.
 // Tests are skipped automatically if the server is not reachable.
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 
 const BASE = process.env.TEST_BASE_URL || 'http://localhost:4000';
 const stamp = Date.now().toString().slice(-8);
@@ -75,12 +75,18 @@ afterAll(async () => {
   }
 });
 
-// Helper: skip suite body when server is down
+// Skip every test when the dev server isn't reachable (CI runs vitest without
+// starting the server). Using vitest's runtime skip so the test reports as
+// skipped instead of failed — throwing here would surface as a failure.
+beforeEach((ctx) => {
+  if (!serverUp) ctx.skip();
+});
+
+// Kept as a no-op so existing call sites compile; the beforeEach above does
+// the real work. We retain the function to keep diffs small if some test
+// wants extra defense-in-depth in the future.
 function requireServer() {
-  if (!serverUp) {
-    // eslint-disable-next-line @typescript-eslint/no-throw-literal
-    throw new Error('SKIP: server not reachable');
-  }
+  /* see beforeEach above — runtime skip handles the server-down case */
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
