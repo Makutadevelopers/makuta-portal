@@ -337,7 +337,7 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
     );
 
     const callerRole = req.user!.role;
-    const callerSite = req.user!.site;
+    const callerSites = req.user!.sites;
 
     // Phase 1: normalize all rows
     const normalized: NormalizedRow[] = [];
@@ -353,8 +353,8 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
         continue;
       }
 
-      // Site accountants can only import rows for their own site
-      if (callerRole === 'site' && norm.site && norm.site !== callerSite) {
+      // Site accountants can only import rows for sites they own
+      if (callerRole === 'site' && norm.site && !callerSites.includes(norm.site)) {
         skippedRows.push({ row: rowNum, reason: `site "${norm.site}" not owned by current user` });
         continue;
       }

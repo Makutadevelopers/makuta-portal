@@ -3,10 +3,11 @@
 //
 // Visibility rules (per product decision):
 //   ho   — all sites, full read + write
-//   site — own site only, read + log expenses
+//   site — own site(s) only, read + log expenses
 //   mgmt — 403 everywhere
 //
-// Site-scope filtering is enforced inside the controllers using req.user.site.
+// Site-scope filtering is enforced inside the controllers using req.user.sites
+// (a single user may own multiple sites).
 
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';

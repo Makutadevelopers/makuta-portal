@@ -44,9 +44,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const role = user?.role;
   const tabs = role === 'ho' ? HO_TABS : role === 'mgmt' ? MGMT_TABS : SITE_TABS;
+  const userSites = user?.sites ?? [];
+  const sitesLabel = userSites.join(' + ');
   const subtitle = role === 'ho' ? 'Head Office — Full Access'
     : role === 'mgmt' ? 'Management — Read Only'
-      : `${user?.site ?? ''} — Site Portal`;
+      : `${sitesLabel} — Site Portal`;
 
   const initials = user?.name?.split(' ').map(n => n[0]).join('').slice(0, 2) ?? '';
   const avatarBg = role === 'ho' ? 'bg-blue-50 text-blue-800'
@@ -237,7 +239,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Role banners */}
       {role === 'site' && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 py-1.5 text-xs text-amber-800">
-          Viewing <strong>{user?.site}</strong> data only · <span className="hidden sm:inline">Enter invoices and attach documents · </span>Payment processing is handled by Head Office
+          Viewing <strong>{sitesLabel}</strong> data only · <span className="hidden sm:inline">Enter invoices and attach documents · </span>Payment processing is handled by Head Office
         </div>
       )}
       {role === 'mgmt' && (

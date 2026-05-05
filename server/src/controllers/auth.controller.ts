@@ -22,7 +22,7 @@ interface UserRow {
   email: string;
   password_hash: string;
   role: string;
-  site: string | null;
+  sites: string[];
   title: string | null;
   is_active: boolean;
 }
@@ -32,7 +32,7 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
     const { email, password } = loginSchema.parse(req.body);
 
     const user = await queryOne<UserRow>(
-      'SELECT id, name, email, password_hash, role, site, title, is_active FROM users WHERE email = $1',
+      'SELECT id, name, email, password_hash, role, sites, title, is_active FROM users WHERE email = $1',
       [email]
     );
 
@@ -56,7 +56,7 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
       id: user.id,
       name: user.name,
       role: user.role as 'ho' | 'site' | 'mgmt',
-      site: user.site,
+      sites: user.sites ?? [],
       title: user.title,
     };
 

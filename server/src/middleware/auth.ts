@@ -11,7 +11,7 @@ export interface JwtPayload {
   id: string;
   name: string;
   role: 'ho' | 'site' | 'mgmt';
-  site: string | null;
+  sites: string[];
   title: string | null;
 }
 
@@ -42,7 +42,13 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
   }
 
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+    const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload & { site?: string | null };
+    // Backward-compat: tokens issued before the multi-site change carry `site`
+    // (single string) instead of `sites` (array). Coerce so existing sessions
+    // keep working until they expire (8h) without forcing a global logout.
+    if (!Array.isArray(decoded.sites)) {
+      decoded.sites = decoded.site ? [decoded.site] : [];
+    }
     req.user = decoded;
     next();
   } catch {

@@ -14,7 +14,7 @@ interface UserRow {
   name: string;
   email: string;
   role: string;
-  site: string | null;
+  sites: string[];
   title: string | null;
   is_active: boolean;
   created_at: string;
@@ -25,7 +25,7 @@ interface UserRow {
 export async function listUsers(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const users = await query<UserRow>(
-      `SELECT id, name, email, role, site, title, is_active, created_at, updated_at
+      `SELECT id, name, email, role, sites, title, is_active, created_at, updated_at
        FROM users ORDER BY role, name`
     );
     res.json(users);
@@ -40,7 +40,11 @@ const createSchema = z.object({
   email: z.string().email('Valid email is required'),
   password: z.string().min(4, 'Password must be at least 4 characters'),
   role: z.enum(['ho', 'site', 'mgmt']),
-  site: z.string().nullable().default(null),
+  // Sites array — site role must own ≥1 site, ho/mgmt are global so usually [].
+  // Accepts a single string (legacy) and coerces to a 1-element array.
+  sites: z.union([z.array(z.string()), z.string()])
+    .optional()
+    .transform(v => (Array.isArray(v) ? v : v ? [v] : [])),
   title: z.string().nullable().default(null),
 });
 
@@ -60,16 +64,17 @@ export async function createUser(req: Request, res: Response, next: NextFunction
     const hash = await bcrypt.hash(data.password, 12);
 
     const user = await queryOne<UserRow>(
-      `INSERT INTO users (name, email, password_hash, role, site, title)
+      `INSERT INTO users (name, email, password_hash, role, sites, title)
        VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, name, email, role, site, title, is_active, created_at, updated_at`,
-      [data.name, data.email, hash, data.role, data.site, data.title]
+       RETURNING id, name, email, role, sites, title, is_active, created_at, updated_at`,
+      [data.name, data.email, hash, data.role, data.sites, data.title]
     );
 
+    const sitesLabel = data.sites.length ? `, ${data.sites.join(' + ')}` : '';
     await logAudit({
       userId: req.user!.id,
-      action: `Created user "${data.name}" (${data.role}${data.site ? `, ${data.site}` : ''})`,
-      metadata: { targetUserId: user?.id, role: data.role, site: data.site },
+      action: `Created user "${data.name}" (${data.role}${sitesLabel})`,
+      metadata: { targetUserId: user?.id, role: data.role, sites: data.sites },
     });
 
     res.status(201).json(user);
@@ -83,7 +88,9 @@ const updateSchema = z.object({
   name: z.string().min(1).optional(),
   email: z.string().email().optional(),
   role: z.enum(['ho', 'site', 'mgmt']).optional(),
-  site: z.string().nullable().optional(),
+  sites: z.union([z.array(z.string()), z.string()])
+    .optional()
+    .transform(v => (v === undefined ? undefined : Array.isArray(v) ? v : v ? [v] : [])),
   title: z.string().nullable().optional(),
   is_active: z.boolean().optional(),
 });
@@ -137,7 +144,7 @@ export async function updateUser(req: Request, res: Response, next: NextFunction
 
     const user = await queryOne<UserRow>(
       `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx}
-       RETURNING id, name, email, role, site, title, is_active, created_at, updated_at`,
+       RETURNING id, name, email, role, sites, title, is_active, created_at, updated_at`,
       values
     );
 

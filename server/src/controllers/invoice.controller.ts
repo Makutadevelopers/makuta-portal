@@ -75,7 +75,7 @@ interface InvoiceRow {
 
 export async function getInvoices(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { role, site } = req.user!;
+    const { role, sites } = req.user!;
 
     // Computed fields shared by all roles: allocated_credits + effective_payable
     const CN_FIELDS = `
@@ -84,15 +84,15 @@ export async function getInvoices(req: Request, res: Response, next: NextFunctio
     `;
 
     if (role === 'site') {
-      // Site: own site only, NO payment data
+      // Site: own sites only, NO payment data
       // created_at tiebreaker so a back-dated invoice added today still
       // appears above older rows with the same invoice_date.
       const invoices = await query<InvoiceRow>(
         `SELECT ${SITE_COLUMNS}, ${CN_FIELDS},
            (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = invoices.id)::int AS attachment_count
-         FROM invoices WHERE site = $1 AND deleted_at IS NULL
+         FROM invoices WHERE site = ANY($1::text[]) AND deleted_at IS NULL
          ORDER BY invoice_date DESC, created_at DESC`,
-        [site]
+        [sites]
       );
       res.json(invoices);
     } else {
@@ -113,10 +113,10 @@ export async function getInvoices(req: Request, res: Response, next: NextFunctio
 export async function createInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const data = createInvoiceSchema.parse(req.body);
-    const { role, site, id: userId } = req.user!;
+    const { role, sites, id: userId } = req.user!;
 
-    // Site accountants can only create invoices for their own site
-    if (role === 'site' && data.site !== site) {
+    // Site accountants can only create invoices for sites they own
+    if (role === 'site' && !sites.includes(data.site)) {
       res.status(403).json({ error: 'Forbidden', message: 'You can only create invoices for your own site' });
       return;
     }
@@ -238,7 +238,7 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
   try {
     const id = req.params.id as string;
     const data = updateInvoiceSchema.parse(req.body);
-    const { role, site } = req.user!;
+    const { role, sites } = req.user!;
 
     // Verify invoice exists (excludes soft-deleted), check site ownership, and finalized status
     const existing = await queryOne<InvoiceRow>(
@@ -256,14 +256,14 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
       return;
     }
 
-    if (role === 'site' && existing.site !== site) {
+    if (role === 'site' && !sites.includes(String(existing.site))) {
       res.status(403).json({ error: 'Forbidden', message: 'You can only edit invoices for your own site' });
       return;
     }
 
-    // H1: site role cannot change the site of an invoice — that would let them escape their boundary
-    if (role === 'site' && data.site !== undefined && data.site !== existing.site) {
-      res.status(403).json({ error: 'Forbidden', message: 'Site accountants cannot change the site of an invoice' });
+    // H1: site role cannot move an invoice to a site they don't own
+    if (role === 'site' && data.site !== undefined && !sites.includes(data.site)) {
+      res.status(403).json({ error: 'Forbidden', message: 'Site accountants cannot move invoices to a site they do not own' });
       return;
     }
 
@@ -603,7 +603,7 @@ export async function markDisputed(req: Request, res: Response, next: NextFuncti
   try {
     const id = req.params.id as string;
     const data = markDisputeSchema.parse(req.body);
-    const { role, site, id: userId } = req.user!;
+    const { role, sites, id: userId } = req.user!;
 
     const existing = await queryOne<InvoiceRow>(
       'SELECT id, site, invoice_no FROM invoices WHERE id = $1 AND deleted_at IS NULL',
@@ -613,7 +613,7 @@ export async function markDisputed(req: Request, res: Response, next: NextFuncti
       res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
       return;
     }
-    if (role === 'site' && existing.site !== site) {
+    if (role === 'site' && !sites.includes(String(existing.site))) {
       res.status(403).json({
         error: 'Forbidden',
         message: 'You can only dispute invoices for your own site',
@@ -647,7 +647,7 @@ export async function clearDispute(req: Request, res: Response, next: NextFuncti
   try {
     const id = req.params.id as string;
     const data = clearDisputeSchema.parse(req.body ?? {});
-    const { role, site, id: userId } = req.user!;
+    const { role, sites, id: userId } = req.user!;
 
     const existing = await queryOne<InvoiceRow>(
       'SELECT id, site, invoice_no FROM invoices WHERE id = $1 AND deleted_at IS NULL',
@@ -657,7 +657,7 @@ export async function clearDispute(req: Request, res: Response, next: NextFuncti
       res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
       return;
     }
-    if (role === 'site' && existing.site !== site) {
+    if (role === 'site' && !sites.includes(String(existing.site))) {
       res.status(403).json({
         error: 'Forbidden',
         message: 'You can only clear disputes for your own site',

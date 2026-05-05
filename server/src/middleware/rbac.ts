@@ -3,7 +3,8 @@
 // Usage: router.get('/vendors', authenticate, requireRole(['ho']), handler)
 //
 // IMPORTANT: This only checks the role. For site-scoped data,
-// controllers MUST also filter by req.user.site in their queries.
+// controllers MUST also filter by req.user.sites in their queries
+// (a user may own multiple sites — use site = ANY($1::text[])).
 
 import { Request, Response, NextFunction } from 'express';
 

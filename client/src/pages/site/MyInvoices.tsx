@@ -19,6 +19,7 @@ const MINOR_LIMIT = 50000;
 
 export default function MyInvoices() {
   const { user } = useAuth();
+  const userSites = useMemo(() => user?.sites ?? [], [user?.sites]);
   const { invoices, loading, refresh } = useInvoices();
   const { vendors } = useVendors();
   const [search, setSearch] = useState('');
@@ -38,6 +39,11 @@ export default function MyInvoices() {
   );
   const selectedInvoice = selectedIds.size === 1 ? selectedInvoices[0] ?? null : null;
   const bulkPayable = selectedInvoices.filter(i => !i.pushed && i.payment_status !== 'Paid');
+  // Bulk-pay draws from a single site's petty cash float. If the selection
+  // spans sites (only possible for multi-site users), block bulk pay until
+  // they narrow it down — otherwise we'd pull from the wrong float.
+  const bulkPaySite = bulkPayable[0]?.site ?? '';
+  const bulkPaySpansSites = bulkPayable.some(i => i.site !== bulkPaySite);
 
   function toggleSelected(id: string) {
     setSelectedIds(prev => {
@@ -70,8 +76,11 @@ export default function MyInvoices() {
           {bulkPayable.length > 0 && (
             <button
               onClick={() => setBulkPayOpen(true)}
-              className="px-3 py-2 bg-green-700 text-white text-sm font-medium rounded-lg hover:bg-green-800"
-              title="Pay selected invoices from petty cash (each ≤ ₹50,000)"
+              disabled={bulkPaySpansSites}
+              className="px-3 py-2 bg-green-700 text-white text-sm font-medium rounded-lg hover:bg-green-800 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              title={bulkPaySpansSites
+                ? 'Selection spans multiple sites — bulk pay only works within a single site'
+                : 'Pay selected invoices from petty cash (each ≤ ₹50,000)'}
             >
               Pay Selected ({bulkPayable.length})
             </button>
@@ -137,10 +146,10 @@ export default function MyInvoices() {
       )}
 
       {/* Bulk pay from petty cash modal */}
-      {bulkPayOpen && bulkPayable.length > 0 && (
+      {bulkPayOpen && bulkPayable.length > 0 && !bulkPaySpansSites && (
         <SiteBulkPayModal
           invoices={bulkPayable}
-          site={user?.site ?? ''}
+          site={bulkPaySite}
           onClose={() => setBulkPayOpen(false)}
           onDone={(paid, failed) => {
             setBulkPayOpen(false);
@@ -156,7 +165,7 @@ export default function MyInvoices() {
       {showForm && (
         <InvoiceForm
           key={duplicateFrom ? `dup-${duplicateFrom.id}` : 'new'}
-          site={user?.site ?? ''}
+          siteOptions={userSites}
           vendors={vendors}
           editInvoice={null}
           prefillFrom={duplicateFrom}
@@ -307,7 +316,7 @@ export default function MyInvoices() {
                     <td colSpan={11} className="px-4 py-4">
                       <InvoiceForm
                         key={`edit-${inv.id}`}
-                        site={user?.site ?? ''}
+                        siteOptions={userSites}
                         vendors={vendors}
                         editInvoice={inv}
                         onCancel={() => setExpandedEditId(null)}
@@ -332,8 +341,8 @@ export default function MyInvoices() {
 // ── Invoice Form ────────────────────────────────────────────────────────────
 interface Vendor { id: string; name: string; payment_terms: number; category: string | null; }
 
-function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSaved }: {
-  site: string;
+function InvoiceForm({ siteOptions, vendors, editInvoice, prefillFrom, onCancel, onSaved }: {
+  siteOptions: string[];
   vendors: Vendor[];
   editInvoice: Invoice | null;
   prefillFrom?: Invoice | null;
@@ -347,6 +356,11 @@ function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSave
   const { notify } = useToast();
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
+  // Initial site: edit/duplicate uses the source row; new uses the first
+  // option. The user can still change it via the picker below when the form
+  // owner has more than one site.
+  const initialSite = seed?.site ?? siteOptions[0] ?? '';
+  const [site, setSite] = useState<string>(initialSite);
   const DRAFT_KEY = `makuta:invoice-draft:${site}`;
 
   // Read draft synchronously on the first render so initial state matches it,
@@ -734,9 +748,19 @@ function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSave
         {/* Row 4: Site */}
         <div className="mb-4">
           <label className="block text-xs text-gray-500 mb-1">Site Location</label>
-          <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 bg-gray-50">
-            {site}
-          </div>
+          {/* Lock the site on edit/duplicate (the source row's site is source of
+              truth) and on single-site users. Show a picker only when a new
+              invoice is being entered AND the user owns more than one site. */}
+          {isEdit || isDuplicate || siteOptions.length <= 1 ? (
+            <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 bg-gray-50">
+              {site}
+            </div>
+          ) : (
+            <select value={site} onChange={e => setSite(e.target.value)}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-200">
+              {siteOptions.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
         </div>
 
         {/* Row 5: Tax split */}

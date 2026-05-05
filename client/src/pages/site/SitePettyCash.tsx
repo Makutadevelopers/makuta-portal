@@ -14,7 +14,14 @@ const MINOR_LIMIT = 50000;
 
 export default function SitePettyCash() {
   const { user } = useAuth();
-  const site = user?.site ?? '';
+  const userSites = useMemo(() => user?.sites ?? [], [user?.sites]);
+  // Active site for the page — defaults to the first owned site. When the user
+  // owns more than one site, a picker lets them switch which one this page is
+  // showing (balance, ledger, expense form all key off `site`).
+  const [site, setSite] = useState<string>('');
+  useEffect(() => {
+    if (!site && userSites.length > 0) setSite(userSites[0]);
+  }, [site, userSites]);
   const { notify } = useToast();
   const { invoices, refresh: refreshInvoices } = useInvoices();
   const today = new Date().toISOString().split('T')[0];
@@ -123,12 +130,18 @@ export default function SitePettyCash() {
     <AppShell>
       <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
         <div>
-          <div className="text-lg font-medium text-gray-900">Petty Cash</div>
+          <div className="text-lg font-medium text-gray-900">Petty Cash{site ? ` — ${site}` : ''}</div>
           <div className="text-xs text-gray-500 mt-1">
             Your site's cash float · Log site-level expenses here
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {userSites.length > 1 && (
+            <select value={site} onChange={e => setSite(e.target.value)}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-700">
+              {userSites.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
           <button onClick={() => setShowPay(true)}
             disabled={empty || payableInvoices.length === 0}
             title={payableInvoices.length === 0 ? 'No draft invoices to pay' : empty ? 'No petty cash available' : ''}

@@ -73,8 +73,8 @@ export default function SiteDashboard() {
   return (
     <AppShell>
       <div className="mb-6">
-        <div className="text-lg font-medium text-gray-900">Dashboard — {user?.site}</div>
-        <div className="text-xs text-gray-500 mt-1">Invoice summary for your site · cashflow and aging managed by Head Office</div>
+        <div className="text-lg font-medium text-gray-900">Dashboard — {(user?.sites ?? []).join(' + ')}</div>
+        <div className="text-xs text-gray-500 mt-1">Invoice summary for your site{(user?.sites?.length ?? 0) > 1 ? 's' : ''} · cashflow and aging managed by Head Office</div>
       </div>
 
       {loading ? (

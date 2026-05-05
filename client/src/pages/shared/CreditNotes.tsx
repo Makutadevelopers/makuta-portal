@@ -88,7 +88,7 @@ export default function CreditNotes() {
         <CreditNoteForm
           vendors={vendors}
           invoices={invoices}
-          defaultSite={user?.site ?? SITES[0]}
+          defaultSite={user?.sites?.[0] ?? SITES[0]}
           isSite={isSite}
           onCancel={() => setShowForm(false)}
           onSaved={() => {

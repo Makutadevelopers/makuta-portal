@@ -81,16 +81,22 @@ interface ExpenseRow {
 // GET /api/petty-cash/balances/:site  — HO or site (site restricted to own)
 export async function getBalances(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { role, site: userSite } = req.user!;
+    const { role, sites: userSites } = req.user!;
     const siteParam = (req.params.site as string | undefined) ?? null;
 
     if (role === 'site') {
-      if (siteParam && siteParam !== userSite) {
-        res.status(403).json({ error: 'Forbidden', message: 'You can only view your own site balance' });
+      if (siteParam) {
+        if (!userSites.includes(siteParam)) {
+          res.status(403).json({ error: 'Forbidden', message: 'You can only view your own site balance' });
+          return;
+        }
+        const row = await fetchSiteBalance(siteParam);
+        res.json(row);
         return;
       }
-      const row = await fetchSiteBalance(userSite!);
-      res.json(row);
+      // No site param — return one balance row per owned site
+      const rows = await Promise.all(userSites.map(s => fetchSiteBalance(s)));
+      res.json(rows);
       return;
     }
 
@@ -181,18 +187,26 @@ export async function createDisbursement(req: Request, res: Response, next: Next
 // GET /api/petty-cash/disbursements?site=X — HO (any site) | site (own only)
 export async function listDisbursements(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { role, site: userSite } = req.user!;
+    const { role, sites: userSites } = req.user!;
     const qSite = (req.query.site as string | undefined) ?? null;
-    const site = role === 'site' ? userSite! : qSite;
 
-    if (role === 'site' && qSite && qSite !== userSite) {
+    if (role === 'site' && qSite && !userSites.includes(qSite)) {
       res.status(403).json({ error: 'Forbidden', message: 'You can only view your own site' });
       return;
     }
 
-    const where = site ? 'WHERE d.site = $1 AND d.deleted_at IS NULL'
-                       : 'WHERE d.deleted_at IS NULL';
-    const params = site ? [site] : [];
+    // Site role: filter to one of their sites if qSite is set, else all owned sites.
+    // HO/mgmt: filter to qSite if set, else no site filter at all.
+    let where: string;
+    let params: unknown[];
+    if (role === 'site') {
+      if (qSite) { where = 'WHERE d.site = $1 AND d.deleted_at IS NULL'; params = [qSite]; }
+      else       { where = 'WHERE d.site = ANY($1::text[]) AND d.deleted_at IS NULL'; params = [userSites]; }
+    } else if (qSite) {
+      where = 'WHERE d.site = $1 AND d.deleted_at IS NULL'; params = [qSite];
+    } else {
+      where = 'WHERE d.deleted_at IS NULL'; params = [];
+    }
     const rows = await query<DisbursementRow>(
       `SELECT d.*, u.name AS given_by_name
          FROM petty_cash_disbursements d
@@ -209,10 +223,10 @@ export async function listDisbursements(req: Request, res: Response, next: NextF
 // POST /api/petty-cash/expenses — HO (any site) | site (own only)
 export async function createExpense(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { role, site: userSite, id: userId } = req.user!;
+    const { role, sites: userSites, id: userId } = req.user!;
     const data = expenseSchema.parse(req.body);
 
-    if (role === 'site' && data.site !== userSite) {
+    if (role === 'site' && !userSites.includes(data.site)) {
       res.status(403).json({ error: 'Forbidden', message: 'You can only log expenses for your own site' });
       return;
     }
@@ -339,18 +353,24 @@ export async function createExpense(req: Request, res: Response, next: NextFunct
 // GET /api/petty-cash/expenses?site=X — HO (any site) | site (own only)
 export async function listExpenses(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { role, site: userSite } = req.user!;
+    const { role, sites: userSites } = req.user!;
     const qSite = (req.query.site as string | undefined) ?? null;
-    const site = role === 'site' ? userSite! : qSite;
 
-    if (role === 'site' && qSite && qSite !== userSite) {
+    if (role === 'site' && qSite && !userSites.includes(qSite)) {
       res.status(403).json({ error: 'Forbidden', message: 'You can only view your own site' });
       return;
     }
 
-    const where = site ? 'WHERE e.site = $1 AND e.deleted_at IS NULL'
-                       : 'WHERE e.deleted_at IS NULL';
-    const params = site ? [site] : [];
+    let where: string;
+    let params: unknown[];
+    if (role === 'site') {
+      if (qSite) { where = 'WHERE e.site = $1 AND e.deleted_at IS NULL'; params = [qSite]; }
+      else       { where = 'WHERE e.site = ANY($1::text[]) AND e.deleted_at IS NULL'; params = [userSites]; }
+    } else if (qSite) {
+      where = 'WHERE e.site = $1 AND e.deleted_at IS NULL'; params = [qSite];
+    } else {
+      where = 'WHERE e.deleted_at IS NULL'; params = [];
+    }
     const rows = await query<ExpenseRow>(
       `SELECT e.*, u.name AS recorded_by_name, i.invoice_no
          FROM petty_cash_expenses e
@@ -368,17 +388,26 @@ export async function listExpenses(req: Request, res: Response, next: NextFuncti
 // site role: own site only; HO: any site (defaults to all if no site query param)
 export async function getLedger(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { role, site: userSite } = req.user!;
+    const { role, sites: userSites } = req.user!;
     const qSite = (req.query.site as string | undefined) ?? null;
 
-    if (role === 'site' && qSite && qSite !== userSite) {
+    if (role === 'site' && qSite && !userSites.includes(qSite)) {
       res.status(403).json({ error: 'Forbidden', message: 'You can only view your own site' });
       return;
     }
 
-    const site = role === 'site' ? userSite! : qSite;
-    const filter = site ? 'AND site = $1' : '';
-    const params = site ? [site] : [];
+    // Site role: filter to one of their sites if qSite is set, else all owned sites.
+    let filter: string;
+    let params: unknown[];
+    if (role === 'site') {
+      if (qSite) { filter = 'AND site = $1'; params = [qSite]; }
+      else       { filter = 'AND site = ANY($1::text[])'; params = [userSites]; }
+    } else if (qSite) {
+      filter = 'AND site = $1'; params = [qSite];
+    } else {
+      filter = ''; params = [];
+    }
+    const filterE = filter.replace(/\bsite\b/g, 'e.site');
 
     const rows = await query<{
       id: string; site: string; event_type: 'in' | 'out'; amount: string;
@@ -403,7 +432,7 @@ export async function getLedger(req: Request, res: Response, next: NextFunction)
            (SELECT u.name FROM users u WHERE u.id = e.recorded_by) AS by_name,
            e.created_at
          FROM petty_cash_expenses e
-         WHERE e.deleted_at IS NULL ${filter ? 'AND e.site = $1' : ''}
+         WHERE e.deleted_at IS NULL ${filterE}
          ORDER BY event_date DESC, created_at DESC`,
       params
     );

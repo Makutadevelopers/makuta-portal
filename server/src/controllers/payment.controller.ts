@@ -78,7 +78,7 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
       if (invoice.deleted_at) {
         return { status: 404, body: { error: 'Not Found', message: 'Invoice has been deleted' } };
       }
-      if (role === 'site' && invoice.site !== req.user!.site) {
+      if (role === 'site' && !req.user!.sites.includes(String(invoice.site))) {
         return { status: 403, body: { error: 'Forbidden', message: 'You can only record payments for invoices in your own site' } };
       }
       // H4: Site accountants may not pay finalized invoices — those need HO

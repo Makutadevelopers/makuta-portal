@@ -4,7 +4,8 @@ export interface User {
   id: string;
   name: string;
   role: Role;
-  site: string | null;
+  // Sites the user owns. HO/MD usually have []; site role has ≥1 entry.
+  sites: string[];
   title: string | null;
 }
 

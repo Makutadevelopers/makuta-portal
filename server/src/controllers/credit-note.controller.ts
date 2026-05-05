@@ -97,10 +97,10 @@ function unallocatedBalance(cn: CreditNoteRow, allocs: AllocationRow[]): number 
 
 export async function listCreditNotes(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { role, site } = req.user!;
+    const { role, sites } = req.user!;
 
-    const sqlWhere = role === 'site' ? 'WHERE site = $1 AND deleted_at IS NULL' : 'WHERE deleted_at IS NULL';
-    const params = role === 'site' ? [site] : [];
+    const sqlWhere = role === 'site' ? 'WHERE site = ANY($1::text[]) AND deleted_at IS NULL' : 'WHERE deleted_at IS NULL';
+    const params: unknown[] = role === 'site' ? [sites] : [];
 
     const rows = await query<CreditNoteRow>(
       `SELECT * FROM credit_notes ${sqlWhere} ORDER BY cn_date DESC, created_at DESC`,
@@ -125,7 +125,7 @@ export async function listCreditNotes(req: Request, res: Response, next: NextFun
 export async function getCreditNote(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const id = req.params.id as string;
-    const { role, site } = req.user!;
+    const { role, sites } = req.user!;
 
     const row = await queryOne<CreditNoteRow>(
       'SELECT * FROM credit_notes WHERE id = $1 AND deleted_at IS NULL',
@@ -135,7 +135,7 @@ export async function getCreditNote(req: Request, res: Response, next: NextFunct
       res.status(404).json({ error: 'Not Found', message: 'Credit note not found' });
       return;
     }
-    if (role === 'site' && row.site !== site) {
+    if (role === 'site' && !sites.includes(row.site)) {
       res.status(403).json({ error: 'Forbidden', message: 'Not your site' });
       return;
     }
@@ -156,9 +156,9 @@ export async function getCreditNote(req: Request, res: Response, next: NextFunct
 export async function createCreditNote(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const data = createCreditNoteSchema.parse(req.body);
-    const { role, site, id: userId } = req.user!;
+    const { role, sites, id: userId } = req.user!;
 
-    if (role === 'site' && data.site !== site) {
+    if (role === 'site' && !sites.includes(data.site)) {
       res.status(403).json({ error: 'Forbidden', message: 'You can only create credit notes for your own site' });
       return;
     }
@@ -184,7 +184,7 @@ export async function createCreditNote(req: Request, res: Response, next: NextFu
           res.status(400).json({ error: 'Bad Request', message: 'One or more invoices not found' });
           return;
         }
-        const mismatched = invs.find((i) => i.site !== site);
+        const mismatched = invs.find((i) => !sites.includes(i.site));
         if (mismatched) {
           res.status(403).json({ error: 'Forbidden', message: 'Cannot allocate to invoices outside your site' });
           return;
@@ -265,7 +265,7 @@ export async function updateCreditNote(req: Request, res: Response, next: NextFu
   try {
     const id = req.params.id as string;
     const data = updateCreditNoteSchema.parse(req.body);
-    const { role, site, id: userId } = req.user!;
+    const { role, sites, id: userId } = req.user!;
 
     const existing = await queryOne<CreditNoteRow>(
       'SELECT * FROM credit_notes WHERE id = $1 AND deleted_at IS NULL',
@@ -275,13 +275,13 @@ export async function updateCreditNote(req: Request, res: Response, next: NextFu
       res.status(404).json({ error: 'Not Found', message: 'Credit note not found' });
       return;
     }
-    if (role === 'site' && existing.site !== site) {
+    if (role === 'site' && !sites.includes(existing.site)) {
       res.status(403).json({ error: 'Forbidden', message: 'Not your site' });
       return;
     }
-    // Site cannot change site field
-    if (role === 'site' && data.site !== undefined && data.site !== existing.site) {
-      res.status(403).json({ error: 'Forbidden', message: 'Site accountants cannot change site' });
+    // Site cannot move a CN to a site they don't own
+    if (role === 'site' && data.site !== undefined && !sites.includes(data.site)) {
+      res.status(403).json({ error: 'Forbidden', message: 'Site accountants cannot move credit notes to a site they do not own' });
       return;
     }
     // If the CN already has allocations, prevent changing total_amount below current allocated sum
@@ -383,7 +383,7 @@ export async function deleteCreditNote(req: Request, res: Response, next: NextFu
 export async function addAllocation(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const cnId = req.params.id as string;
-    const { role, site, id: userId } = req.user!;
+    const { role, sites, id: userId } = req.user!;
     const data = allocationInputSchema.parse(req.body);
 
     const cn = await queryOne<CreditNoteRow>(
@@ -394,7 +394,7 @@ export async function addAllocation(req: Request, res: Response, next: NextFunct
       res.status(404).json({ error: 'Not Found', message: 'Credit note not found' });
       return;
     }
-    if (role === 'site' && cn.site !== site) {
+    if (role === 'site' && !sites.includes(cn.site)) {
       res.status(403).json({ error: 'Forbidden', message: 'Not your site' });
       return;
     }
@@ -407,7 +407,7 @@ export async function addAllocation(req: Request, res: Response, next: NextFunct
       res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
       return;
     }
-    if (role === 'site' && inv.site !== site) {
+    if (role === 'site' && !sites.includes(inv.site)) {
       res.status(403).json({ error: 'Forbidden', message: 'Cannot allocate to invoices outside your site' });
       return;
     }
