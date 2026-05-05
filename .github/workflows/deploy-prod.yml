@@ -1,0 +1,48 @@
+name: Deploy prod (EC2)
+
+# Auto-deploys main to the production EC2 box at 52.3.199.149.
+# Each push SSHes in, fast-forwards the working tree, and runs the
+# idempotent deploy.sh which rebuilds containers, applies migrations,
+# and reloads nginx. Includes a commit-message escape hatch ([skip deploy])
+# for emergency rollbacks done by hand on the box.
+#
+# Required GitHub Secrets (Settings → Secrets and variables → Actions):
+#   EC2_HOST        — public IP or DNS, e.g. 52.3.199.149
+#   EC2_USER        — SSH user, typically `ubuntu` or `ec2-user`
+#   EC2_SSH_KEY     — full PEM private key contents (BEGIN…END lines included)
+#   EC2_SSH_PORT    — optional, defaults to 22
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # lets HO redeploy manually from the Actions tab
+
+# Serialize deploys: if a second push lands while the first is still SSH'd in,
+# queue it instead of letting two deploy.sh runs race on the same box.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: "!contains(github.event.head_commit.message, '[skip deploy]')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host:     ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key:      ${{ secrets.EC2_SSH_KEY }}
+          port:     ${{ secrets.EC2_SSH_PORT || 22 }}
+          # The remote box already has the repo cloned at /opt/makuta-portal.
+          # Fetch + hard reset so we mirror origin/main exactly (no merge surprises),
+          # then run the idempotent deploy script.
+          script: |
+            set -euo pipefail
+            cd /opt/makuta-portal
+            sudo git fetch --prune origin main
+            sudo git reset --hard origin/main
+            sudo ./infra/prod/deploy.sh
