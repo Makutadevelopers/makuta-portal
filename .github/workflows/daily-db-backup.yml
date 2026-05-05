@@ -1,127 +1,39 @@
-name: Daily full backup
+name: Daily backup mirror
 
-# Complete daily backup: PostgreSQL dump + S3 invoice-files snapshot.
-# Dump is stored as a GitHub Actions artifact (90-day retention) and the S3
-# files are mirrored into a date-stamped prefix in the backup bucket.
+# Mirrors the latest production backup from S3 into a GitHub Actions
+# artifact, so the dump is available even if AWS access is later lost.
 #
-# Required repo secrets:
-#   DATABASE_URL          — full AWS RDS Postgres connection string
-#                           (postgresql://USER:PW@HOST:5432/DB?sslmode=require)
-#                           Production RDS lives in us-east-1.
-#   AWS_ACCESS_KEY_ID     — IAM key with read on source bucket and write on
-#   AWS_SECRET_ACCESS_KEY   backup bucket
-#   AWS_REGION            — e.g. ap-south-1
-#   S3_SOURCE_BUCKET      — bucket holding live invoice attachments
-#                           (= server's S3_BUCKET_NAME)
-#   S3_BACKUP_BUCKET      — separate bucket for snapshots (must differ from source)
+# Architecture: the actual pg_dump runs on the EC2 box (which sits in the
+# same VPC as RDS) via a root cron at 02:00 UTC — see
+# scripts/cron/run-ec2-backup.sh and scripts/install-ec2-backup-cron.sh.
+# That writes:
+#   s3://<S3_BACKUP_BUCKET>/db-backups/YYYYMMDD_HHMMSS/makuta_portal_*.sql.gz
+#   s3://<S3_BACKUP_BUCKET>/file-backups/YYYY-MM-DD/...
 #
-# The S3 step is skipped automatically if the AWS secrets are missing, so the
-# DB-only backup keeps working until the bucket is provisioned.
+# This workflow runs ~3 hours later, picks the freshest dump, and stores
+# it as a GHA artifact (90-day retention). That gives the off-AWS copy.
 #
-# Run it by hand any time from Actions → "Daily full backup" → Run workflow.
+# Required repo secrets (set already by the backup-pipeline IAM user):
+#   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY  — read on backup bucket
+#   AWS_REGION                                  — us-east-1
+#   S3_BACKUP_BUCKET                            — makuta-backup-use1
 
 on:
   schedule:
-    # 20:30 UTC = 02:00 IST (next day). Keeps backup time outside working hours.
-    - cron: '30 20 * * *'
+    # 05:00 UTC = ~3h after the EC2 cron at 02:00 UTC
+    - cron: '0 5 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  backup:
+  mirror:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
-      - name: Install PostgreSQL 17 client (PGDG)
-        run: |
-          set -euo pipefail
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
-            https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends postgresql-client-17
-          pg_dump --version
-
-      - name: Dump database
-        env:
-          DATABASE_URL_RAW: ${{ secrets.DATABASE_URL }}
-        run: |
-          set -euo pipefail
-          # Strip any surrounding whitespace/newlines that sneak in via copy-paste
-          # into the GH secret — libpq treats a trailing \n as part of the final
-          # parameter value and rejects it (e.g. channel_binding="require\n").
-          DATABASE_URL=$(printf '%s' "$DATABASE_URL_RAW" | tr -d '[:space:]')
-
-          if [ -z "${DATABASE_URL:-}" ]; then
-            echo "::error::DATABASE_URL secret is not set on this repository."
-            echo "Add it at Settings → Secrets and variables → Actions → New repository secret."
-            exit 1
-          fi
-
-          STAMP=$(date -u +%Y%m%d_%H%M%S)
-          FILE="makuta_portal_${STAMP}.sql"
-          echo "FILE=$FILE" >> "$GITHUB_ENV"
-
-          pg_dump --no-owner --no-acl --format=plain "$DATABASE_URL" > "$FILE"
-
-          echo "--- dump size ---"
-          ls -lh "$FILE"
-          echo "--- line count ---"
-          wc -l "$FILE"
-          echo "--- row counts ---"
-          psql "$DATABASE_URL" -At -F $'\t' -c \
-            "SELECT relname, n_live_tup FROM pg_stat_user_tables ORDER BY n_live_tup DESC;"
-
-      - name: Compress dump
-        run: |
-          set -euo pipefail
-          gzip -9 "$FILE"
-          echo "FILE=${FILE}.gz" >> "$GITHUB_ENV"
-          ls -lh "${FILE}.gz"
-
-      - name: Upload backup artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: db-backup-${{ github.run_number }}
-          path: ${{ env.FILE }}
-          retention-days: 90
-          if-no-files-found: error
-
-      - name: Sync S3 invoice files to backup bucket
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          SRC: ${{ secrets.S3_SOURCE_BUCKET }}
-          DST: ${{ secrets.S3_BACKUP_BUCKET }}
-        run: |
-          set -euo pipefail
-          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${SRC:-}" ] || [ -z "${DST:-}" ]; then
-            echo "::warning::AWS secrets or bucket names not set — skipping S3 file backup."
-            echo "Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION,"
-            echo "    S3_SOURCE_BUCKET, S3_BACKUP_BUCKET to enable."
-            exit 0
-          fi
-          if [ "$SRC" = "$DST" ]; then
-            echo "::error::S3_SOURCE_BUCKET and S3_BACKUP_BUCKET must differ."
-            exit 1
-          fi
-          STAMP=$(date -u +%Y-%m-%d)
-          DEST="s3://$DST/file-backups/$STAMP/"
-          echo "Syncing s3://$SRC → $DEST"
-          aws s3 sync "s3://$SRC/" "$DEST" \
-            --storage-class STANDARD_IA \
-            --only-show-errors
-          echo "--- snapshot summary ---"
-          aws s3 ls "$DEST" --recursive --summarize | tail -n 5
-
-      - name: Mirror DB dump to backup bucket
+      - name: Find latest dump in S3
+        id: find
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -130,11 +42,44 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${DST:-}" ]; then
-            echo "::warning::AWS secrets not set — DB dump remains in GHA artifacts only."
-            exit 0
+            echo "::error::Missing AWS_ACCESS_KEY_ID or S3_BACKUP_BUCKET secret."
+            exit 1
           fi
-          STAMP=$(date -u +%Y-%m-%d)
-          aws s3 cp "${{ env.FILE }}" "s3://$DST/db-backups/${STAMP}/" \
-            --storage-class STANDARD_IA \
-            --only-show-errors
-          echo "DB dump copied to s3://$DST/db-backups/${STAMP}/"
+          LATEST=$(aws s3api list-objects-v2 \
+            --bucket "$DST" \
+            --prefix db-backups/ \
+            --query 'reverse(sort_by(Contents[?ends_with(Key, `.sql.gz`)], &LastModified))[0].Key' \
+            --output text)
+          if [ -z "$LATEST" ] || [ "$LATEST" = "None" ]; then
+            echo "::error::No .sql.gz dumps found under s3://$DST/db-backups/"
+            echo "Has the EC2 cron run yet? Check on the box:  ls /var/log/makuta/"
+            exit 1
+          fi
+          OUT=$(basename "$LATEST")
+          echo "key=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "file=$OUT"   >> "$GITHUB_OUTPUT"
+          echo "Latest dump: $LATEST"
+
+      - name: Download dump
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          DST: ${{ secrets.S3_BACKUP_BUCKET }}
+          KEY: ${{ steps.find.outputs.key }}
+          FILE: ${{ steps.find.outputs.file }}
+        run: |
+          set -euo pipefail
+          aws s3 cp "s3://$DST/$KEY" "$FILE"
+          ls -lh "$FILE"
+          gzip -t "$FILE"
+          echo "Decompressed size:"
+          gzip -l "$FILE" | tail -n 1
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-backup-${{ github.run_number }}
+          path: ${{ steps.find.outputs.file }}
+          retention-days: 90
+          if-no-files-found: error
