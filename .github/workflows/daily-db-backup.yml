@@ -5,8 +5,9 @@ name: Daily full backup
 # files are mirrored into a date-stamped prefix in the backup bucket.
 #
 # Required repo secrets:
-#   DATABASE_URL          — full Neon pooler connection string
-#                           (postgresql://...?sslmode=require)
+#   DATABASE_URL          — full AWS RDS Postgres connection string
+#                           (postgresql://USER:PW@HOST:5432/DB?sslmode=require)
+#                           Production RDS lives in us-east-1.
 #   AWS_ACCESS_KEY_ID     — IAM key with read on source bucket and write on
 #   AWS_SECRET_ACCESS_KEY   backup bucket
 #   AWS_REGION            — e.g. ap-south-1
