@@ -17,7 +17,7 @@ lives in `server/src/config/env.ts`.
 
 ## 2. Infrastructure
 
-- [ ] **API host**: AWS EC2 (`54.3.199.149`, `/opt/makuta-portal`), Dockerised, co-tenant with the CRM stack and fronted by the CRM nginx at `invoice.makutadevelopers.com`.
+- [ ] **API host**: AWS EC2 (`52.3.199.149`, instance `i-0c5c88d0ffca5821a`, `/opt/makuta-portal`), Dockerised, co-tenant with the CRM stack and fronted by the CRM nginx at `invoice.makutadevelopers.com`.
 - [ ] **Database**: AWS RDS PostgreSQL 16 in `us-east-1`, multi-AZ for production.
 - [ ] **DB_SSL=true** (ENFORCED) — RDS requires TLS in transit.
 - [ ] **S3 bucket** exists in `us-east-1`, versioning enabled, public access fully blocked, lifecycle rule for attachments older than ~3 years if desired.
