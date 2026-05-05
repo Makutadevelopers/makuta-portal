@@ -1,0 +1,4 @@
+aws_region           = "ap-south-1"
+backup_bucket_name   = "makuta-backups-prod"
+source_bucket_name   = "makuta-invoice-attachments"
+backup_iam_user_name = "makuta-backup-automation"

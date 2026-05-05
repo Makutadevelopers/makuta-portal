@@ -1,12 +1,23 @@
-name: Daily DB backup
+name: Daily full backup
 
-# Backs up the Neon Postgres every day. Dump is stored as a GitHub Actions
-# artifact with 90-day retention — downloadable from the Actions tab.
+# Complete daily backup: PostgreSQL dump + S3 invoice-files snapshot.
+# Dump is stored as a GitHub Actions artifact (90-day retention) and the S3
+# files are mirrored into a date-stamped prefix in the backup bucket.
 #
-# Required repo secret:
-#   DATABASE_URL  — full Neon pooler connection string (postgresql://...?sslmode=require)
+# Required repo secrets:
+#   DATABASE_URL          — full Neon pooler connection string
+#                           (postgresql://...?sslmode=require)
+#   AWS_ACCESS_KEY_ID     — IAM key with read on source bucket and write on
+#   AWS_SECRET_ACCESS_KEY   backup bucket
+#   AWS_REGION            — e.g. ap-south-1
+#   S3_SOURCE_BUCKET      — bucket holding live invoice attachments
+#                           (= server's S3_BUCKET_NAME)
+#   S3_BACKUP_BUCKET      — separate bucket for snapshots (must differ from source)
 #
-# Run it by hand any time from Actions → "Daily DB backup" → Run workflow.
+# The S3 step is skipped automatically if the AWS secrets are missing, so the
+# DB-only backup keeps working until the bucket is provisioned.
+#
+# Run it by hand any time from Actions → "Daily full backup" → Run workflow.
 
 on:
   schedule:
@@ -80,3 +91,49 @@ jobs:
           path: ${{ env.FILE }}
           retention-days: 90
           if-no-files-found: error
+
+      - name: Sync S3 invoice files to backup bucket
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          SRC: ${{ secrets.S3_SOURCE_BUCKET }}
+          DST: ${{ secrets.S3_BACKUP_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${SRC:-}" ] || [ -z "${DST:-}" ]; then
+            echo "::warning::AWS secrets or bucket names not set — skipping S3 file backup."
+            echo "Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION,"
+            echo "    S3_SOURCE_BUCKET, S3_BACKUP_BUCKET to enable."
+            exit 0
+          fi
+          if [ "$SRC" = "$DST" ]; then
+            echo "::error::S3_SOURCE_BUCKET and S3_BACKUP_BUCKET must differ."
+            exit 1
+          fi
+          STAMP=$(date -u +%Y-%m-%d)
+          DEST="s3://$DST/file-backups/$STAMP/"
+          echo "Syncing s3://$SRC → $DEST"
+          aws s3 sync "s3://$SRC/" "$DEST" \
+            --storage-class STANDARD_IA \
+            --only-show-errors
+          echo "--- snapshot summary ---"
+          aws s3 ls "$DEST" --recursive --summarize | tail -n 5
+
+      - name: Mirror DB dump to backup bucket
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          DST: ${{ secrets.S3_BACKUP_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${DST:-}" ]; then
+            echo "::warning::AWS secrets not set — DB dump remains in GHA artifacts only."
+            exit 0
+          fi
+          STAMP=$(date -u +%Y-%m-%d)
+          aws s3 cp "${{ env.FILE }}" "s3://$DST/db-backups/${STAMP}/" \
+            --storage-class STANDARD_IA \
+            --only-show-errors
+          echo "DB dump copied to s3://$DST/db-backups/${STAMP}/"
