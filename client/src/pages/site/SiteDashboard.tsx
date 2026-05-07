@@ -70,12 +70,49 @@ export default function SiteDashboard() {
     return `${names[parseInt(m, 10) - 1]} ${y}`;
   }
 
+  const userSites = user?.sites && user.sites.length > 0
+    ? user.sites
+    : (user?.site ? [user.site] : []);
+  const isMulti = userSites.length > 1;
+
+  // Per-site breakdown (multi-site only)
+  const perSite = useMemo(() => {
+    if (!isMulti) return [];
+    const map = new Map<string, { count: number; total: number }>();
+    for (const s of userSites) map.set(s, { count: 0, total: 0 });
+    for (const inv of invoices) {
+      const cur = map.get(inv.site);
+      if (!cur) continue;
+      cur.count += 1;
+      cur.total += Number(inv.invoice_amount);
+    }
+    return userSites.map(s => ({ site: s, ...(map.get(s) ?? { count: 0, total: 0 }) }));
+  }, [invoices, isMulti, userSites]);
+
   return (
     <AppShell>
       <div className="mb-6">
-        <div className="text-lg font-medium text-gray-900">Dashboard — {user?.site}</div>
-        <div className="text-xs text-gray-500 mt-1">Invoice summary for your site · cashflow and aging managed by Head Office</div>
+        <div className="text-lg font-medium text-gray-900">
+          Dashboard — {isMulti ? `${userSites.length} sites` : userSites[0] ?? ''}
+        </div>
+        <div className="text-xs text-gray-500 mt-1">
+          {isMulti
+            ? `Aggregated view for: ${userSites.join(', ')} · cashflow and aging managed by Head Office`
+            : 'Invoice summary for your site · cashflow and aging managed by Head Office'}
+        </div>
       </div>
+
+      {isMulti && perSite.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+          {perSite.map(s => (
+            <div key={s.site} className="bg-blue-50/50 border border-blue-100 rounded-xl p-3">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-[#1a3c5e] mb-1">{s.site}</div>
+              <div className="text-base font-semibold text-[#1a3c5e]">{formatINR(s.total)}</div>
+              <div className="text-[11px] text-[#1a3c5e] opacity-70">{s.count} invoice{s.count === 1 ? '' : 's'}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {loading ? (
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>

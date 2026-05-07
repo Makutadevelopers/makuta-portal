@@ -11,7 +11,8 @@ export interface JwtPayload {
   id: string;
   name: string;
   role: 'ho' | 'site' | 'mgmt';
-  site: string | null;
+  site: string | null;       // primary/first site — kept for backwards compat
+  sites: string[];           // all sites the user can access (source of truth)
   title: string | null;
 }
 
@@ -43,9 +44,28 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
 
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+    // Older tokens may have been issued before `sites` existed; coerce to a
+    // safe shape so downstream code can rely on `sites` being an array.
+    if (!Array.isArray(decoded.sites)) {
+      decoded.sites = decoded.site ? [decoded.site] : [];
+    }
     req.user = decoded;
     next();
   } catch {
     res.status(401).json({ error: 'Unauthorized', message: 'Invalid or expired token' });
   }
+}
+
+/**
+ * Returns true if the user is allowed to operate on data belonging to `site`.
+ * - HO and MD: any site (cross-site visibility)
+ * - Site accountants: only sites in their assigned array
+ *
+ * Use this in controllers instead of `req.user.site === invoiceSite` so that
+ * users assigned to multiple sites work correctly.
+ */
+export function userHasSite(user: JwtPayload | undefined, site: string | null | undefined): boolean {
+  if (!user || !site) return false;
+  if (user.role === 'ho' || user.role === 'mgmt') return true;
+  return Array.isArray(user.sites) && user.sites.includes(site);
 }

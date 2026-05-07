@@ -53,8 +53,16 @@ export default function SiteExpenditure() {
     <AppShell>
       <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
         <div>
-          <div className="text-lg font-medium text-gray-900">Expenditure — {user?.site}</div>
-          <div className="text-xs text-gray-500 mt-1">Invoice amounts for your site · cashflow and aging managed by Head Office</div>
+          <div className="text-lg font-medium text-gray-900">
+            Expenditure — {(user?.sites && user.sites.length > 1)
+              ? `${user.sites.length} sites`
+              : (user?.sites?.[0] ?? user?.site ?? '')}
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            {(user?.sites && user.sites.length > 1)
+              ? `Aggregated for: ${user.sites.join(', ')} · cashflow and aging managed by Head Office`
+              : 'Invoice amounts for your site · cashflow and aging managed by Head Office'}
+          </div>
         </div>
         <select value={fMonth} onChange={e => setFMonth(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
           <option value="All">All Months</option>

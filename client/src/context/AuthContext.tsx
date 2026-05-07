@@ -21,7 +21,14 @@ export const AuthContext = createContext<AuthState>({
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('makuta_user');
-    return saved ? JSON.parse(saved) as User : null;
+    if (!saved) return null;
+    const parsed = JSON.parse(saved) as User;
+    // Older sessions persisted `user.site` only; coerce to a `sites` array so
+    // every consumer can rely on `user.sites` being defined.
+    if (!Array.isArray(parsed.sites)) {
+      parsed.sites = parsed.site ? [parsed.site] : [];
+    }
+    return parsed;
   });
   const [token, setToken] = useState<string | null>(() => {
     const saved = localStorage.getItem('makuta_token');

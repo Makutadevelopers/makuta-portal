@@ -10,6 +10,7 @@
 // GET    /api/credit-notes/invoice/:invoiceId/suggestions — available credit for this vendor
 
 import { Request, Response, NextFunction } from 'express';
+import { userHasSite } from '../middleware/auth';
 import { z } from 'zod';
 import { query, queryOne, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
@@ -98,9 +99,12 @@ function unallocatedBalance(cn: CreditNoteRow, allocs: AllocationRow[]): number 
 export async function listCreditNotes(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { role, site } = req.user!;
+    const userSites = req.user!.sites && req.user!.sites.length > 0
+      ? req.user!.sites
+      : (site ? [site] : []);
 
-    const sqlWhere = role === 'site' ? 'WHERE site = $1 AND deleted_at IS NULL' : 'WHERE deleted_at IS NULL';
-    const params = role === 'site' ? [site] : [];
+    const sqlWhere = role === 'site' ? 'WHERE site = ANY($1) AND deleted_at IS NULL' : 'WHERE deleted_at IS NULL';
+    const params = role === 'site' ? [userSites] : [];
 
     const rows = await query<CreditNoteRow>(
       `SELECT * FROM credit_notes ${sqlWhere} ORDER BY cn_date DESC, created_at DESC`,
@@ -125,7 +129,7 @@ export async function listCreditNotes(req: Request, res: Response, next: NextFun
 export async function getCreditNote(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const id = req.params.id as string;
-    const { role, site } = req.user!;
+    const { role } = req.user!;
 
     const row = await queryOne<CreditNoteRow>(
       'SELECT * FROM credit_notes WHERE id = $1 AND deleted_at IS NULL',
@@ -135,7 +139,7 @@ export async function getCreditNote(req: Request, res: Response, next: NextFunct
       res.status(404).json({ error: 'Not Found', message: 'Credit note not found' });
       return;
     }
-    if (role === 'site' && row.site !== site) {
+    if (role === 'site' && !userHasSite(req.user, row.site as string)) {
       res.status(403).json({ error: 'Forbidden', message: 'Not your site' });
       return;
     }
@@ -156,10 +160,10 @@ export async function getCreditNote(req: Request, res: Response, next: NextFunct
 export async function createCreditNote(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const data = createCreditNoteSchema.parse(req.body);
-    const { role, site, id: userId } = req.user!;
+    const { role, id: userId } = req.user!;
 
-    if (role === 'site' && data.site !== site) {
-      res.status(403).json({ error: 'Forbidden', message: 'You can only create credit notes for your own site' });
+    if (role === 'site' && !userHasSite(req.user, data.site)) {
+      res.status(403).json({ error: 'Forbidden', message: 'You can only create credit notes for sites you are assigned to' });
       return;
     }
 
@@ -173,7 +177,7 @@ export async function createCreditNote(req: Request, res: Response, next: NextFu
         });
         return;
       }
-      // Site can only allocate to invoices of their own site
+      // Site can only allocate to invoices of their assigned sites
       if (role === 'site') {
         const invoiceIds = data.allocations.map((a) => a.invoice_id);
         const invs = await query<{ id: string; site: string }>(
@@ -184,9 +188,9 @@ export async function createCreditNote(req: Request, res: Response, next: NextFu
           res.status(400).json({ error: 'Bad Request', message: 'One or more invoices not found' });
           return;
         }
-        const mismatched = invs.find((i) => i.site !== site);
+        const mismatched = invs.find((i) => !userHasSite(req.user, i.site));
         if (mismatched) {
-          res.status(403).json({ error: 'Forbidden', message: 'Cannot allocate to invoices outside your site' });
+          res.status(403).json({ error: 'Forbidden', message: 'Cannot allocate to invoices outside your assigned sites' });
           return;
         }
       }
@@ -275,13 +279,13 @@ export async function updateCreditNote(req: Request, res: Response, next: NextFu
       res.status(404).json({ error: 'Not Found', message: 'Credit note not found' });
       return;
     }
-    if (role === 'site' && existing.site !== site) {
+    if (role === 'site' && !userHasSite(req.user, existing.site as string)) {
       res.status(403).json({ error: 'Forbidden', message: 'Not your site' });
       return;
     }
-    // Site cannot change site field
-    if (role === 'site' && data.site !== undefined && data.site !== existing.site) {
-      res.status(403).json({ error: 'Forbidden', message: 'Site accountants cannot change site' });
+    // Site can move within their assigned sites, but not to a site outside.
+    if (role === 'site' && data.site !== undefined && data.site !== existing.site && !userHasSite(req.user, data.site)) {
+      res.status(403).json({ error: 'Forbidden', message: 'You cannot move a credit note to a site you are not assigned to' });
       return;
     }
     // If the CN already has allocations, prevent changing total_amount below current allocated sum
@@ -394,7 +398,7 @@ export async function addAllocation(req: Request, res: Response, next: NextFunct
       res.status(404).json({ error: 'Not Found', message: 'Credit note not found' });
       return;
     }
-    if (role === 'site' && cn.site !== site) {
+    if (role === 'site' && !userHasSite(req.user, cn.site as string)) {
       res.status(403).json({ error: 'Forbidden', message: 'Not your site' });
       return;
     }
@@ -407,8 +411,8 @@ export async function addAllocation(req: Request, res: Response, next: NextFunct
       res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
       return;
     }
-    if (role === 'site' && inv.site !== site) {
-      res.status(403).json({ error: 'Forbidden', message: 'Cannot allocate to invoices outside your site' });
+    if (role === 'site' && !userHasSite(req.user, inv.site)) {
+      res.status(403).json({ error: 'Forbidden', message: 'Cannot allocate to invoices outside your assigned sites' });
       return;
     }
     if (inv.vendor_id && inv.vendor_id !== cn.vendor_id) {

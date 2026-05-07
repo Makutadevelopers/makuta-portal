@@ -78,19 +78,28 @@ interface ExpenseRow {
 
 // ── balances ────────────────────────────────────────────────────────────
 // GET /api/petty-cash/balances        — HO: balances across all sites
-// GET /api/petty-cash/balances/:site  — HO or site (site restricted to own)
+// GET /api/petty-cash/balances/:site  — HO or site (site restricted to assigned sites)
 export async function getBalances(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { role, site: userSite } = req.user!;
+    const userSites = req.user!.sites && req.user!.sites.length > 0
+      ? req.user!.sites
+      : (userSite ? [userSite] : []);
     const siteParam = (req.params.site as string | undefined) ?? null;
 
     if (role === 'site') {
-      if (siteParam && siteParam !== userSite) {
-        res.status(403).json({ error: 'Forbidden', message: 'You can only view your own site balance' });
+      if (siteParam && !userSites.includes(siteParam)) {
+        res.status(403).json({ error: 'Forbidden', message: 'You can only view balances for sites you are assigned to' });
         return;
       }
-      const row = await fetchSiteBalance(userSite!);
-      res.json(row);
+      if (siteParam) {
+        const row = await fetchSiteBalance(siteParam);
+        res.json(row);
+        return;
+      }
+      // No specific site requested → return one row per assigned site
+      const rows = await Promise.all(userSites.map(s => fetchSiteBalance(s)));
+      res.json(rows);
       return;
     }
 
@@ -178,21 +187,32 @@ export async function createDisbursement(req: Request, res: Response, next: Next
   } catch (err) { next(err); }
 }
 
-// GET /api/petty-cash/disbursements?site=X — HO (any site) | site (own only)
+// GET /api/petty-cash/disbursements?site=X — HO (any site) | site (assigned sites only)
 export async function listDisbursements(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { role, site: userSite } = req.user!;
+    const userSites = req.user!.sites && req.user!.sites.length > 0
+      ? req.user!.sites
+      : (userSite ? [userSite] : []);
     const qSite = (req.query.site as string | undefined) ?? null;
-    const site = role === 'site' ? userSite! : qSite;
 
-    if (role === 'site' && qSite && qSite !== userSite) {
-      res.status(403).json({ error: 'Forbidden', message: 'You can only view your own site' });
+    if (role === 'site' && qSite && !userSites.includes(qSite)) {
+      res.status(403).json({ error: 'Forbidden', message: 'You can only view sites you are assigned to' });
       return;
     }
 
-    const where = site ? 'WHERE d.site = $1 AND d.deleted_at IS NULL'
-                       : 'WHERE d.deleted_at IS NULL';
-    const params = site ? [site] : [];
+    let where: string;
+    let params: unknown[];
+    if (qSite) {
+      where = 'WHERE d.site = $1 AND d.deleted_at IS NULL';
+      params = [qSite];
+    } else if (role === 'site') {
+      where = 'WHERE d.site = ANY($1) AND d.deleted_at IS NULL';
+      params = [userSites];
+    } else {
+      where = 'WHERE d.deleted_at IS NULL';
+      params = [];
+    }
     const rows = await query<DisbursementRow>(
       `SELECT d.*, u.name AS given_by_name
          FROM petty_cash_disbursements d
@@ -206,14 +226,17 @@ export async function listDisbursements(req: Request, res: Response, next: NextF
 }
 
 // ── expenses ────────────────────────────────────────────────────────────
-// POST /api/petty-cash/expenses — HO (any site) | site (own only)
+// POST /api/petty-cash/expenses — HO (any site) | site (assigned sites only)
 export async function createExpense(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { role, site: userSite, id: userId } = req.user!;
+    const userSites = req.user!.sites && req.user!.sites.length > 0
+      ? req.user!.sites
+      : (userSite ? [userSite] : []);
     const data = expenseSchema.parse(req.body);
 
-    if (role === 'site' && data.site !== userSite) {
-      res.status(403).json({ error: 'Forbidden', message: 'You can only log expenses for your own site' });
+    if (role === 'site' && !userSites.includes(data.site)) {
+      res.status(403).json({ error: 'Forbidden', message: 'You can only log expenses for sites you are assigned to' });
       return;
     }
 
@@ -336,21 +359,32 @@ export async function createExpense(req: Request, res: Response, next: NextFunct
   } catch (err) { next(err); }
 }
 
-// GET /api/petty-cash/expenses?site=X — HO (any site) | site (own only)
+// GET /api/petty-cash/expenses?site=X — HO (any site) | site (assigned sites only)
 export async function listExpenses(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { role, site: userSite } = req.user!;
+    const userSites = req.user!.sites && req.user!.sites.length > 0
+      ? req.user!.sites
+      : (userSite ? [userSite] : []);
     const qSite = (req.query.site as string | undefined) ?? null;
-    const site = role === 'site' ? userSite! : qSite;
 
-    if (role === 'site' && qSite && qSite !== userSite) {
-      res.status(403).json({ error: 'Forbidden', message: 'You can only view your own site' });
+    if (role === 'site' && qSite && !userSites.includes(qSite)) {
+      res.status(403).json({ error: 'Forbidden', message: 'You can only view sites you are assigned to' });
       return;
     }
 
-    const where = site ? 'WHERE e.site = $1 AND e.deleted_at IS NULL'
-                       : 'WHERE e.deleted_at IS NULL';
-    const params = site ? [site] : [];
+    let where: string;
+    let params: unknown[];
+    if (qSite) {
+      where = 'WHERE e.site = $1 AND e.deleted_at IS NULL';
+      params = [qSite];
+    } else if (role === 'site') {
+      where = 'WHERE e.site = ANY($1) AND e.deleted_at IS NULL';
+      params = [userSites];
+    } else {
+      where = 'WHERE e.deleted_at IS NULL';
+      params = [];
+    }
     const rows = await query<ExpenseRow>(
       `SELECT e.*, u.name AS recorded_by_name, i.invoice_no
          FROM petty_cash_expenses e
@@ -365,20 +399,34 @@ export async function listExpenses(req: Request, res: Response, next: NextFuncti
 }
 
 // GET /api/petty-cash/ledger?site=X — combined, chronological
-// site role: own site only; HO: any site (defaults to all if no site query param)
+// site role: assigned sites only; HO: any site (defaults to all if no site query param)
 export async function getLedger(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { role, site: userSite } = req.user!;
+    const userSites = req.user!.sites && req.user!.sites.length > 0
+      ? req.user!.sites
+      : (userSite ? [userSite] : []);
     const qSite = (req.query.site as string | undefined) ?? null;
 
-    if (role === 'site' && qSite && qSite !== userSite) {
-      res.status(403).json({ error: 'Forbidden', message: 'You can only view your own site' });
+    if (role === 'site' && qSite && !userSites.includes(qSite)) {
+      res.status(403).json({ error: 'Forbidden', message: 'You can only view sites you are assigned to' });
       return;
     }
 
-    const site = role === 'site' ? userSite! : qSite;
-    const filter = site ? 'AND site = $1' : '';
-    const params = site ? [site] : [];
+    // Build matching SQL fragments for both halves of the UNION (one uses
+    // bare `site`, the other uses alias `e.site`).
+    let filterDisb = '';
+    let filterExp = '';
+    let params: unknown[] = [];
+    if (qSite) {
+      filterDisb = 'AND site = $1';
+      filterExp  = 'AND e.site = $1';
+      params = [qSite];
+    } else if (role === 'site') {
+      filterDisb = 'AND site = ANY($1)';
+      filterExp  = 'AND e.site = ANY($1)';
+      params = [userSites];
+    }
 
     const rows = await query<{
       id: string; site: string; event_type: 'in' | 'out'; amount: string;
@@ -393,7 +441,7 @@ export async function getLedger(req: Request, res: Response, next: NextFunction)
            (SELECT u.name FROM users u WHERE u.id = given_by) AS by_name,
            created_at
          FROM petty_cash_disbursements
-         WHERE deleted_at IS NULL ${filter}
+         WHERE deleted_at IS NULL ${filterDisb}
          UNION ALL
          SELECT
            e.id, e.site, 'out'::text AS event_type, e.amount::text,
@@ -403,7 +451,7 @@ export async function getLedger(req: Request, res: Response, next: NextFunction)
            (SELECT u.name FROM users u WHERE u.id = e.recorded_by) AS by_name,
            e.created_at
          FROM petty_cash_expenses e
-         WHERE e.deleted_at IS NULL ${filter ? 'AND e.site = $1' : ''}
+         WHERE e.deleted_at IS NULL ${filterExp}
          ORDER BY event_date DESC, created_at DESC`,
       params
     );

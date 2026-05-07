@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { query, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
 import { notifyPaymentRecorded } from '../services/email.service';
+import { userHasSite } from '../middleware/auth';
 import { paymentStatusCase } from '../services/payment.service';
 
 const MINOR_LIMIT = 50000;
@@ -78,8 +79,8 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
       if (invoice.deleted_at) {
         return { status: 404, body: { error: 'Not Found', message: 'Invoice has been deleted' } };
       }
-      if (role === 'site' && invoice.site !== req.user!.site) {
-        return { status: 403, body: { error: 'Forbidden', message: 'You can only record payments for invoices in your own site' } };
+      if (role === 'site' && !userHasSite(req.user, invoice.site)) {
+        return { status: 403, body: { error: 'Forbidden', message: 'You can only record payments for invoices in sites you are assigned to' } };
       }
       // H4: Site accountants may not pay finalized invoices — those need HO
       if (role === 'site' && invoice.pushed) {

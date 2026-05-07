@@ -31,56 +31,63 @@ Multi-role invoice and payment portal for **Makuta Developers** — a real estat
 - **PWA** — Installable on mobile/desktop, offline support with cached data
 - **Cron** — Daily overdue email alerts at 8 AM IST
 
-## Quick Start (Local Dev)
+## Where it runs
 
-```bash
-# 1. Start PostgreSQL
-docker compose up -d postgres
+The application runs **only on AWS** — there is no local dev stack.
 
-# 2. Install dependencies
-cd client && npm install && cd ../server && npm install && cd ..
+| Component | Where |
+|-----------|-------|
+| Frontend (React + Vite + PWA) | Built into the API container, served via nginx on EC2 |
+| Backend (Node + Express) | Docker container `makuta_portal_api_prod` on EC2 `52.3.199.149` (`/opt/makuta-portal`) |
+| Database | Neon Postgres (us-east-1, SSL required) — see `DATABASE_URL` secret |
+| File storage | AWS S3 (`makuta-invoice-attachments`, us-east-1) |
+| HTTPS / domain | Cloudflare DNS → CRM nginx fronts `invoice.makutadevelopers.com` |
+| Daily DB backup | GitHub Actions workflow `daily-db-backup.yml` (artifact retention 90 days) |
 
-# 3. Set up environment
-cp .env.example .env
-# Edit .env if needed (defaults work with docker compose)
-
-# 4. Run migrations & seed data
-npm run db:reset
-
-# 5. Start dev servers
-npm run dev
-# Client: http://localhost:3000
-# Server: http://localhost:4000
-```
-
-## Tech Stack
+Tech stack:
 
 | Component | Technology |
 |-----------|-----------|
 | Frontend | React 18 + TypeScript + Tailwind CSS + Recharts |
 | Backend | Node.js + Express + TypeScript |
-| Database | PostgreSQL |
+| Database | PostgreSQL (Neon) |
 | Build Tool | Vite + PWA plugin |
 | Auth | JWT (8h expiry) + bcrypt |
-| Charts | Recharts (interactive with tooltips) |
-| Cron | node-cron (overdue alerts) |
-| Storage | AWS S3 (or local disk for dev) |
+| Charts | Recharts |
+| Cron | node-cron (daily overdue email alerts at 8 AM IST) |
 
-## Deployment
+## Deploy / redeploy
 
-| Component | Platform |
-|-----------|----------|
-| Frontend | Vercel (auto-deploys from GitHub) |
-| Backend | Render / Railway |
-| Database | Supabase / Neon (managed PostgreSQL) |
+The deploy script is idempotent — safe to re-run after a `git pull`.
 
 ```bash
-# Required environment variables for production:
-DATABASE_URL=postgresql://...     # From Supabase/Neon
-JWT_SECRET=<openssl rand -hex 48> # Min 48 chars
-ALLOWED_ORIGINS=*                 # Or frontend URL
+# from your laptop, push code via PR → merge to main:
+git push origin <feature-branch>
+# open PR at https://github.com/Makutadevelopers/makuta-portal
+# merge after CI passes
+
+# from the EC2 box (52.3.199.149) as the deploy user:
+cd /opt/makuta-portal
+git pull
+./infra/prod/deploy.sh                    # build + up + migrate
+./infra/prod/deploy.sh --no-build         # skip rebuild, just up
+./infra/prod/deploy.sh --migrate-only     # just run pending migrations
+```
+
+The script runs `npx tsx src/db/migrate.ts` inside `makuta_portal_api_prod`, which applies any new SQL files in `server/src/db/migrations/` to Neon.
+
+Required environment variables (already set in `/opt/makuta-portal/infra/prod/.env`):
+
+```bash
+DATABASE_URL=postgresql://...     # Neon connection string
+JWT_SECRET=<at least 48 chars>
+ALLOWED_ORIGINS=https://invoice.makutadevelopers.com
 NODE_ENV=production
-CRON_SECRET=<any random string>   # For scheduled jobs
+CRON_SECRET=<any random string>
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+S3_BUCKET_NAME=makuta-invoice-attachments
 ```
 
 ## Sites
