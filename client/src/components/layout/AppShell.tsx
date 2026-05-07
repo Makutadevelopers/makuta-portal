@@ -44,9 +44,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const role = user?.role;
   const tabs = role === 'ho' ? HO_TABS : role === 'mgmt' ? MGMT_TABS : SITE_TABS;
+  const userSites = user?.sites && user.sites.length > 0
+    ? user.sites
+    : (user?.site ? [user.site] : []);
+  const siteSubtitle = userSites.length === 1
+    ? userSites[0]
+    : userSites.length > 1
+      ? `${userSites.length} sites — ${userSites.join(', ')}`
+      : '';
   const subtitle = role === 'ho' ? 'Head Office — Full Access'
     : role === 'mgmt' ? 'Management — Read Only'
-      : `${user?.site ?? ''} — Site Portal`;
+      : `${siteSubtitle} — Site Portal`;
 
   const initials = user?.name?.split(' ').map(n => n[0]).join('').slice(0, 2) ?? '';
   const avatarBg = role === 'ho' ? 'bg-blue-50 text-blue-800'

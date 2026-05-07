@@ -23,6 +23,7 @@ interface UserRow {
   password_hash: string;
   role: string;
   site: string | null;
+  sites: string[] | null;
   title: string | null;
   is_active: boolean;
 }
@@ -32,7 +33,7 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
     const { email, password } = loginSchema.parse(req.body);
 
     const user = await queryOne<UserRow>(
-      'SELECT id, name, email, password_hash, role, site, title, is_active FROM users WHERE email = $1',
+      'SELECT id, name, email, password_hash, role, site, sites, title, is_active FROM users WHERE email = $1',
       [email]
     );
 
@@ -52,11 +53,18 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
       return;
     }
 
+    // Resolve the sites array, falling back to single `site` if the array is
+    // empty (legacy users who were created before migration 018).
+    const sites = (Array.isArray(user.sites) && user.sites.length > 0)
+      ? user.sites
+      : (user.site ? [user.site] : []);
+
     const payload = {
       id: user.id,
       name: user.name,
       role: user.role as 'ho' | 'site' | 'mgmt',
       site: user.site,
+      sites,
       title: user.title,
     };
 

@@ -5,7 +5,8 @@ export interface UserRecord {
   name: string;
   email: string;
   role: 'ho' | 'site' | 'mgmt';
-  site: string | null;
+  site: string | null;            // primary site = sites[0]
+  sites: string[];                // all assigned sites
   title: string | null;
   is_active: boolean;
   created_at: string;
@@ -21,7 +22,8 @@ export function createUser(data: {
   email: string;
   password: string;
   role: string;
-  site: string | null;
+  sites?: string[];
+  site?: string | null;
   title: string | null;
 }): Promise<UserRecord> {
   return apiFetch('/users', { method: 'POST', body: JSON.stringify(data) });
@@ -31,6 +33,7 @@ export function updateUser(id: string, data: Partial<{
   name: string;
   email: string;
   role: string;
+  sites: string[];
   site: string | null;
   title: string | null;
   is_active: boolean;

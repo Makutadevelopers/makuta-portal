@@ -15,6 +15,7 @@ interface UserRow {
   email: string;
   role: string;
   site: string | null;
+  sites: string[] | null;
   title: string | null;
   is_active: boolean;
   created_at: string;
@@ -25,7 +26,7 @@ interface UserRow {
 export async function listUsers(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const users = await query<UserRow>(
-      `SELECT id, name, email, role, site, title, is_active, created_at, updated_at
+      `SELECT id, name, email, role, site, sites, title, is_active, created_at, updated_at
        FROM users ORDER BY role, name`
     );
     res.json(users);
@@ -34,6 +35,10 @@ export async function listUsers(req: Request, res: Response, next: NextFunction)
   }
 }
 
+// Accepts either `sites: string[]` (preferred) or legacy `site: string`.
+// Normalises to a non-null array. Empty array is valid for HO/MD.
+const sitesField = z.array(z.string().min(1).max(100)).max(20).optional();
+
 // POST /api/users — create a new user
 const createSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -41,6 +46,7 @@ const createSchema = z.object({
   password: z.string().min(4, 'Password must be at least 4 characters'),
   role: z.enum(['ho', 'site', 'mgmt']),
   site: z.string().nullable().default(null),
+  sites: sitesField,
   title: z.string().nullable().default(null),
 });
 
@@ -59,17 +65,24 @@ export async function createUser(req: Request, res: Response, next: NextFunction
 
     const hash = await bcrypt.hash(data.password, 12);
 
+    // Resolve `sites` array, falling back to legacy `site` string. `site` is
+    // kept populated as the "primary" (= sites[0]) for backwards compatibility.
+    const sitesArr = data.sites && data.sites.length > 0
+      ? data.sites
+      : (data.site ? [data.site] : []);
+    const primarySite = sitesArr[0] ?? null;
+
     const user = await queryOne<UserRow>(
-      `INSERT INTO users (name, email, password_hash, role, site, title)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, name, email, role, site, title, is_active, created_at, updated_at`,
-      [data.name, data.email, hash, data.role, data.site, data.title]
+      `INSERT INTO users (name, email, password_hash, role, site, sites, title)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, name, email, role, site, sites, title, is_active, created_at, updated_at`,
+      [data.name, data.email, hash, data.role, primarySite, sitesArr, data.title]
     );
 
     await logAudit({
       userId: req.user!.id,
-      action: `Created user "${data.name}" (${data.role}${data.site ? `, ${data.site}` : ''})`,
-      metadata: { targetUserId: user?.id, role: data.role, site: data.site },
+      action: `Created user "${data.name}" (${data.role}${sitesArr.length > 0 ? `, ${sitesArr.join(', ')}` : ''})`,
+      metadata: { targetUserId: user?.id, role: data.role, sites: sitesArr },
     });
 
     res.status(201).json(user);
@@ -84,6 +97,7 @@ const updateSchema = z.object({
   email: z.string().email().optional(),
   role: z.enum(['ho', 'site', 'mgmt']).optional(),
   site: z.string().nullable().optional(),
+  sites: sitesField,
   title: z.string().nullable().optional(),
   is_active: z.boolean().optional(),
 });
@@ -118,10 +132,21 @@ export async function updateUser(req: Request, res: Response, next: NextFunction
     const values: unknown[] = [];
     let idx = 1;
 
-    for (const [key, val] of Object.entries(data)) {
+    // If caller sent `sites`, also keep `site` in lockstep as the primary
+    // (sites[0]). If only `site` was sent, expand it into `sites` so both
+    // columns stay consistent without making the caller think about it.
+    const dataForSql: Record<string, unknown> = { ...data };
+    if (data.sites !== undefined) {
+      dataForSql.sites = data.sites;
+      dataForSql.site = data.sites[0] ?? null;
+    } else if (data.site !== undefined) {
+      dataForSql.site = data.site;
+      dataForSql.sites = data.site ? [data.site] : [];
+    }
+
+    for (const [key, val] of Object.entries(dataForSql)) {
       if (val !== undefined) {
-        const col = key === 'is_active' ? 'is_active' : key;
-        fields.push(`${col} = $${idx}`);
+        fields.push(`${key} = $${idx}`);
         values.push(val);
         idx++;
       }
@@ -137,7 +162,7 @@ export async function updateUser(req: Request, res: Response, next: NextFunction
 
     const user = await queryOne<UserRow>(
       `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx}
-       RETURNING id, name, email, role, site, title, is_active, created_at, updated_at`,
+       RETURNING id, name, email, role, site, sites, title, is_active, created_at, updated_at`,
       values
     );
 

@@ -4,7 +4,8 @@ export interface User {
   id: string;
   name: string;
   role: Role;
-  site: string | null;
+  site: string | null;        // primary/first site (= sites[0]) — kept for compat
+  sites: string[];            // all sites the user is assigned to
   title: string | null;
 }
 

@@ -156,7 +156,7 @@ export default function MyInvoices() {
       {showForm && (
         <InvoiceForm
           key={duplicateFrom ? `dup-${duplicateFrom.id}` : 'new'}
-          site={user?.site ?? ''}
+          allowedSites={user?.sites && user.sites.length > 0 ? user.sites : (user?.site ? [user.site] : [])}
           vendors={vendors}
           editInvoice={null}
           prefillFrom={duplicateFrom}
@@ -307,7 +307,7 @@ export default function MyInvoices() {
                     <td colSpan={11} className="px-4 py-4">
                       <InvoiceForm
                         key={`edit-${inv.id}`}
-                        site={user?.site ?? ''}
+                        allowedSites={user?.sites && user.sites.length > 0 ? user.sites : (user?.site ? [user.site] : [])}
                         vendors={vendors}
                         editInvoice={inv}
                         onCancel={() => setExpandedEditId(null)}
@@ -332,8 +332,8 @@ export default function MyInvoices() {
 // ── Invoice Form ────────────────────────────────────────────────────────────
 interface Vendor { id: string; name: string; payment_terms: number; category: string | null; }
 
-function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSaved }: {
-  site: string;
+function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel, onSaved }: {
+  allowedSites: string[];
   vendors: Vendor[];
   editInvoice: Invoice | null;
   prefillFrom?: Invoice | null;
@@ -347,6 +347,13 @@ function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSave
   const { notify } = useToast();
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
+
+  // The selected site for this invoice. Locked to the only allowed site when
+  // the user has just one; otherwise editable via the dropdown below.
+  const [site, setSite] = useState<string>(() => {
+    if (seed?.site && allowedSites.includes(seed.site)) return seed.site;
+    return allowedSites[0] ?? '';
+  });
   const DRAFT_KEY = `makuta:invoice-draft:${site}`;
 
   // Read draft synchronously on the first render so initial state matches it,
@@ -734,9 +741,19 @@ function InvoiceForm({ site, vendors, editInvoice, prefillFrom, onCancel, onSave
         {/* Row 4: Site */}
         <div className="mb-4">
           <label className="block text-xs text-gray-500 mb-1">Site Location</label>
-          <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 bg-gray-50">
-            {site}
-          </div>
+          {allowedSites.length > 1 ? (
+            <select
+              value={site}
+              onChange={e => setSite(e.target.value)}
+              className="w-full px-3 py-2.5 border border-blue-200 rounded-lg text-sm text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+            >
+              {allowedSites.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          ) : (
+            <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm text-gray-700 bg-gray-50">
+              {site || '—'}
+            </div>
+          )}
         </div>
 
         {/* Row 5: Tax split */}

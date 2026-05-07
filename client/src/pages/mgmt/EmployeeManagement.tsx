@@ -29,9 +29,11 @@ export default function EmployeeManagement() {
   const [sendingTempFor, setSendingTempFor] = useState<string | null>(null);
   const [confirmTempFor, setConfirmTempFor] = useState<UserRecord | null>(null);
 
-  // Form state
+  // Form state — `sites` is the array of assigned sites (≥ 1 for site role).
   const [form, setForm] = useState({
-    name: '', email: '', password: '', role: 'site', site: '' as string | null, title: 'Site Accountant',
+    name: '', email: '', password: '', role: 'site',
+    sites: [] as string[],
+    title: 'Site Accountant',
   });
 
   const loadUsers = useCallback(async () => {
@@ -102,18 +104,21 @@ export default function EmployeeManagement() {
 
   function openCreate() {
     setEditUser(null);
-    setForm({ name: '', email: '', password: '', role: 'site', site: '', title: 'Site Accountant' });
+    setForm({ name: '', email: '', password: '', role: 'site', sites: [], title: 'Site Accountant' });
     setShowForm(true);
   }
 
   function openEdit(u: UserRecord) {
     setEditUser(u);
+    const existingSites = (u.sites && u.sites.length > 0)
+      ? u.sites
+      : (u.site ? [u.site] : []);
     setForm({
       name: u.name,
       email: u.email,
       password: '',
       role: u.role,
-      site: u.site || '',
+      sites: existingSites,
       title: u.title || '',
     });
     setShowForm(true);
@@ -121,13 +126,18 @@ export default function EmployeeManagement() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (form.role === 'site' && form.sites.length === 0) {
+      notify('Pick at least one site for a site accountant', 'error');
+      return;
+    }
     try {
+      const sitesPayload = form.role === 'site' ? form.sites : [];
       if (editUser) {
         await updateUser(editUser.id, {
           name: form.name,
           email: form.email,
           role: form.role,
-          site: form.role === 'site' ? form.site : null,
+          sites: sitesPayload,
           title: form.title || null,
         });
         notify(`Updated ${form.name}`, 'success');
@@ -137,7 +147,7 @@ export default function EmployeeManagement() {
           email: form.email,
           password: form.password,
           role: form.role,
-          site: form.role === 'site' ? form.site : null,
+          sites: sitesPayload,
           title: form.title || null,
         });
         notify(`Created ${form.name}`, 'success');
@@ -147,6 +157,13 @@ export default function EmployeeManagement() {
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Failed to save', 'error');
     }
+  }
+
+  function toggleFormSite(s: string) {
+    setForm(f => ({
+      ...f,
+      sites: f.sites.includes(s) ? f.sites.filter(x => x !== s) : [...f.sites, s],
+    }));
   }
 
   async function handleToggleActive(u: UserRecord) {
@@ -277,7 +294,20 @@ export default function EmployeeManagement() {
                       </td>
                       <td className="px-4 py-3 text-gray-600">{u.email}</td>
                       <td className="px-4 py-3">{roleBadge(u.role)}</td>
-                      <td className="px-4 py-3 text-gray-600">{u.site || '—'}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {(() => {
+                          const list = (u.sites && u.sites.length > 0) ? u.sites : (u.site ? [u.site] : []);
+                          if (list.length === 0) return '—';
+                          if (list.length === 1) return list[0];
+                          return (
+                            <div className="flex flex-wrap gap-1" title={list.join(', ')}>
+                              {list.map(s => (
+                                <span key={s} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700">{s}</span>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${u.is_active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
                           {u.is_active ? 'Active' : 'Inactive'}
@@ -338,25 +368,37 @@ export default function EmployeeManagement() {
                       className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Role *</label>
-                    <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
-                      {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-                    </select>
-                  </div>
-                  {form.role === 'site' && (
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Site *</label>
-                      <select value={form.site || ''} onChange={e => setForm(f => ({ ...f, site: e.target.value }))}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
-                        <option value="">Select site</option>
-                        {SITES.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </div>
-                  )}
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Role *</label>
+                  <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
+                    {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
                 </div>
+                {form.role === 'site' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Sites * <span className="text-gray-400 font-normal">(tick all that this person handles)</span>
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 p-3 border border-gray-200 rounded-lg bg-gray-50">
+                      {SITES.map(s => {
+                        const checked = form.sites.includes(s);
+                        return (
+                          <label key={s} className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm ${checked ? 'bg-blue-50 text-blue-900' : 'text-gray-700 hover:bg-white'}`}>
+                            <input type="checkbox" checked={checked} onChange={() => toggleFormSite(s)} className="rounded border-gray-300" />
+                            <span>{s}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {form.sites.length === 0 && (
+                      <div className="text-[11px] text-amber-600 mt-1">Pick at least one site.</div>
+                    )}
+                    {form.sites.length > 1 && (
+                      <div className="text-[11px] text-blue-600 mt-1">{form.sites.length} sites selected — this person can switch between them inside the app.</div>
+                    )}
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Title</label>
                   <input value={form.title || ''} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
