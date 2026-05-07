@@ -67,12 +67,18 @@ invoices. Head Office processes payments. MD views executive dashboards.
 - SQL seeds:        001_seed_table_name.sql    (snake_case + number prefix)
 
 ## Common commands
-- npm run dev          — start client (:5173) and server (:4000)
-- npm run db:migrate   — run pending SQL migrations
-- npm run db:seed      — run all seed files
-- npm run db:reset     — drop tables, re-migrate, re-seed
+This repo deploys directly to AWS — there is no local-dev stack.
+The commands below are only useful for static checks and on the EC2 host.
+
+Static (run anywhere):
 - npm run typecheck    — TypeScript check across client + server
 - npm run lint         — ESLint across the entire repo
+- npm run build        — production build of client + server
+
+Deployment (run on EC2 box at /opt/makuta-portal):
+- ./infra/prod/deploy.sh                — pull, rebuild, restart, run migrations
+- ./infra/prod/deploy.sh --no-build     — restart only
+- ./infra/prod/deploy.sh --migrate-only — apply pending migrations to Neon
 
 ## Sites
 Nirvana, Taranga, Horizon, Green Wood Villas, Aruna Arcade, Office
