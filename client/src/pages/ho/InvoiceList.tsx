@@ -839,7 +839,7 @@ function InvoiceInfoPanel({ invoice, history, loading, onClose }: {
           </div>
         </div>
 
-        {/* Amount breakdown — base, GST split, total */}
+        {/* Amount breakdown — base, GST split, additional charge, total */}
         {(() => {
           const base = Number(invoice.base_amount ?? invoice.invoice_amount);
           const cgstPct = Number(invoice.cgst_pct ?? 0);
@@ -848,9 +848,17 @@ function InvoiceInfoPanel({ invoice, history, loading, onClose }: {
           const cgstAmt = +(base * cgstPct / 100).toFixed(2);
           const sgstAmt = +(base * sgstPct / 100).toFixed(2);
           const igstAmt = +(base * igstPct / 100).toFixed(2);
+          const addCharge = Number(invoice.additional_charge ?? 0);
+          const addCgstPct = Number(invoice.additional_charge_cgst_pct ?? 0);
+          const addSgstPct = Number(invoice.additional_charge_sgst_pct ?? 0);
+          const addIgstPct = Number(invoice.additional_charge_igst_pct ?? 0);
+          const addCgstAmt = +(addCharge * addCgstPct / 100).toFixed(2);
+          const addSgstAmt = +(addCharge * addSgstPct / 100).toFixed(2);
+          const addIgstAmt = +(addCharge * addIgstPct / 100).toFixed(2);
           const total = Number(invoice.invoice_amount);
           const hasTax = cgstPct > 0 || sgstPct > 0 || igstPct > 0;
-          if (!hasTax && Math.abs(base - total) < 0.01) return null;
+          const hasAddCharge = addCharge > 0;
+          if (!hasTax && !hasAddCharge && Math.abs(base - total) < 0.01) return null;
           return (
             <div className="mb-5">
               <div className="text-sm font-medium text-gray-900 mb-2">Amount Breakdown</div>
@@ -889,6 +897,41 @@ function InvoiceInfoPanel({ invoice, history, loading, onClose }: {
                         <td className="px-3 py-2 text-right text-gray-600">{igstPct.toFixed(2)} %</td>
                         <td className="px-3 py-2 text-right">{formatINR(igstAmt)}</td>
                       </tr>
+                    )}
+                    {hasAddCharge && (
+                      <>
+                        <tr className="border-t border-gray-100 bg-amber-50/40">
+                          <td className="px-3 py-2 text-gray-800">
+                            Additional Charge
+                            {invoice.additional_charge_reason && (
+                              <span className="text-xs text-gray-500 ml-1">— {invoice.additional_charge_reason}</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-400">—</td>
+                          <td className="px-3 py-2 text-right font-medium">{formatINR(addCharge)}</td>
+                        </tr>
+                        {addCgstPct > 0 && (
+                          <tr className="border-t border-gray-100 bg-amber-50/40">
+                            <td className="px-3 py-2 pl-6 text-gray-600">CGST on Additional Charge</td>
+                            <td className="px-3 py-2 text-right text-gray-600">{addCgstPct.toFixed(2)} %</td>
+                            <td className="px-3 py-2 text-right">{formatINR(addCgstAmt)}</td>
+                          </tr>
+                        )}
+                        {addSgstPct > 0 && (
+                          <tr className="border-t border-gray-100 bg-amber-50/40">
+                            <td className="px-3 py-2 pl-6 text-gray-600">SGST on Additional Charge</td>
+                            <td className="px-3 py-2 text-right text-gray-600">{addSgstPct.toFixed(2)} %</td>
+                            <td className="px-3 py-2 text-right">{formatINR(addSgstAmt)}</td>
+                          </tr>
+                        )}
+                        {addIgstPct > 0 && (
+                          <tr className="border-t border-gray-100 bg-amber-50/40">
+                            <td className="px-3 py-2 pl-6 text-gray-600">IGST on Additional Charge</td>
+                            <td className="px-3 py-2 text-right text-gray-600">{addIgstPct.toFixed(2)} %</td>
+                            <td className="px-3 py-2 text-right">{formatINR(addIgstAmt)}</td>
+                          </tr>
+                        )}
+                      </>
                     )}
                   </tbody>
                   <tfoot>
