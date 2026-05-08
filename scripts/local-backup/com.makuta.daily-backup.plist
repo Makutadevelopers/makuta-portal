@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  LaunchAgent that runs makuta-backup.sh once a day at 14:00 local time
+  (~2:00 PM IST). RunAtLoad: true means it also fires the moment the user
+  logs in, so a Mac that was off at 14:00 still catches up.
+
+  Install path: ~/Library/LaunchAgents/com.makuta.daily-backup.plist
+  Activate:     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.makuta.daily-backup.plist
+  See INSTALL.md for the full setup walkthrough.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.makuta.daily-backup</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__SCRIPT_PATH__</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>14</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>__LOG_PATH__</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_PATH__</string>
+
+  <!-- Only run when there's network — avoids noisy errors on a flight -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>NetworkState</key>
+    <true/>
+  </dict>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
