@@ -67,15 +67,7 @@ export default function MyInvoices() {
               {selectedIds.size} selected · <button type="button" onClick={clearSelection} className="text-blue-600 hover:underline">clear</button>
             </span>
           )}
-          {bulkPayable.length > 0 && (
-            <button
-              onClick={() => setBulkPayOpen(true)}
-              className="px-3 py-2 bg-green-700 text-white text-sm font-medium rounded-lg hover:bg-green-800"
-              title="Pay selected invoices from petty cash (each ≤ ₹50,000)"
-            >
-              Pay Selected ({bulkPayable.length})
-            </button>
-          )}
+          {/* Bulk Pay Selected hidden for site role — payment processing is HO's responsibility. */}
           {selectedInvoice && (
             <button
               onClick={() => setDisputeInv(selectedInvoice)}
@@ -289,16 +281,7 @@ export default function MyInvoices() {
                           title="Pay this invoice from your petty cash float"
                         >Pay</span>
                       )}
-                      <span
-                        onClick={() => {
-                          setExpandedEditId(null);
-                          setDuplicateFrom(inv);
-                          setShowForm(true);
-                          if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
-                        }}
-                        className="text-xs text-purple-600 cursor-pointer hover:underline"
-                        title="Copy this invoice's details into a new entry"
-                      >Duplicate</span>
+                      {/* Duplicate action hidden for now — re-enable if/when needed. */}
                     </div>
                   </td>
                 </tr>

@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { getAlerts, getAlertCount, resolveAlert, Alert } from '../../api/alerts';
+import { sendTempPassword } from '../../api/users';
+import { useToast } from '../../context/ToastContext';
 import { getPendingCount } from '../../utils/offlineSync';
 import CalculatorWidget from '../shared/CalculatorWidget';
 
@@ -79,6 +81,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [showAlerts, setShowAlerts] = useState(false);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(false);
+  const [sendingTempFor, setSendingTempFor] = useState<string | null>(null);
+  const { notify } = useToast();
 
   const loadCount = useCallback(async () => {
     // HO sees data-hygiene alerts; MD sees password-reset requests.
@@ -118,6 +122,30 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       setAlerts(prev => prev.filter(a => a.id !== id));
       setAlertCount(prev => Math.max(0, prev - 1));
     } catch { /* ignore */ }
+  }
+
+  async function handleSendTempPassword(alert: Alert) {
+    const meta = alert.metadata as Record<string, string> | null;
+    const targetUserId = meta?.userId;
+    if (!targetUserId) {
+      notify('Alert is missing the user reference', 'error');
+      return;
+    }
+    if (!confirm(`Send a temporary password to ${meta?.name ?? 'this user'} (${meta?.email ?? ''})?`)) return;
+    setSendingTempFor(alert.id);
+    try {
+      const res = await sendTempPassword(targetUserId);
+      try { await navigator.clipboard.writeText(res.tempPassword); } catch { /* ignore clipboard errors */ }
+      // The server auto-resolves the linked password_reset_request alert,
+      // so drop it from the local list and decrement the badge.
+      setAlerts(prev => prev.filter(a => a.id !== alert.id));
+      setAlertCount(prev => Math.max(0, prev - 1));
+      notify(`Temp password for ${res.userName}: ${res.tempPassword} (copied to clipboard)`);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to send temp password', 'error');
+    } finally {
+      setSendingTempFor(null);
+    }
   }
 
   return (
@@ -245,7 +273,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Role banners */}
       {role === 'site' && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 py-1.5 text-xs text-amber-800">
-          Viewing <strong>{user?.site}</strong> data only · <span className="hidden sm:inline">Enter invoices and attach documents · </span>Payment processing is handled by Head Office
+          Viewing <strong>{userSites.join(', ')}</strong> data only · <span className="hidden sm:inline">Enter invoices and attach documents · </span>Payment processing is handled by Head Office
         </div>
       )}
       {role === 'mgmt' && (

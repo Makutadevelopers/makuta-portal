@@ -1,6 +1,7 @@
 import { useState, useRef, ChangeEvent } from 'react';
 import { apiFetch, getApiToken } from '../../api/client';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../hooks/useAuth';
 import { formatINR, formatDate } from '../../utils/formatters';
 
 // ── Response shapes ─────────────────────────────────────────────────────────
@@ -68,6 +69,11 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
 
   const fileRef = useRef<HTMLInputElement>(null);
   const { notify } = useToast();
+  const { user } = useAuth();
+  const allowedSites = user?.sites && user.sites.length > 0
+    ? user.sites
+    : (user?.site ? [user.site] : []);
+  const isSiteRole = user?.role === 'site';
 
   function resetState() {
     setFile(null);
@@ -211,6 +217,24 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
         <div className="mb-4 p-3 bg-blue-50 rounded-lg text-xs text-blue-800">
           First time? <button onClick={handleDownloadTemplate} className="underline font-medium">Download CSV template</button> to see the expected column format.
         </div>
+
+        {/* Site hint for site-role bulk invoice imports */}
+        {isSiteRole && importType === 'invoices' && allowedSites.length > 0 && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
+            <div className="font-medium mb-0.5">
+              Set the <code className="px-1 py-0.5 bg-white rounded border border-amber-200 font-mono">Site Location</code> column on every row.
+            </div>
+            <div>
+              You can import for {allowedSites.length === 1 ? 'this site' : 'any of these sites'}:{' '}
+              {allowedSites.map((s, i) => (
+                <span key={s}>
+                  <strong>{s}</strong>{i < allowedSites.length - 1 ? ', ' : ''}
+                </span>
+              ))}
+              . Rows with a different or misspelled site are skipped.
+            </div>
+          </div>
+        )}
 
         {/* File picker (only show until we have a commit result) */}
         {nothingCommittedYet && (
