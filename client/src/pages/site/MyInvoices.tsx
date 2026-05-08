@@ -772,14 +772,28 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Category</label>
-            <select
-              value={purpose}
-              onChange={e => setPurpose(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
-            >
-              {PURPOSES.map(p => <option key={p}>{p}</option>)}
-            </select>
+            <label className="block text-xs text-gray-500 mb-1">
+              Category
+              {(() => {
+                const v = localVendors.find(v => v.id === vendorId);
+                return v?.category ? <span className="text-gray-400 ml-2">· locked to vendor master</span> : null;
+              })()}
+            </label>
+            {(() => {
+              const v = localVendors.find(v => v.id === vendorId);
+              const locked = !!v?.category;
+              return (
+                <select
+                  value={purpose}
+                  onChange={e => setPurpose(e.target.value)}
+                  disabled={locked}
+                  className={`w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 ${locked ? 'bg-gray-50 text-gray-600 cursor-not-allowed' : ''}`}
+                >
+                  {PURPOSES.map(p => <option key={p}>{p}</option>)}
+                  {locked && v?.category && !PURPOSES.includes(v.category) && <option key={v.category}>{v.category}</option>}
+                </select>
+              );
+            })()}
           </div>
         </div>
 
