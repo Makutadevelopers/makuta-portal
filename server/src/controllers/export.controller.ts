@@ -213,7 +213,7 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
        i.po_number,
        i.purpose,
        i.site,
-       COALESCE(i.taxable_amount, 0)                  AS taxable_amount,
+       COALESCE(i.base_amount, i.invoice_amount, 0)   AS taxable_amount,
        COALESCE(i.cgst_pct, 0)                        AS cgst_pct,
        COALESCE(i.sgst_pct, 0)                        AS sgst_pct,
        COALESCE(i.igst_pct, 0)                        AS igst_pct,
