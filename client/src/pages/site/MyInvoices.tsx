@@ -114,27 +114,19 @@ export default function MyInvoices() {
               {selectedIds.size} selected · <button type="button" onClick={clearSelection} className="text-blue-600 hover:underline">clear</button>
             </span>
           )}
-          {/* Bulk Pay Selected — only enabled when the user's petty cash for
-              every selected invoice's site covers that site's selected total.
-              Each individual invoice still must be ≤ ₹50,000 (existing rule). */}
+          {/* Bulk Pay Selected — no petty-cash cap on the client.
+              Server still enforces ≤ ₹50k per invoice and refuses any expense
+              that would overdraw the site's float, so over-spending isn't
+              possible regardless of what's clicked here. */}
           {bulkPayable.length > 0 && (
-            bulkPaySummary.canPay ? (
-              <button
-                onClick={() => setBulkPayOpen(true)}
-                className="px-3 py-2 bg-green-700 text-white text-sm font-medium rounded-lg hover:bg-green-800"
-                title={`Pay ${bulkPayable.length} invoice${bulkPayable.length > 1 ? 's' : ''} (${formatINR(bulkPaySummary.totalSelected)}) from petty cash. Available: ${formatINR(bulkPaySummary.totalAvailable)}.`}
-              >
-                Pay Selected ({bulkPayable.length})
-                <span className="ml-1 text-[11px] opacity-90">{formatINR(bulkPaySummary.totalSelected)}</span>
-              </button>
-            ) : (
-              <span
-                className="px-3 py-2 bg-gray-100 text-gray-500 text-sm font-medium rounded-lg cursor-not-allowed"
-                title={`Need ${formatINR(bulkPaySummary.totalSelected)} but petty cash is ${formatINR(bulkPaySummary.totalAvailable)}. Short on: ${bulkPaySummary.insufficient.map(s => `${s.site} (${formatINR(s.short)})`).join(', ')}.`}
-              >
-                Pay Selected — Insufficient Petty Cash
-              </span>
-            )
+            <button
+              onClick={() => setBulkPayOpen(true)}
+              className="px-3 py-2 bg-green-700 text-white text-sm font-medium rounded-lg hover:bg-green-800"
+              title={`Pay ${bulkPayable.length} invoice${bulkPayable.length > 1 ? 's' : ''} (${formatINR(bulkPaySummary.totalSelected)}) from petty cash`}
+            >
+              Pay Selected ({bulkPayable.length})
+              <span className="ml-1 text-[11px] opacity-90">{formatINR(bulkPaySummary.totalSelected)}</span>
+            </button>
           )}
           {selectedInvoice && (
             <button
