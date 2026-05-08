@@ -63,3 +63,57 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
   return res.json();
 }
+
+/**
+ * Authenticated file download. Uses fetch() (with the JWT in the Authorization
+ * header) to pull the response as a blob, then triggers a save dialog from a
+ * blob URL. This deliberately avoids anchor-tag navigation to /api/...,
+ * because the PWA service worker's navigateFallback would otherwise intercept
+ * the navigation and serve index.html — causing the page to "reload to home"
+ * instead of downloading.
+ *
+ * @param path     API path including query string, e.g. "/export/invoices?format=csv&site=Nirvana"
+ * @param fallbackFilename Used if the response has no Content-Disposition header.
+ * @param openInTab If true, opens the blob in a new tab instead of saving (used for PDFs).
+ */
+export async function downloadAuthenticated(
+  path: string,
+  fallbackFilename: string,
+  openInTab = false,
+): Promise<void> {
+  const headers: Record<string, string> = {
+    'ngrok-skip-browser-warning': 'true',
+  };
+  if (tokenRef) headers['Authorization'] = `Bearer ${tokenRef}`;
+
+  const res = await fetch(`${API_BASE}${path}`, { headers });
+  if (res.status === 401) {
+    if (tokenRef && unauthorizedHandler) unauthorizedHandler();
+    throw new Error('Session expired — please log in again');
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message || `Download failed: ${res.status}`);
+  }
+
+  // Honour Content-Disposition's filename if the server provided one.
+  const cd = res.headers.get('content-disposition') ?? '';
+  const m = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(cd);
+  const filename = m ? decodeURIComponent(m[1].trim()) : fallbackFilename;
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  if (openInTab) {
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+  } else {
+    a.download = filename;
+  }
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoke the URL after a tick so the browser has time to start the download/tab.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, Fragment, FormEvent, ChangeEvent, DragEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { getApiToken } from '../../api/client';
+import { downloadAuthenticated } from '../../api/client';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { useVendors } from '../../hooks/useVendors';
@@ -281,7 +281,7 @@ export default function InvoiceList() {
             Bulk Import
           </button>
           <ExportMenu
-            buildUrl={(format) => {
+            buildPath={(format) => {
               const range = getTimelineRange(timeline);
               const params = new URLSearchParams();
               params.set('format', format);
@@ -293,9 +293,7 @@ export default function InvoiceList() {
               if (range?.to)          params.set('to', range.to);
               if (!range && fMonth)   params.set('month', fMonth);
               params.set('sort', sortBy);
-              const tok = getApiToken();
-              if (tok) params.set('token', tok);
-              return `/api/export/invoices?${params.toString()}`;
+              return `/export/invoices?${params.toString()}`;
             }}
             filterCount={
               (fSite !== 'All' ? 1 : 0) +
@@ -1558,15 +1556,17 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
 
 // ── Export dropdown menu ───────────────────────────────────────────────────
 interface ExportMenuProps {
-  buildUrl: (format: 'csv' | 'xlsx' | 'pdf') => string;
+  buildPath: (format: 'csv' | 'xlsx' | 'pdf') => string;
   filterCount: number;
 }
 
-function ExportMenu({ buildUrl, filterCount }: ExportMenuProps) {
+function ExportMenu({ buildPath, filterCount }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [busyFormat, setBusyFormat] = useState<'csv' | 'xlsx' | 'pdf' | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const { notify } = useToast();
 
   useEffect(() => {
     if (!open) return;
@@ -1582,16 +1582,16 @@ function ExportMenu({ buildUrl, filterCount }: ExportMenuProps) {
     };
   }, [open]);
 
-  function download(format: 'csv' | 'xlsx' | 'pdf') {
-    const url = buildUrl(format);
-    const a = document.createElement('a');
-    a.href = url;
-    if (format === 'pdf') a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setOpen(false);
+  async function download(format: 'csv' | 'xlsx' | 'pdf') {
+    setBusyFormat(format);
+    try {
+      await downloadAuthenticated(buildPath(format), `invoices.${format}`, format === 'pdf');
+      setOpen(false);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Export failed', 'error');
+    } finally {
+      setBusyFormat(null);
+    }
   }
 
   const tip = filterCount > 0
@@ -1617,16 +1617,16 @@ function ExportMenu({ buildUrl, filterCount }: ExportMenuProps) {
           <div className="px-3 py-2 text-[11px] text-gray-500 border-b border-gray-100">
             {filterCount > 0 ? `Current filtered view (${filterCount})` : 'All invoices'}
           </div>
-          <button onClick={() => download('csv')} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-700">
-            <div className="font-medium">CSV</div>
+          <button onClick={() => download('csv')} disabled={busyFormat !== null} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-700 disabled:opacity-50">
+            <div className="font-medium">{busyFormat === 'csv' ? 'Preparing CSV…' : 'CSV'}</div>
             <div className="text-[10px] text-gray-500">Comma-separated · opens in Excel</div>
           </button>
-          <button onClick={() => download('xlsx')} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-700">
-            <div className="font-medium">Excel (.xlsx)</div>
+          <button onClick={() => download('xlsx')} disabled={busyFormat !== null} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-700 disabled:opacity-50">
+            <div className="font-medium">{busyFormat === 'xlsx' ? 'Preparing Excel…' : 'Excel (.xlsx)'}</div>
             <div className="text-[10px] text-gray-500">Native Excel workbook</div>
           </button>
-          <button onClick={() => download('pdf')} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-700">
-            <div className="font-medium">PDF</div>
+          <button onClick={() => download('pdf')} disabled={busyFormat !== null} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-700 disabled:opacity-50">
+            <div className="font-medium">{busyFormat === 'pdf' ? 'Preparing PDF…' : 'PDF'}</div>
             <div className="text-[10px] text-gray-500">Print-friendly summary</div>
           </button>
         </div>
