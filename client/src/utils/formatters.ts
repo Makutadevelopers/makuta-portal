@@ -1,19 +1,30 @@
 // Shared formatting utilities used across all pages.
 
-// Always show 2 decimals — paisa must be visible on every amount the user sees,
-// even when the value is a round rupee (.00). Don't switch to "drop trailing
-// zeros" because that hides the precision deliberately preserved by the
-// importer/breakdown views.
+// Default display rounds to whole rupees — paisa cluttered KPI/totals at
+// scale (lakhs/crores). For places that genuinely need paisa precision
+// (e.g. importer line-item breakdowns), use formatINRPaisa instead.
 const inrFormatter = new Intl.NumberFormat('en-IN', {
+  style: 'currency',
+  currency: 'INR',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
+const inrPaisaFormatter = new Intl.NumberFormat('en-IN', {
   style: 'currency',
   currency: 'INR',
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
 
-/** Format a number as ₹X,XX,XXX.YY (en-IN locale, paisa always shown). */
+/** Format a number as ₹X,XX,XXX (en-IN locale, rounded to nearest rupee). */
 export function formatINR(value: number): string {
-  return inrFormatter.format(value);
+  return inrFormatter.format(Math.round(value));
+}
+
+/** Format with paisa preserved — only for line-item/breakdown contexts. */
+export function formatINRPaisa(value: number): string {
+  return inrPaisaFormatter.format(value);
 }
 
 /** Format an ISO date string as "14 Nov 2025". */

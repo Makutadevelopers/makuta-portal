@@ -169,7 +169,7 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
   }
 
   async function handleDownloadTemplate() {
-    const type = importType === 'invoices' ? 'payments' : 'vendors';
+    const type = importType === 'invoices' ? 'invoices' : 'vendors';
     const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
     const token = getApiToken();
     try {
