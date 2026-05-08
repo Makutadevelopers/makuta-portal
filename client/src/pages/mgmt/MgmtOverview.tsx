@@ -25,7 +25,7 @@ export default function MgmtOverview() {
 
   return (
     <AppShell>
-      <div className="max-w-[1100px]">
+      <div className="w-full">
         <div className="mb-5 sm:mb-7">
           <div className="text-lg sm:text-xl font-medium text-gray-900">Overview</div>
           <div className="text-[11px] sm:text-xs text-gray-500 mt-1 truncate">{todayStr} · Accounting Module · All Sites</div>
@@ -55,9 +55,9 @@ export default function MgmtOverview() {
                   bg: disputeSummary.major.length > 0 ? '#fef2f2' : '#fffbeb',
                 },
               ].map(c => (
-                <div key={c.label} className="rounded-xl p-3 sm:p-5" style={{ background: c.bg, border: `1px solid ${c.accent}22` }}>
+                <div key={c.label} className="rounded-xl p-3 sm:p-5 min-w-0" style={{ background: c.bg, border: `1px solid ${c.accent}22` }}>
                   <div className="text-[10px] sm:text-[11px] font-medium uppercase tracking-wider mb-1.5 sm:mb-2.5" style={{ color: c.accent }}>{c.label}</div>
-                  <div className="text-base sm:text-[22px] font-semibold leading-none mb-1 sm:mb-1.5 truncate" style={{ color: c.accent }}>{c.value}</div>
+                  <div className="text-base sm:text-[20px] font-semibold leading-tight mb-1 sm:mb-1.5 whitespace-nowrap" style={{ color: c.accent }}>{c.value}</div>
                   <div className="text-[10px] sm:text-[11px] truncate" style={{ color: c.accent, opacity: 0.7 }}>{c.sub}</div>
                 </div>
               ))}
