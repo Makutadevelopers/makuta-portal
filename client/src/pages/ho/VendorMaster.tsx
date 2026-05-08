@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import { useVendors } from '../../hooks/useVendors';
 import { useInvoices } from '../../hooks/useInvoices';
@@ -21,12 +21,35 @@ export default function VendorMaster() {
   const canManage = (v: Vendor) => !isSite || v.created_by === user?.id;
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  // showForm renders the form above the table — used only for "+ Add Vendor"
+  // and the unmastered-vendor quick-add buttons. Row-level Edit uses
+  // expandedEditId so the form opens inline below the clicked row.
   const [showForm, setShowForm] = useState(false);
-  const [editVendor, setEditVendor] = useState<Vendor | null>(null);
+  const [expandedEditId, setExpandedEditId] = useState<string | null>(null);
   const [initialName, setInitialName] = useState('');
   const [showUnmastered, setShowUnmastered] = useState(true);
   const [showImport, setShowImport] = useState(false);
+  const [editingTermsId, setEditingTermsId] = useState<string | null>(null);
+  const [savingTermsId, setSavingTermsId] = useState<string | null>(null);
   const { notify } = useToast();
+
+  async function handleQuickTermsChange(v: Vendor, newTerms: number) {
+    if (newTerms === v.payment_terms) {
+      setEditingTermsId(null);
+      return;
+    }
+    setSavingTermsId(v.id);
+    try {
+      await updateVendor(v.id, { payment_terms: newTerms });
+      notify(`${v.name}: ${newTerms} day terms`);
+      refresh();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to update terms', 'error');
+    } finally {
+      setSavingTermsId(null);
+      setEditingTermsId(null);
+    }
+  }
 
   const vendorStats = new Map<string, number>();
   for (const inv of invoices) {
@@ -80,7 +103,7 @@ export default function VendorMaster() {
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
             Bulk Import
           </button>
-          <button onClick={() => { setEditVendor(null); setInitialName(''); setShowForm(true); }}
+          <button onClick={() => { setExpandedEditId(null); setInitialName(''); setShowForm(true); }}
             className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
             + Add Vendor
           </button>
@@ -103,7 +126,7 @@ export default function VendorMaster() {
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
             {unmasteredVendors.map(uName => (
-              <button key={uName} onClick={() => { setEditVendor(null); setInitialName(uName); setShowForm(true); }}
+              <button key={uName} onClick={() => { setExpandedEditId(null); setInitialName(uName); setShowForm(true); }}
                 className="text-xs px-2.5 py-1 bg-white border border-amber-300 rounded-md text-amber-800 hover:bg-amber-100">
                 + {uName}
               </button>
@@ -114,12 +137,12 @@ export default function VendorMaster() {
 
       {showForm && (
         <VendorForm
-          key={editVendor?.id ?? `new-${initialName}`}
-          vendor={editVendor}
+          key={`new-${initialName}`}
+          vendor={null}
           initialName={initialName}
-          onCancel={() => { setShowForm(false); setEditVendor(null); setInitialName(''); }}
-          onSaved={() => { setShowForm(false); setEditVendor(null); setInitialName(''); notify(editVendor ? 'Vendor updated' : 'Vendor added'); refresh(); }}
-          onMerged={() => { setShowForm(false); setEditVendor(null); setInitialName(''); notify('Vendors merged'); refresh(); }}
+          onCancel={() => { setShowForm(false); setInitialName(''); }}
+          onSaved={() => { setShowForm(false); setInitialName(''); notify('Vendor added'); refresh(); }}
+          onMerged={() => { setShowForm(false); setInitialName(''); notify('Vendors merged'); refresh(); }}
         />
       )}
 
@@ -149,40 +172,83 @@ export default function VendorMaster() {
             <tbody>
               {filtered.map(v => {
                 const outstanding = vendorStats.get(v.name);
+                const isExpanded = expandedEditId === v.id;
                 return (
-                  <tr key={v.id} className="border-t border-gray-50 hover:bg-gray-50/50">
-                    <td className="px-4 py-3">
-                      {isSite ? (
-                        <span className="font-medium text-gray-900">{v.name}</span>
-                      ) : (
-                        <Link to={`/vendors/${v.id}`} className="font-medium text-blue-700 hover:underline">{v.name}</Link>
-                      )}
-                      {!isSite && outstanding && outstanding > 0 && (
-                        <div className="text-[11px] text-red-500 mt-0.5">{formatINR(outstanding)} outstanding</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{v.category ?? '—'}</td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-medium border ${termsBadgeColor(v.payment_terms)}`}>
-                        {v.payment_terms} days
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-600">{v.gstin ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-700">{v.contact_name ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-600">{v.phone ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-600 text-xs">{v.email ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs max-w-[140px] truncate" title={v.notes ?? ''}>{v.notes || '—'}</td>
-                    <td className="px-4 py-3">
-                      {canManage(v) ? (
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => { setEditVendor(v); setShowForm(true); }} className="text-xs text-blue-600 hover:underline">Edit</button>
-                          <button onClick={() => handleDelete(v)} className="text-xs text-red-500 hover:underline">Delete</button>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-gray-300">—</span>
-                      )}
-                    </td>
-                  </tr>
+                  <Fragment key={v.id}>
+                    <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${isExpanded ? 'bg-blue-50/40' : ''}`}>
+                      <td className="px-4 py-3">
+                        {isSite ? (
+                          <span className="font-medium text-gray-900">{v.name}</span>
+                        ) : (
+                          <Link to={`/vendors/${v.id}`} className="font-medium text-blue-700 hover:underline">{v.name}</Link>
+                        )}
+                        {!isSite && outstanding && outstanding > 0 && (
+                          <div className="text-[11px] text-red-500 mt-0.5">{formatINR(outstanding)} outstanding</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">{v.category ?? '—'}</td>
+                      <td className="px-4 py-3 text-center">
+                        {editingTermsId === v.id && canManage(v) ? (
+                          <select
+                            autoFocus
+                            defaultValue={v.payment_terms}
+                            disabled={savingTermsId === v.id}
+                            onBlur={() => setEditingTermsId(null)}
+                            onChange={e => handleQuickTermsChange(v, Number(e.target.value))}
+                            className="px-2 py-1 border border-blue-300 rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          >
+                            {TERM_OPTIONS.map(t => <option key={t} value={t}>{t} days</option>)}
+                            {!TERM_OPTIONS.includes(v.payment_terms) && (
+                              <option value={v.payment_terms}>{v.payment_terms} days (current)</option>
+                            )}
+                          </select>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => canManage(v) && setEditingTermsId(v.id)}
+                            disabled={!canManage(v)}
+                            title={canManage(v) ? 'Click to change' : ''}
+                            className={`inline-block px-2.5 py-1 rounded-md text-xs font-medium border ${termsBadgeColor(v.payment_terms)} ${canManage(v) ? 'cursor-pointer hover:ring-2 hover:ring-blue-200' : 'cursor-default'}`}
+                          >
+                            {v.payment_terms} days
+                          </button>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{v.gstin ?? '—'}</td>
+                      <td className="px-4 py-3 text-gray-700">{v.contact_name ?? '—'}</td>
+                      <td className="px-4 py-3 text-gray-600">{v.phone ?? '—'}</td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">{v.email ?? '—'}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs max-w-[140px] truncate" title={v.notes ?? ''}>{v.notes || '—'}</td>
+                      <td className="px-4 py-3">
+                        {canManage(v) ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => { setShowForm(false); setExpandedEditId(isExpanded ? null : v.id); }}
+                              className="text-xs text-blue-600 hover:underline"
+                            >
+                              {isExpanded ? 'Close' : 'Edit'}
+                            </button>
+                            <button onClick={() => handleDelete(v)} className="text-xs text-red-500 hover:underline">Delete</button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-300">—</span>
+                        )}
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr className="border-t border-blue-100 bg-blue-50/30">
+                        <td colSpan={9} className="px-2 py-4">
+                          <VendorForm
+                            key={`edit-${v.id}`}
+                            vendor={v}
+                            onCancel={() => setExpandedEditId(null)}
+                            onSaved={() => { setExpandedEditId(null); notify('Vendor updated'); refresh(); }}
+                            onMerged={() => { setExpandedEditId(null); notify('Vendors merged'); refresh(); }}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
               {filtered.length === 0 && (
