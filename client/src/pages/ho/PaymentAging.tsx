@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAgingCalc } from '../../hooks/useAgingCalc';
+import { getApiToken } from '../../api/client';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
@@ -24,8 +25,17 @@ export default function PaymentAging() {
             <option value="All">All Sites</option>
             {SITES.map(s => <option key={s}>{s}</option>)}
           </select>
-          <a href={`/api/export/aging?site=${encodeURIComponent(site)}`} target="_blank" rel="noopener noreferrer"
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+          <a
+            href={(() => {
+              const params = new URLSearchParams({ site });
+              const tok = getApiToken();
+              if (tok) params.set('token', tok);
+              return `/api/export/aging?${params.toString()}`;
+            })()}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+          >
             Export PDF
           </a>
         </div>
