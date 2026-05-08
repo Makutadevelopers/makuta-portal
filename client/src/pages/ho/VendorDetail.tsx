@@ -33,6 +33,22 @@ export default function VendorDetail() {
     getVendorCreditBalance(id).then(setCreditBalance).catch(() => setCreditBalance(null));
   }, [id]);
 
+  // Hooks must run unconditionally on every render — keep this above the
+  // loading/error early-returns so the hook count stays stable. The previous
+  // crash (commit 6b61438) was caused by placing useMemo below the returns.
+  const selectionSummary = useMemo(() => {
+    let amount = 0;
+    let balance = 0;
+    const invs = data?.invoices ?? [];
+    for (const inv of invs) {
+      if (selectedIds.has(inv.id)) {
+        amount += Number(inv.invoice_amount);
+        balance += Number(inv.balance);
+      }
+    }
+    return { count: selectedIds.size, amount, balance };
+  }, [data, selectedIds]);
+
   if (loading) {
     return (
       <AppShell>
@@ -80,18 +96,6 @@ export default function VendorDetail() {
 
   const allFilteredSelected = filtered.length > 0 && filtered.every(i => selectedIds.has(i.id));
   const someFilteredSelected = filtered.some(i => selectedIds.has(i.id));
-
-  const selectionSummary = useMemo(() => {
-    let amount = 0;
-    let balance = 0;
-    for (const inv of invoices) {
-      if (selectedIds.has(inv.id)) {
-        amount += Number(inv.invoice_amount);
-        balance += Number(inv.balance);
-      }
-    }
-    return { count: selectedIds.size, amount, balance };
-  }, [invoices, selectedIds]);
 
   function toggleRow(id: string) {
     setSelectedIds(prev => {
