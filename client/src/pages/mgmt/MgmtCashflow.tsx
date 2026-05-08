@@ -163,13 +163,13 @@ export default function MgmtCashflow() {
                 )}
               </tbody>
               {!isEmpty && (
-                <tfoot className="border-t-2 border-gray-200 bg-gray-50 sticky bottom-0 z-20">
+                <tfoot className="border-t-2 border-gray-200 bg-gray-50">
                   <tr>
-                    <td className="px-4 py-2.5 font-medium text-gray-900 sticky left-0 bg-gray-50 z-30">Total</td>
+                    <td className="px-4 py-2.5 font-medium text-gray-900 sticky left-0 bg-gray-50 z-10">Total</td>
                     {totals.map((t, i) => (
                       <td key={months[i]} className="px-4 py-2.5 text-right font-semibold text-gray-900 whitespace-nowrap">{formatINR(t)}</td>
                     ))}
-                    <td className="px-4 pl-6 py-2.5 text-right font-bold text-gray-900 whitespace-nowrap sticky right-0 bg-gray-50 z-30 border-l border-gray-200">{formatINR(grandTotal)}</td>
+                    <td className="px-4 pl-6 py-2.5 text-right font-bold text-gray-900 whitespace-nowrap sticky right-0 bg-gray-50 z-10 border-l border-gray-200">{formatINR(grandTotal)}</td>
                   </tr>
                 </tfoot>
               )}
