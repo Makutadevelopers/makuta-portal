@@ -282,19 +282,26 @@ export default function InvoiceList() {
           </button>
           <ExportMenu
             buildPath={(format) => {
-              const range = getTimelineRange(timeline);
               const params = new URLSearchParams();
               params.set('format', format);
-              if (fSite !== 'All')    params.set('site', fSite);
-              if (fStatus !== 'All')  params.set('status', fStatus);
-              if (fPurpose !== 'All') params.set('category', fPurpose);
-              if (search)             params.set('search', search);
-              if (range?.from)        params.set('from', range.from);
-              if (range?.to)          params.set('to', range.to);
-              if (!range && fMonth)   params.set('month', fMonth);
-              params.set('sort', sortBy);
+              // If the user has ticked specific rows, export ONLY those.
+              // Otherwise fall back to the active filters / full table.
+              if (selected.size > 0) {
+                params.set('ids', Array.from(selected).join(','));
+              } else {
+                const range = getTimelineRange(timeline);
+                if (fSite !== 'All')    params.set('site', fSite);
+                if (fStatus !== 'All')  params.set('status', fStatus);
+                if (fPurpose !== 'All') params.set('category', fPurpose);
+                if (search)             params.set('search', search);
+                if (range?.from)        params.set('from', range.from);
+                if (range?.to)          params.set('to', range.to);
+                if (!range && fMonth)   params.set('month', fMonth);
+                params.set('sort', sortBy);
+              }
               return `/export/invoices?${params.toString()}`;
             }}
+            selectedCount={selected.size}
             filterCount={
               (fSite !== 'All' ? 1 : 0) +
               (fStatus !== 'All' ? 1 : 0) +
@@ -1315,11 +1322,24 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Category</label>
-            <select value={purpose} onChange={e => setPurpose(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200">
-              {PURPOSES.map(p => <option key={p}>{p}</option>)}
-            </select>
+            <label className="block text-xs text-gray-500 mb-1">
+              Category
+              {(() => {
+                const v = localVendors.find(v => v.id === vendorId);
+                return v?.category ? <span className="text-gray-400 ml-2">· locked to vendor master</span> : null;
+              })()}
+            </label>
+            {(() => {
+              const v = localVendors.find(v => v.id === vendorId);
+              const locked = !!v?.category;
+              return (
+                <select value={purpose} onChange={e => setPurpose(e.target.value)} disabled={locked}
+                  className={`w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 ${locked ? 'bg-gray-50 text-gray-600 cursor-not-allowed' : ''}`}>
+                  {PURPOSES.map(p => <option key={p}>{p}</option>)}
+                  {locked && v?.category && !PURPOSES.includes(v.category) && <option key={v.category}>{v.category}</option>}
+                </select>
+              );
+            })()}
           </div>
         </div>
 
@@ -1558,9 +1578,10 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
 interface ExportMenuProps {
   buildPath: (format: 'csv' | 'xlsx' | 'pdf') => string;
   filterCount: number;
+  selectedCount: number;
 }
 
-function ExportMenu({ buildPath, filterCount }: ExportMenuProps) {
+function ExportMenu({ buildPath, filterCount, selectedCount }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const [busyFormat, setBusyFormat] = useState<'csv' | 'xlsx' | 'pdf' | null>(null);
@@ -1594,9 +1615,11 @@ function ExportMenu({ buildPath, filterCount }: ExportMenuProps) {
     }
   }
 
-  const tip = filterCount > 0
-    ? `Exports the current filtered view (${filterCount} filter${filterCount === 1 ? '' : 's'} active)`
-    : 'Exports all invoices';
+  const tip = selectedCount > 0
+    ? `Exports the ${selectedCount} selected invoice${selectedCount === 1 ? '' : 's'}`
+    : filterCount > 0
+      ? `Exports the current filtered view (${filterCount} filter${filterCount === 1 ? '' : 's'} active)`
+      : 'Exports all invoices';
 
   return (
     <div className="relative inline-block" ref={ref}>
@@ -1607,15 +1630,21 @@ function ExportMenu({ buildPath, filterCount }: ExportMenuProps) {
         className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 flex items-center gap-1.5"
       >
         Export
-        {filterCount > 0 && (
+        {selectedCount > 0 ? (
+          <span className="bg-blue-600 text-white text-[10px] font-medium px-1.5 rounded-full">{selectedCount}</span>
+        ) : filterCount > 0 ? (
           <span className="bg-[#1a3c5e] text-white text-[10px] font-medium px-1.5 rounded-full">{filterCount}</span>
-        )}
+        ) : null}
         <span className="text-[10px]">&#9662;</span>
       </button>
       {open && (
         <div className="absolute right-0 z-30 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
           <div className="px-3 py-2 text-[11px] text-gray-500 border-b border-gray-100">
-            {filterCount > 0 ? `Current filtered view (${filterCount})` : 'All invoices'}
+            {selectedCount > 0
+              ? `${selectedCount} selected invoice${selectedCount === 1 ? '' : 's'}`
+              : filterCount > 0
+                ? `Current filtered view (${filterCount})`
+                : 'All invoices'}
           </div>
           <button onClick={() => download('csv')} disabled={busyFormat !== null} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-700 disabled:opacity-50">
             <div className="font-medium">{busyFormat === 'csv' ? 'Preparing CSV…' : 'CSV'}</div>
