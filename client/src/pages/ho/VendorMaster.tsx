@@ -249,11 +249,6 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) { setError('Vendor name is required'); return; }
-    const phoneDigits = phone.replace(/\D/g, '');
-    if (phoneDigits.length < 7) {
-      setError('Phone number is required');
-      return;
-    }
 
     const data = {
       name: name.trim(),
@@ -261,7 +256,7 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
       category: category || null,
       gstin: gstin.trim() || null,
       contact_name: contactName.trim() || null,
-      phone: phone.trim(),
+      phone: phone.trim() || null,
       email: email.trim() || null,
       notes: notes.trim() || null,
     };
@@ -356,12 +351,11 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Phone *</label>
+            <label className="block text-xs text-gray-500 mb-1">Phone</label>
             <input
               value={phone}
               onChange={e => setPhone(e.target.value)}
               placeholder="9848012345"
-              required
               inputMode="tel"
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
             />

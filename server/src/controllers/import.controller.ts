@@ -479,21 +479,27 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
           continue;
         }
 
-        // Look up or auto-create vendor
-        let vendor: { id: string } | null = r.vendorName
-          ? await queryOne<{ id: string }>('SELECT id FROM vendors WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))', [r.vendorName])
+        // Look up or auto-create vendor — fetch category too so we can fall
+        // back to it when the CSV row's Head/Category cell is empty.
+        let vendor: { id: string; category: string | null } | null = r.vendorName
+          ? await queryOne<{ id: string; category: string | null }>(
+              'SELECT id, category FROM vendors WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))',
+              [r.vendorName]
+            )
           : null;
 
         if (!vendor && r.vendorName) {
-          vendor = await queryOne<{ id: string }>(
+          vendor = await queryOne<{ id: string; category: string | null }>(
             `INSERT INTO vendors (name, payment_terms, category, created_by, batch_id)
              VALUES (TRIM($1), 30, $2, $3, $4)
              ON CONFLICT (name) DO UPDATE SET name = vendors.name
-             RETURNING id`,
+             RETURNING id, category`,
             [r.vendorName, r.purpose || null, req.user!.id, batchId]
           );
           vendorsCreated++;
         }
+
+        const invoicePurpose = r.purpose || vendor?.category || '';
 
         const seqResult = await queryOne<{ nextval: string }>("SELECT nextval('invoice_internal_seq')");
         const internalNo = `MKT-${String(seqResult!.nextval).padStart(5, '0')}`;
@@ -515,7 +521,7 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
             r.vendorName || '',
             r.invoiceNo || null,
             r.poNumber || null,
-            r.purpose || '',
+            invoicePurpose,
             r.site || '',
             r.amount,
             r.baseAmount > 0 ? r.baseAmount : r.amount,
