@@ -185,6 +185,15 @@ interface NormalizedRow {
   purpose: string;
   site: string;
   amount: number;
+  baseAmount: number;
+  cgstPct: number;
+  sgstPct: number;
+  igstPct: number;
+  additionalCharge: number;
+  additionalChargeCgstPct: number;
+  additionalChargeSgstPct: number;
+  additionalChargeIgstPct: number;
+  additionalChargeReason: string;
   remarks: string;
   paymentStatus: string;
   paymentType: string;
@@ -203,6 +212,19 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
   const purpose = row['purpose'] || row['Purpose'] || row['Head'] || row['Category'] || '';
   const site = row['site'] || row['Site'] || row['Site Location'] || '';
   const amountStr = row['invoice_amount'] || row['Invoice amount'] || row['Invoice Amount'] || row['Amount'] || '0';
+  // Optional tax split — if any of these are present we use them; otherwise fall
+  // back to amount-as-base with zero taxes (legacy behaviour).
+  const baseAmountStr = row['base_amount'] || row['Base Amount'] || row['Taxable Value'] || row['Taxable Value (₹)'] || '';
+  const cgstPctStr = row['cgst_pct'] || row['CGST %'] || row['CGST Pct'] || row['CGST'] || '';
+  const sgstPctStr = row['sgst_pct'] || row['SGST %'] || row['SGST Pct'] || row['SGST'] || '';
+  const igstPctStr = row['igst_pct'] || row['IGST %'] || row['IGST Pct'] || row['IGST'] || '';
+  // Additional charge (transport, loading, etc.) — optional, with its own tax rates and a reason
+  // string that becomes mandatory when the charge is > 0 (matches the manual entry form).
+  const addChargeStr = row['additional_charge'] || row['Additional Charge'] || row['Additional charge'] || '';
+  const addCgstPctStr = row['additional_charge_cgst_pct'] || row['Additional Charge CGST %'] || row['Add Charge CGST %'] || '';
+  const addSgstPctStr = row['additional_charge_sgst_pct'] || row['Additional Charge SGST %'] || row['Add Charge SGST %'] || '';
+  const addIgstPctStr = row['additional_charge_igst_pct'] || row['Additional Charge IGST %'] || row['Add Charge IGST %'] || '';
+  const addReasonStr = row['additional_charge_reason'] || row['Additional Charge Reason'] || row['Add Charge Reason'] || '';
   const remarks = row['remarks'] || row['Remarks'] || '';
   const paymentStatus = row['payment_status'] || row['Payment Status'] || row['Status'] || 'Not Paid';
   const paymentType = row['payment_type'] || row['Payment Type'] || row['Pay Type'] || '';
@@ -221,7 +243,48 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
   if (isNaN(amountRaw) || amountRaw < 0) {
     return { skip: true, reason: `invalid amount "${amountStr}"` };
   }
-  const amount = amountRaw;
+
+  // Tax split: use the optional columns when present; otherwise default to
+  // (base = total, all percentages = 0) so legacy templates keep working.
+  const parsePct = (s: string): number => {
+    if (!s) return 0;
+    let cleaned = s.replace(/[%,\s]/g, '');
+    if (!cleaned) return 0;
+    let n = parseFloat(cleaned);
+    if (!isFinite(n) || n < 0) return 0;
+    // Tolerate "0.18" meaning 18% — same convention the source spreadsheet uses
+    if (n > 0 && n < 1) n = n * 100;
+    if (n > 100) n = 0;
+    return Math.round(n * 100) / 100;
+  };
+  const baseAmount = baseAmountStr
+    ? parseFloat(baseAmountStr.replace(/[₹,\s]/g, '') || '0')
+    : amountRaw;
+  const cgstPct = parsePct(cgstPctStr);
+  const sgstPct = parsePct(sgstPctStr);
+  const igstPct = parsePct(igstPctStr);
+
+  const additionalCharge = addChargeStr
+    ? Math.max(0, parseFloat(addChargeStr.replace(/[₹,\s]/g, '') || '0'))
+    : 0;
+  const additionalChargeCgstPct = parsePct(addCgstPctStr);
+  const additionalChargeSgstPct = parsePct(addSgstPctStr);
+  const additionalChargeIgstPct = parsePct(addIgstPctStr);
+  const additionalChargeReason = addReasonStr.trim();
+
+  // Reason is mandatory when an additional charge is present
+  if (additionalCharge > 0 && !additionalChargeReason) {
+    return { skip: true, reason: 'additional charge requires a reason' };
+  }
+
+  // If only the base + tax percentages were given (no Invoice amount), compute
+  // the total. Otherwise trust the explicit Invoice amount column.
+  const baseTotal = baseAmount * (1 + (cgstPct + sgstPct + igstPct) / 100);
+  const addTotal = additionalCharge * (1 + (additionalChargeCgstPct + additionalChargeSgstPct + additionalChargeIgstPct) / 100);
+  const computedTotal = +(baseTotal + addTotal).toFixed(2);
+  const amount = amountRaw > 0
+    ? amountRaw
+    : computedTotal > 0 ? computedTotal : 0;
 
   const parsedInvoiceDate = parseDate(invoiceDate);
   const parsedMonth = parseMonthColumn(month);
@@ -241,6 +304,15 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
     purpose,
     site,
     amount,
+    baseAmount,
+    cgstPct,
+    sgstPct,
+    igstPct,
+    additionalCharge,
+    additionalChargeCgstPct,
+    additionalChargeSgstPct,
+    additionalChargeIgstPct,
+    additionalChargeReason,
     remarks,
     paymentStatus,
     paymentType,
@@ -417,8 +489,12 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
         const insertedInvoice = await queryOne<{ id: string }>(
           `INSERT INTO invoices (
             month, invoice_date, vendor_id, vendor_name, invoice_no, po_number,
-            purpose, site, invoice_amount, payment_status, remarks, created_by, internal_no, batch_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            purpose, site, invoice_amount, base_amount, cgst_pct, sgst_pct, igst_pct,
+            additional_charge, additional_charge_cgst_pct, additional_charge_sgst_pct,
+            additional_charge_igst_pct, additional_charge_reason,
+            payment_status, remarks, created_by, internal_no, batch_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
           RETURNING id`,
           [
             r.month,
@@ -430,6 +506,15 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
             r.purpose || '',
             r.site || '',
             r.amount,
+            r.baseAmount > 0 ? r.baseAmount : r.amount,
+            r.cgstPct,
+            r.sgstPct,
+            r.igstPct,
+            r.additionalCharge,
+            r.additionalChargeCgstPct,
+            r.additionalChargeSgstPct,
+            r.additionalChargeIgstPct,
+            r.additionalChargeReason || null,
             r.paymentStatus,
             r.remarks || null,
             req.user!.id,
@@ -794,7 +879,29 @@ export function downloadTemplate(req: Request, res: Response): void {
   const templates: Record<string, { filename: string; content: string }> = {
     invoices: {
       filename: 'invoice_import_template.csv',
-      content: 'Sl.No,Month,Invoice date,Vendor Name,Invoice no,PO Number,Head,Site Location,Invoice amount,Payment Status,Pending Days,Payment Type,Payment Details,Payment Date,Bank,Payment Month\n1,2026-04-01,2026-04-01,Vendor Name,INV-001,PO-001,Steel,Nirvana,100000,Not Paid,,,,,,\n',
+      content:
+        // Mirrors every field on the manual entry form so a CSV can carry
+        // base + GST + additional charge + reason + payment info in one row.
+        'Sl.No,Month,Invoice date,Vendor Name,Invoice no,PO Number,Head,Site Location,' +
+        'Base Amount,CGST %,SGST %,IGST %,' +
+        'Additional Charge,Additional Charge CGST %,Additional Charge SGST %,Additional Charge IGST %,Additional Charge Reason,' +
+        'Invoice amount,' +
+        'Payment Status,Pending Days,Payment Type,Payment Details,Payment Date,Bank,Payment Month\n' +
+        // Example 1: full tax split with no additional charge
+        '1,2026-04-01,2026-04-01,Vendor Name,INV-001,PO-001,Steel,Nirvana,' +
+        '100000,9,9,0,' +
+        ',,,,,' +
+        '118000,Not Paid,,,,,,\n' +
+        // Example 2: tax split + additional transport charge with its own GST
+        '2,2026-04-01,2026-04-01,Vendor Name,INV-002,PO-002,Cement,Nirvana,' +
+        '50000,9,9,0,' +
+        '500,9,9,0,Transport,' +
+        '59590,Not Paid,,,,,,\n' +
+        // Example 3: legacy — only Invoice amount, importer treats it as the full amount
+        '3,2026-04-01,2026-04-01,Other Vendor,INV-003,PO-003,Cement,Nirvana,' +
+        ',,,,' +
+        ',,,,,' +
+        '25000,Not Paid,,,,,,\n',
     },
     vendors: {
       filename: 'vendor_import_template.csv',
