@@ -427,10 +427,22 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
         continue;
       }
 
-      // Site accountants can only import rows for sites they're assigned to
-      if (callerRole === 'site' && norm.site && !callerSites.includes(norm.site)) {
-        skippedRows.push({ row: rowNum, reason: `site "${norm.site}" is not in your assigned sites` });
-        continue;
+      // Site accountants must specify a site that's in their assigned list.
+      // For single-site accountants we transparently fall back to their one
+      // site so blank-site rows still import; multi-site accountants must
+      // pick explicitly so we don't silently misroute invoices.
+      if (callerRole === 'site') {
+        if (!norm.site) {
+          if (callerSites.length === 1) {
+            norm.site = callerSites[0];
+          } else {
+            skippedRows.push({ row: rowNum, reason: `Site Location is required — your sites: ${callerSites.join(', ')}` });
+            continue;
+          }
+        } else if (!callerSites.includes(norm.site)) {
+          skippedRows.push({ row: rowNum, reason: `site "${norm.site}" is not in your assigned sites (${callerSites.join(', ')})` });
+          continue;
+        }
       }
 
       normalized.push(norm);
