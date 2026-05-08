@@ -44,7 +44,7 @@ export async function resetPasswordApi(token: string, newPassword: string): Prom
 }
 
 export async function changePasswordApi(currentPassword: string, newPassword: string): Promise<void> {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('makuta_token');
   const res = await fetch(`${API_BASE}/auth/change-password`, {
     method: 'POST',
     headers: {

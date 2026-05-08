@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getVendorDetail, VendorDetailResponse } from '../../api/vendors';
 import { getVendorCreditBalance } from '../../api/creditNotes';
@@ -20,6 +20,7 @@ export default function VendorDetail() {
   const [creditBalance, setCreditBalance] = useState<VendorCreditBalance | null>(null);
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
   const [showAllFiles, setShowAllFiles] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!id) return;
@@ -76,6 +77,42 @@ export default function VendorDetail() {
   const allAttachments = invoices.flatMap(inv =>
     inv.attachments.map(att => ({ ...att, _invoiceNo: inv.invoice_no, _date: inv.invoice_date }))
   );
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every(i => selectedIds.has(i.id));
+  const someFilteredSelected = filtered.some(i => selectedIds.has(i.id));
+
+  const selectionSummary = useMemo(() => {
+    let amount = 0;
+    let balance = 0;
+    for (const inv of invoices) {
+      if (selectedIds.has(inv.id)) {
+        amount += Number(inv.invoice_amount);
+        balance += Number(inv.balance);
+      }
+    }
+    return { count: selectedIds.size, amount, balance };
+  }, [invoices, selectedIds]);
+
+  function toggleRow(id: string) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllFiltered() {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allFilteredSelected) {
+        for (const inv of filtered) next.delete(inv.id);
+      } else {
+        for (const inv of filtered) next.add(inv.id);
+      }
+      return next;
+    });
+  }
 
   const statusCounts = {
     All: invoices.length,
@@ -263,11 +300,43 @@ export default function VendorDetail() {
           </div>
         )}
 
+        {/* Selection summary bar */}
+        {selectionSummary.count > 0 && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 mb-3 bg-blue-50 border border-blue-200 rounded-lg flex-wrap">
+            <div className="text-sm text-blue-900">
+              <span className="font-semibold">{selectionSummary.count}</span>
+              <span className="text-blue-700"> selected</span>
+              <span className="text-blue-300 mx-2">·</span>
+              <span className="text-blue-700">Total: </span>
+              <span className="font-semibold">{formatINR(selectionSummary.amount)}</span>
+              <span className="text-blue-300 mx-2">·</span>
+              <span className="text-blue-700">Outstanding: </span>
+              <span className="font-semibold">{formatINR(selectionSummary.balance)}</span>
+            </div>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-xs text-blue-700 hover:text-blue-900 hover:underline"
+            >
+              Clear selection
+            </button>
+          </div>
+        )}
+
         {/* Invoice Table */}
         <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
+                <th className="px-4 py-2.5 w-8">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all visible invoices"
+                    checked={allFilteredSelected}
+                    ref={el => { if (el) el.indeterminate = !allFilteredSelected && someFilteredSelected; }}
+                    onChange={toggleAllFiltered}
+                    className="cursor-pointer accent-[#1a3c5e]"
+                  />
+                </th>
                 <th className="px-4 py-2.5 w-8"></th>
                 {['Date', 'Inv No', 'PO No', 'Category', 'Site', 'Amount', 'Balance', 'Status', 'Files'].map((h) => (
                   <th
@@ -287,7 +356,16 @@ export default function VendorDetail() {
                 const hasFiles = inv.attachments.length > 0;
                 return (
                   <Fragment key={inv.id}>
-                    <tr className="border-t border-gray-50 hover:bg-gray-50/50">
+                    <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${selectedIds.has(inv.id) ? 'bg-blue-50/40' : ''}`}>
+                      <td className="px-4 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select invoice ${inv.invoice_no || inv.id}`}
+                          checked={selectedIds.has(inv.id)}
+                          onChange={() => toggleRow(inv.id)}
+                          className="cursor-pointer accent-[#1a3c5e]"
+                        />
+                      </td>
                       <td className="px-4 py-3 text-center">
                         {hasFiles && (
                           <button
@@ -332,7 +410,7 @@ export default function VendorDetail() {
                     </tr>
                     {expanded && hasFiles && (
                       <tr className="bg-gray-50/60 border-t border-gray-100">
-                        <td colSpan={10} className="px-4 py-3">
+                        <td colSpan={11} className="px-4 py-3">
                           <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">
                             Attachments for invoice {inv.invoice_no || '—'}
                           </div>
@@ -376,7 +454,7 @@ export default function VendorDetail() {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-10 text-center text-gray-400 text-sm">
+                  <td colSpan={11} className="px-4 py-10 text-center text-gray-400 text-sm">
                     {invoices.length === 0 ? 'No invoices for this vendor.' : 'No invoices match the selected filter.'}
                   </td>
                 </tr>

@@ -13,6 +13,11 @@ router.use(requireRole(['ho', 'mgmt']));
 
 router.get('/aging', exportAging);
 router.get('/invoices', exportInvoices);
+// Backward-compatible CSV alias — equivalent to /invoices?format=csv
+router.get('/invoices.csv', (req, res, next) => {
+  req.query.format = 'csv';
+  return exportInvoices(req, res, next);
+});
 router.get('/cashflow', exportCashflow);
 
 export default router;
