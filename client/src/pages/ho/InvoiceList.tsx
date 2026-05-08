@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef, Fragment, FormEvent, ChangeEvent, DragEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { getApiToken } from '../../api/client';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { useVendors } from '../../hooks/useVendors';
@@ -147,6 +148,12 @@ export default function InvoiceList() {
     });
     if (sortBy === 'created_at') {
       result.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    } else {
+      result.sort((a, b) => {
+        const cmp = (b.invoice_date || '').localeCompare(a.invoice_date || '');
+        if (cmp !== 0) return cmp;
+        return (b.created_at || '').localeCompare(a.created_at || '');
+      });
     }
     return result;
   }, [invoices, fSite, fStatus, fPurpose, fMonth, search, timeline, dateFrom, dateTo, sortBy]);
@@ -273,9 +280,14 @@ export default function InvoiceList() {
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
             Bulk Import
           </button>
-          <a href="/api/export/invoices" target="_blank" rel="noopener noreferrer"
+          <a href={`/api/export/invoices${getApiToken() ? `?token=${encodeURIComponent(getApiToken()!)}` : ''}`} target="_blank" rel="noopener noreferrer"
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
             Export PDF
+          </a>
+          <a href={`/api/export/invoices.csv${getApiToken() ? `?token=${encodeURIComponent(getApiToken()!)}` : ''}`}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+            title="Download full invoice ledger as CSV (Excel) for cross-verification">
+            Export Data
           </a>
           <button onClick={() => { setEditInv(null); setExpandedEditId(null); setShowForm(true); }}
             className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
@@ -327,8 +339,8 @@ export default function InvoiceList() {
         <select value={sortBy} onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at')}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
           title="Sort order">
-          <option value="invoice_date">Sort: Invoice date</option>
-          <option value="created_at">Sort: Upload date</option>
+          <option value="created_at">Latest added first</option>
+          <option value="invoice_date">Latest invoice date first</option>
         </select>
         <span className="text-xs text-gray-400 ml-auto">{filtered.length} records</span>
       </div>
