@@ -231,6 +231,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                                       View Duplicates
                                     </button>
                                   )}
+                                  {alert.alert_type === 'password_reset_request' && (
+                                    <button
+                                      onClick={() => handleSendTempPassword(alert)}
+                                      disabled={sendingTempFor === alert.id}
+                                      className="text-[11px] text-blue-600 hover:underline font-medium disabled:opacity-50"
+                                    >
+                                      {sendingTempFor === alert.id ? 'Sending…' : 'Send temp password'}
+                                    </button>
+                                  )}
                                   <button
                                     onClick={() => handleResolve(alert.id)}
                                     className="text-[11px] text-gray-400 hover:underline"
