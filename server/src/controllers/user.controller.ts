@@ -259,8 +259,9 @@ export async function sendTempPassword(req: Request, res: Response, next: NextFu
       [req.user!.id, id]
     );
 
-    // Best-effort email — silently no-ops when SMTP is unconfigured.
-    await notifyTempPassword({
+    // Best-effort email — silently no-ops when SMTP is unconfigured or when
+    // the recipient is a placeholder address that Gmail rejects.
+    const emailSent = await notifyTempPassword({
       name: user.name,
       email: user.email,
       tempPassword,
@@ -269,14 +270,17 @@ export async function sendTempPassword(req: Request, res: Response, next: NextFu
     await logAudit({
       userId: req.user!.id,
       action: `Sent temp password to "${user.name}"`,
-      metadata: { targetUserId: id, method: 'temp-password' },
+      metadata: { targetUserId: id, method: 'temp-password', emailSent },
     });
 
     res.json({
       tempPassword,
       userName: user.name,
       userEmail: user.email,
-      message: `Temporary password generated for ${user.name}. Share it via WhatsApp or phone.`,
+      emailSent,
+      message: emailSent
+        ? `Temporary password emailed to ${user.email}.`
+        : `Temporary password generated for ${user.name}. Email could not be delivered — share it via WhatsApp or phone.`,
     });
   } catch (err) {
     next(err);

@@ -140,7 +140,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       // so drop it from the local list and decrement the badge.
       setAlerts(prev => prev.filter(a => a.id !== alert.id));
       setAlertCount(prev => Math.max(0, prev - 1));
-      notify(`Temp password for ${res.userName}: ${res.tempPassword} (copied to clipboard)`);
+      const suffix = res.emailSent
+        ? ` (also emailed to ${res.userEmail})`
+        : ` — email failed, share via WhatsApp/phone`;
+      notify(`Temp password for ${res.userName}: ${res.tempPassword} (copied to clipboard)${suffix}`);
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Failed to send temp password', 'error');
     } finally {

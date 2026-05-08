@@ -49,6 +49,7 @@ export interface SendTempPasswordResponse {
   tempPassword: string;
   userName: string;
   userEmail: string;
+  emailSent: boolean;
   message: string;
 }
 

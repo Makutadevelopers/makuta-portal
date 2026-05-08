@@ -21,10 +21,10 @@ interface EmailOptions {
   html: string;
 }
 
-async function send(options: EmailOptions): Promise<void> {
+async function send(options: EmailOptions): Promise<boolean> {
   if (!transporter) {
     console.log(`[email] SMTP not configured — skipping: ${options.subject}`);
-    return;
+    return false;
   }
 
   try {
@@ -35,8 +35,10 @@ async function send(options: EmailOptions): Promise<void> {
       html: options.html,
     });
     console.log(`[email] Sent: ${options.subject} → ${options.to}`);
+    return true;
   } catch (err) {
     console.error(`[email] Failed to send: ${options.subject}`, err);
+    return false;
   }
 }
 
@@ -91,8 +93,8 @@ export async function notifyTempPassword(params: {
   name: string;
   email: string;
   tempPassword: string;
-}): Promise<void> {
-  await send({
+}): Promise<boolean> {
+  return send({
     to: params.email,
     subject: 'Your temporary Makuta Portal password',
     html: `
