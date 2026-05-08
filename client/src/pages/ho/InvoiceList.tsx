@@ -158,12 +158,13 @@ export default function InvoiceList() {
     return result;
   }, [invoices, fSite, fStatus, fPurpose, fMonth, search, timeline, dateFrom, dateTo, sortBy]);
 
-  // Selectable = filtered invoices that still need action
-  // (draft → eligible for bulk finalize, unpaid → eligible for bulk pay).
-  // We allow any non-Paid invoice to be ticked; individual actions re-filter
-  // the selection to the subset they apply to.
+  // The row checkbox drives two flows: bulk actions (finalize/pay) AND
+  // Export. Bulk-action handlers below already re-filter the selection to
+  // the rows they apply to (drafts only for finalize, unpaid only for pay),
+  // so it's safe — and necessary for Export — to make every visible row
+  // selectable, including Paid rows.
   const selectableIds = useMemo(
-    () => filtered.filter(i => i.payment_status !== 'Paid').map(i => i.id),
+    () => filtered.map(i => i.id),
     [filtered]
   );
   const allSelected = selectableIds.length > 0 && selectableIds.every(id => selected.has(id));
@@ -522,10 +523,12 @@ export default function InvoiceList() {
                   <Fragment key={inv.id}>
                     <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${selected.has(inv.id) ? 'bg-blue-50/50' : ''} ${inv.disputed ? (inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400') : ''}`}>
                       <td className="px-4 py-3">
-                        {inv.payment_status !== 'Paid' ? (
-                          <input type="checkbox" checked={selected.has(inv.id)} onChange={() => toggleSelect(inv.id)}
-                            className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200" />
-                        ) : <span className="text-gray-300">—</span>}
+                        <input
+                          type="checkbox"
+                          checked={selected.has(inv.id)}
+                          onChange={() => toggleSelect(inv.id)}
+                          className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
+                        />
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
                       <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={inv.vendor_name}>{inv.vendor_name}</td>
