@@ -29,7 +29,27 @@ export default function VendorMaster() {
   const [initialName, setInitialName] = useState('');
   const [showUnmastered, setShowUnmastered] = useState(true);
   const [showImport, setShowImport] = useState(false);
+  const [editingTermsId, setEditingTermsId] = useState<string | null>(null);
+  const [savingTermsId, setSavingTermsId] = useState<string | null>(null);
   const { notify } = useToast();
+
+  async function handleQuickTermsChange(v: Vendor, newTerms: number) {
+    if (newTerms === v.payment_terms) {
+      setEditingTermsId(null);
+      return;
+    }
+    setSavingTermsId(v.id);
+    try {
+      await updateVendor(v.id, { payment_terms: newTerms });
+      notify(`${v.name}: ${newTerms} day terms`);
+      refresh();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to update terms', 'error');
+    } finally {
+      setSavingTermsId(null);
+      setEditingTermsId(null);
+    }
+  }
 
   const vendorStats = new Map<string, number>();
   for (const inv of invoices) {
@@ -168,9 +188,31 @@ export default function VendorMaster() {
                       </td>
                       <td className="px-4 py-3 text-gray-600">{v.category ?? '—'}</td>
                       <td className="px-4 py-3 text-center">
-                        <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-medium border ${termsBadgeColor(v.payment_terms)}`}>
-                          {v.payment_terms} days
-                        </span>
+                        {editingTermsId === v.id && canManage(v) ? (
+                          <select
+                            autoFocus
+                            defaultValue={v.payment_terms}
+                            disabled={savingTermsId === v.id}
+                            onBlur={() => setEditingTermsId(null)}
+                            onChange={e => handleQuickTermsChange(v, Number(e.target.value))}
+                            className="px-2 py-1 border border-blue-300 rounded-md text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          >
+                            {TERM_OPTIONS.map(t => <option key={t} value={t}>{t} days</option>)}
+                            {!TERM_OPTIONS.includes(v.payment_terms) && (
+                              <option value={v.payment_terms}>{v.payment_terms} days (current)</option>
+                            )}
+                          </select>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => canManage(v) && setEditingTermsId(v.id)}
+                            disabled={!canManage(v)}
+                            title={canManage(v) ? 'Click to change' : ''}
+                            className={`inline-block px-2.5 py-1 rounded-md text-xs font-medium border ${termsBadgeColor(v.payment_terms)} ${canManage(v) ? 'cursor-pointer hover:ring-2 hover:ring-blue-200' : 'cursor-default'}`}
+                          >
+                            {v.payment_terms} days
+                          </button>
+                        )}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-gray-600">{v.gstin ?? '—'}</td>
                       <td className="px-4 py-3 text-gray-700">{v.contact_name ?? '—'}</td>
