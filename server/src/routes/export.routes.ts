@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requireRole } from '../middleware/rbac';
-import { exportAging, exportInvoices, exportInvoicesCsv, exportCashflow } from '../controllers/export.controller';
+import { exportAging, exportInvoices, exportCashflow } from '../controllers/export.controller';
 
 const router = Router();
 
@@ -13,7 +13,11 @@ router.use(requireRole(['ho', 'mgmt']));
 
 router.get('/aging', exportAging);
 router.get('/invoices', exportInvoices);
-router.get('/invoices.csv', exportInvoicesCsv);
+// Backward-compatible CSV alias — equivalent to /invoices?format=csv
+router.get('/invoices.csv', (req, res, next) => {
+  req.query.format = 'csv';
+  return exportInvoices(req, res, next);
+});
 router.get('/cashflow', exportCashflow);
 
 export default router;

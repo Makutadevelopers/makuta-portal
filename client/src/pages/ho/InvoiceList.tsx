@@ -280,15 +280,32 @@ export default function InvoiceList() {
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
             Bulk Import
           </button>
-          <a href={`/api/export/invoices${getApiToken() ? `?token=${encodeURIComponent(getApiToken()!)}` : ''}`} target="_blank" rel="noopener noreferrer"
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
-            Export PDF
-          </a>
-          <a href={`/api/export/invoices.csv${getApiToken() ? `?token=${encodeURIComponent(getApiToken()!)}` : ''}`}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
-            title="Download full invoice ledger as CSV (Excel) for cross-verification">
-            Export Data
-          </a>
+          <ExportMenu
+            buildUrl={(format) => {
+              const range = getTimelineRange(timeline);
+              const params = new URLSearchParams();
+              params.set('format', format);
+              if (fSite !== 'All')    params.set('site', fSite);
+              if (fStatus !== 'All')  params.set('status', fStatus);
+              if (fPurpose !== 'All') params.set('category', fPurpose);
+              if (search)             params.set('search', search);
+              if (range?.from)        params.set('from', range.from);
+              if (range?.to)          params.set('to', range.to);
+              if (!range && fMonth)   params.set('month', fMonth);
+              params.set('sort', sortBy);
+              const tok = getApiToken();
+              if (tok) params.set('token', tok);
+              return `/api/export/invoices?${params.toString()}`;
+            }}
+            filterCount={
+              (fSite !== 'All' ? 1 : 0) +
+              (fStatus !== 'All' ? 1 : 0) +
+              (fPurpose !== 'All' ? 1 : 0) +
+              (search ? 1 : 0) +
+              (timeline !== 'all' ? 1 : 0) +
+              (fMonth ? 1 : 0)
+            }
+          />
           <button onClick={() => { setEditInv(null); setExpandedEditId(null); setShowForm(true); }}
             className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
             + New Invoice
@@ -1535,6 +1552,78 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
           <button type="button" onClick={onCancel} className="px-5 py-2.5 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// ── Export dropdown menu ───────────────────────────────────────────────────
+interface ExportMenuProps {
+  buildUrl: (format: 'csv' | 'xlsx' | 'pdf') => string;
+  filterCount: number;
+}
+
+function ExportMenu({ buildUrl, filterCount }: ExportMenuProps) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  function download(format: 'csv' | 'xlsx' | 'pdf') {
+    const url = buildUrl(format);
+    const a = document.createElement('a');
+    a.href = url;
+    if (format === 'pdf') a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setOpen(false);
+  }
+
+  const tip = filterCount > 0
+    ? `Exports the current filtered view (${filterCount} filter${filterCount === 1 ? '' : 's'} active)`
+    : 'Exports all invoices';
+
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        title={tip}
+        className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 flex items-center gap-1.5"
+      >
+        Export
+        {filterCount > 0 && (
+          <span className="bg-[#1a3c5e] text-white text-[10px] font-medium px-1.5 rounded-full">{filterCount}</span>
+        )}
+        <span className="text-[10px]">&#9662;</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 z-30 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+          <div className="px-3 py-2 text-[11px] text-gray-500 border-b border-gray-100">
+            {filterCount > 0 ? `Current filtered view (${filterCount})` : 'All invoices'}
+          </div>
+          <button onClick={() => download('csv')} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-700">
+            <div className="font-medium">CSV</div>
+            <div className="text-[10px] text-gray-500">Comma-separated · opens in Excel</div>
+          </button>
+          <button onClick={() => download('xlsx')} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-700">
+            <div className="font-medium">Excel (.xlsx)</div>
+            <div className="text-[10px] text-gray-500">Native Excel workbook</div>
+          </button>
+          <button onClick={() => download('pdf')} className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 text-gray-700">
+            <div className="font-medium">PDF</div>
+            <div className="text-[10px] text-gray-500">Print-friendly summary</div>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
