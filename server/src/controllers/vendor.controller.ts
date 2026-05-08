@@ -26,11 +26,10 @@ const createVendorSchema = z.object({
   category: z.string().nullable().optional(),
   gstin: z.string().nullable().optional(),
   contact_name: z.string().nullable().optional(),
-  // Phone is required — used for vendor follow-ups. Accept any input
-  // (digits/punctuation/country code) but require ≥7 numeric chars.
-  phone: z.string({ message: 'Phone number is required' })
-    .transform(v => v.trim())
-    .refine(v => v.replace(/\D/g, '').length >= 7, 'Phone number is required'),
+  phone: z.string()
+    .nullable()
+    .optional()
+    .transform(v => (v == null ? null : v.trim() || null)),
   email: z.string().email().nullable().optional(),
   notes: z.string().nullable().optional(),
 });
