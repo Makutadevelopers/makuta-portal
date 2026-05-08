@@ -16,6 +16,7 @@ export default function VendorDetail() {
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
   const [orderType, setOrderType] = useState<OrderType>('All');
+  const [monthFilter, setMonthFilter] = useState<string>('All');
   const [creditBalance, setCreditBalance] = useState<VendorCreditBalance | null>(null);
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
   const [showAllFiles, setShowAllFiles] = useState(false);
@@ -52,10 +53,23 @@ export default function VendorDetail() {
 
   const { vendor, stats, invoices } = data;
 
+  const monthKey = (iso: string) => (iso || '').slice(0, 7); // YYYY-MM
+  const monthLabel = (key: string) => {
+    if (!key) return '';
+    const [y, m] = key.split('-');
+    const d = new Date(Number(y), Number(m) - 1, 1);
+    return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+  };
+
+  const monthOptions = Array.from(
+    new Set(invoices.map(i => monthKey(i.invoice_date)).filter(Boolean))
+  ).sort((a, b) => b.localeCompare(a));
+
   const filtered = invoices.filter(inv => {
     if (statusFilter !== 'All' && inv.payment_status !== statusFilter) return false;
     if (orderType === 'PO' && !(inv.po_number || '').toUpperCase().includes('/PO/')) return false;
     if (orderType === 'WO' && !(inv.po_number || '').toUpperCase().includes('/WO/')) return false;
+    if (monthFilter !== 'All' && monthKey(inv.invoice_date) !== monthFilter) return false;
     return true;
   });
 
@@ -180,6 +194,27 @@ export default function VendorDetail() {
               {ot === 'All' ? 'All Orders' : ot === 'PO' ? 'Purchase Orders' : 'Work Orders'}
             </button>
           ))}
+
+          {monthOptions.length > 0 && (
+            <>
+              <div className="w-px h-5 bg-gray-200 mx-1" />
+              <select
+                value={monthFilter}
+                onChange={e => setMonthFilter(e.target.value)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer ${
+                  monthFilter !== 'All'
+                    ? 'bg-[#1a3c5e] text-white border-[#1a3c5e]'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                }`}
+                title="Filter invoices by month"
+              >
+                <option value="All">All months</option>
+                {monthOptions.map(m => (
+                  <option key={m} value={m}>{monthLabel(m)}</option>
+                ))}
+              </select>
+            </>
+          )}
 
           {allAttachments.length > 0 && (
             <button
