@@ -287,7 +287,7 @@ Tally OK = Balance < Rs.0.01 (fully allocated)
 | Charts | Recharts (interactive bar charts with tooltips) |
 | PWA | Vite PWA plugin + Workbox (offline support, installable) |
 | Cron | node-cron (daily overdue email alerts at 8 AM IST) |
-| Deployment | Vercel (frontend) + Render/Railway (backend) + Supabase (database) |
+| Deployment | AWS EC2 (Docker Compose: `portal-web` nginx:alpine + `portal-api` Node) + AWS RDS (Postgres) + AWS S3 (files) — all under `invoice.makutadevelopers.com` |
 
 ---
 
@@ -359,14 +359,19 @@ npm run dev
 
 ### Production Deployment
 ```
-Frontend: Vercel (auto-deploys from GitHub)
-Backend:  Render / Railway (auto-deploys from GitHub)
-Database: Supabase / Neon (managed PostgreSQL)
+Host:     AWS EC2 (52.3.199.149, /opt/makuta-portal) — Docker Compose
+          • portal-api  (Express + tsx)
+          • portal-web  (Vite SPA → nginx:alpine)
+          Both behind the CRM's public nginx at invoice.makutadevelopers.com
+Database: AWS RDS PostgreSQL 16 (us-east-1, SSL required)
+Files:    AWS S3 (us-east-1)
+Deploy:   ssh ec2-user@52.3.199.149 → cd /opt/makuta-portal → ./infra/prod/deploy.sh
+          (Merging to main does NOT auto-deploy.)
 
-Required environment variables:
-- DATABASE_URL (from Supabase/managed Postgres)
+Required environment variables (infra/prod/.env):
+- DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD / DB_SSL=true
 - JWT_SECRET (generate with: openssl rand -hex 48)
-- ALLOWED_ORIGINS (* or frontend URL)
+- ALLOWED_ORIGINS (https://invoice.makutadevelopers.com, etc.)
 - NODE_ENV=production
 - CRON_SECRET (for scheduled overdue alerts)
 ```
