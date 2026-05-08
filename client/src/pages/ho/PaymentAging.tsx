@@ -1,17 +1,32 @@
 import { useState } from 'react';
 import { useAgingCalc } from '../../hooks/useAgingCalc';
-import { getApiToken } from '../../api/client';
+import { downloadAuthenticated } from '../../api/client';
+import { useToast } from '../../context/ToastContext';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
 
 export default function PaymentAging() {
   const [site, setSite] = useState('All');
+  const [exporting, setExporting] = useState(false);
+  const { notify } = useToast();
   const { withinTerms, overdue, loading } = useAgingCalc(site);
 
   const totalOutstanding = [...withinTerms, ...overdue].reduce((s, r) => s + Number(r.balance), 0);
   const withinTotal = withinTerms.reduce((s, r) => s + Number(r.balance), 0);
   const overdueTotal = overdue.reduce((s, r) => s + Number(r.balance), 0);
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({ site });
+      await downloadAuthenticated(`/export/aging?${params.toString()}`, `payment-aging-${site}.pdf`, true);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Export failed', 'error');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <AppShell>
@@ -25,19 +40,14 @@ export default function PaymentAging() {
             <option value="All">All Sites</option>
             {SITES.map(s => <option key={s}>{s}</option>)}
           </select>
-          <a
-            href={(() => {
-              const params = new URLSearchParams({ site });
-              const tok = getApiToken();
-              if (tok) params.set('token', tok);
-              return `/api/export/aging?${params.toString()}`;
-            })()}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={exporting}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
           >
-            Export PDF
-          </a>
+            {exporting ? 'Preparing PDF…' : 'Export PDF'}
+          </button>
         </div>
       </div>
 

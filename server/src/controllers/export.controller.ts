@@ -159,6 +159,16 @@ interface FilterDescriptor {
 }
 
 async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceExportRow[]; describe: FilterDescriptor }> {
+  // When the client passes ?ids=uuid1,uuid2,... we export ONLY those rows
+  // (used when the user has ticked specific rows in the table). We still
+  // keep deleted_at IS NULL for safety. Filter params are otherwise ignored
+  // when ids is present — the selection is the authoritative scope.
+  const idsRaw = (req.query.ids as string) || '';
+  const ids = idsRaw
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s));
+
   const site = (req.query.site as string) || 'All';
   const status = (req.query.status as string) || 'All';
   const category = (req.query.category as string) || 'All';
@@ -172,16 +182,21 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
   const conds: string[] = ['i.deleted_at IS NULL'];
   const params: unknown[] = [];
   let p = 1;
-  if (site !== 'All')     { conds.push(`i.site = $${p++}`);            params.push(site); }
-  if (status !== 'All')   { conds.push(`i.payment_status = $${p++}`);  params.push(status); }
-  if (category !== 'All') { conds.push(`i.purpose = $${p++}`);         params.push(category); }
-  if (month)              { conds.push(`TO_CHAR(i.month, 'YYYY-MM') = $${p++}`); params.push(month); }
-  if (from)               { conds.push(`i.invoice_date >= $${p++}`);   params.push(from); }
-  if (to)                 { conds.push(`i.invoice_date <= $${p++}`);   params.push(to); }
-  if (search) {
-    conds.push(`(LOWER(i.vendor_name) LIKE $${p} OR LOWER(i.invoice_no) LIKE $${p} OR LOWER(COALESCE(i.po_number, '')) LIKE $${p})`);
-    params.push(`%${search.toLowerCase()}%`);
-    p++;
+  if (ids.length > 0) {
+    conds.push(`i.id = ANY($${p++}::uuid[])`);
+    params.push(ids);
+  } else {
+    if (site !== 'All')     { conds.push(`i.site = $${p++}`);            params.push(site); }
+    if (status !== 'All')   { conds.push(`i.payment_status = $${p++}`);  params.push(status); }
+    if (category !== 'All') { conds.push(`i.purpose = $${p++}`);         params.push(category); }
+    if (month)              { conds.push(`TO_CHAR(i.month, 'YYYY-MM') = $${p++}`); params.push(month); }
+    if (from)               { conds.push(`i.invoice_date >= $${p++}`);   params.push(from); }
+    if (to)                 { conds.push(`i.invoice_date <= $${p++}`);   params.push(to); }
+    if (search) {
+      conds.push(`(LOWER(i.vendor_name) LIKE $${p} OR LOWER(i.invoice_no) LIKE $${p} OR LOWER(COALESCE(i.po_number, '')) LIKE $${p})`);
+      params.push(`%${search.toLowerCase()}%`);
+      p++;
+    }
   }
 
   const orderBy = sortBy === 'invoice_date'
@@ -229,12 +244,17 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
 
   const labels: string[] = [];
   const slug: string[] = [];
-  if (site !== 'All')     { labels.push(`Site: ${site}`);         slug.push(site.replace(/[^a-zA-Z0-9]+/g, '_')); }
-  if (status !== 'All')   { labels.push(`Status: ${status}`);     slug.push(status.replace(/\s+/g, '')); }
-  if (category !== 'All') { labels.push(`Category: ${category}`); slug.push(category.replace(/[^a-zA-Z0-9]+/g, '_')); }
-  if (month)              { labels.push(`Month: ${month}`);       slug.push(month); }
-  if (from || to)         { labels.push(`Range: ${from || '…'} → ${to || '…'}`); slug.push(`${from || ''}_${to || ''}`); }
-  if (search)             { labels.push(`Search: ${search}`); }
+  if (ids.length > 0) {
+    labels.push(`Selected: ${ids.length} invoice${ids.length === 1 ? '' : 's'}`);
+    slug.push(`selected-${ids.length}`);
+  } else {
+    if (site !== 'All')     { labels.push(`Site: ${site}`);         slug.push(site.replace(/[^a-zA-Z0-9]+/g, '_')); }
+    if (status !== 'All')   { labels.push(`Status: ${status}`);     slug.push(status.replace(/\s+/g, '')); }
+    if (category !== 'All') { labels.push(`Category: ${category}`); slug.push(category.replace(/[^a-zA-Z0-9]+/g, '_')); }
+    if (month)              { labels.push(`Month: ${month}`);       slug.push(month); }
+    if (from || to)         { labels.push(`Range: ${from || '…'} → ${to || '…'}`); slug.push(`${from || ''}_${to || ''}`); }
+    if (search)             { labels.push(`Search: ${search}`); }
+  }
   const fileSuffix = slug.length > 0 ? `-${slug.join('-')}` : '';
   return { rows, describe: { filters: labels, fileSuffix } };
 }
