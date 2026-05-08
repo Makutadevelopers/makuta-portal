@@ -1,5 +1,5 @@
 // cashflow.controller.ts
-// GET /api/cashflow?site=All&category=All — ho + mgmt only
+// GET /api/cashflow?site=All&category=All&vendor= — ho + mgmt only
 // Returns expenditure (by invoice_date month) and cashflow (by payment_date month)
 
 import { Request, Response, NextFunction } from 'express';
@@ -15,6 +15,7 @@ export async function getCashflow(req: Request, res: Response, next: NextFunctio
   try {
     const site = (req.query.site as string) || 'All';
     const category = (req.query.category as string) || 'All';
+    const vendor = (req.query.vendor as string) || '';
 
     const conditions: string[] = [];
     const params: string[] = [];
@@ -28,12 +29,18 @@ export async function getCashflow(req: Request, res: Response, next: NextFunctio
       conditions.push(`i.purpose = $${idx++}`);
       params.push(category);
     }
+    if (vendor) {
+      conditions.push(`i.vendor_name = $${idx++}`);
+      params.push(vendor);
+    }
 
     // Always exclude soft-deleted invoices
     conditions.push('i.deleted_at IS NULL');
     const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
-    // When a specific category is selected, group by vendor_name instead of purpose
+    // Drill into vendors when a category is picked; otherwise group by category.
+    // When vendor is picked alone, keep category grouping so the user sees the
+    // vendor's spend broken down by category.
     const groupCol = category !== 'All' ? 'i.vendor_name' : 'i.purpose';
 
     // Expenditure: grouped by accounting month

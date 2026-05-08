@@ -41,18 +41,14 @@ export default function MgmtCashflow() {
     const params = new URLSearchParams();
     if (fSite !== 'All') params.set('site', fSite);
     if (fCategory !== 'All') params.set('category', fCategory);
+    if (fVendor) params.set('vendor', fVendor);
     const qs = params.toString();
     apiFetch<CashflowResponse>(`/cashflow${qs ? `?${qs}` : ''}`)
       .then(setData)
       .finally(() => setLoading(false));
-  }, [fSite, fCategory]);
+  }, [fSite, fCategory, fVendor]);
 
-  const rows = activeTab === 'expenditure' ? data.expenditure : data.cashflow;
-
-  const filteredRows = useMemo(() => {
-    if (!fVendor) return rows;
-    return rows.filter(r => r.purpose === fVendor);
-  }, [rows, fVendor]);
+  const filteredRows = activeTab === 'expenditure' ? data.expenditure : data.cashflow;
 
   const months = useMemo(() => {
     const set = new Set(filteredRows.map(r => r.month));
@@ -182,6 +178,8 @@ export default function MgmtCashflow() {
 
           <div className="mt-3 text-xs text-gray-400">
             {activeTab === 'expenditure' ? 'Invoice amounts' : 'Payments made'} · {fSite === 'All' ? 'All Sites' : fSite}
+            {fCategory !== 'All' && ` · ${fCategory}`}
+            {fVendor && ` · ${fVendor}`}
           </div>
         </>
       )}
