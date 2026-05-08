@@ -3,71 +3,70 @@ import { apiFetch } from '../../api/client';
 import { useVendors } from '../../hooks/useVendors';
 import { formatINR } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
-import { CashflowRow } from '../../types/cashflow';
 import AppShell from '../../components/layout/AppShell';
 
+interface PivotRow {
+  month: string;
+  purpose: string;
+  total: number;
+}
+
+interface CashflowResponse {
+  expenditure: PivotRow[];
+  cashflow: PivotRow[];
+}
+
 export default function MgmtCashflow() {
-  const [rows, setRows] = useState<CashflowRow[]>([]);
+  const [data, setData] = useState<CashflowResponse>({ expenditure: [], cashflow: [] });
+  const [allCategories, setAllCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const { vendors } = useVendors();
 
+  const [activeTab, setActiveTab] = useState<'expenditure' | 'cashflow'>('expenditure');
   const [fSite, setFSite] = useState('All');
   const [fCategory, setFCategory] = useState('All');
   const [fVendor, setFVendor] = useState('');
 
+  const drillByVendor = fCategory !== 'All';
+
   useEffect(() => {
-    apiFetch<{ expenditure: { month: string; purpose: string; total: number }[]; cashflow: { month: string; purpose: string; total: number }[] }>('/cashflow')
-      .then(res => {
-        const merged = new Map<string, CashflowRow>();
-        for (const r of res.expenditure) {
-          const key = `${r.month}|${r.purpose}`;
-          if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
-          merged.get(key)!.total_invoiced += Number(r.total);
-        }
-        for (const r of res.cashflow) {
-          const key = `${r.month}|${r.purpose}`;
-          if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
-          merged.get(key)!.total_paid += Number(r.total);
-        }
-        setRows(Array.from(merged.values()));
-      })
-      .finally(() => setLoading(false));
+    apiFetch<CashflowResponse>('/cashflow').then(res => {
+      const cats = new Set(res.expenditure.map(r => r.purpose));
+      setAllCategories(Array.from(cats).sort());
+    });
   }, []);
 
+  useEffect(() => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (fSite !== 'All') params.set('site', fSite);
+    if (fCategory !== 'All') params.set('category', fCategory);
+    const qs = params.toString();
+    apiFetch<CashflowResponse>(`/cashflow${qs ? `?${qs}` : ''}`)
+      .then(setData)
+      .finally(() => setLoading(false));
+  }, [fSite, fCategory]);
+
+  const rows = activeTab === 'expenditure' ? data.expenditure : data.cashflow;
+
+  const filteredRows = useMemo(() => {
+    if (!fVendor) return rows;
+    return rows.filter(r => r.purpose === fVendor);
+  }, [rows, fVendor]);
+
   const months = useMemo(() => {
-    const set = new Set(rows.map(r => r.month));
+    const set = new Set(filteredRows.map(r => r.month));
     return Array.from(set).sort();
-  }, [rows]);
+  }, [filteredRows]);
 
-  const categories = useMemo(() => {
-    const set = new Set(rows.map(r => r.purpose));
-    return Array.from(set).sort();
-  }, [rows]);
-
-  const filtered = useMemo(() => {
-    let data = rows;
-    if (fCategory !== 'All') data = data.filter(r => r.purpose === fCategory);
-    return data;
-  }, [rows, fCategory]);
-
-  const expPivot = useMemo(() => {
+  const pivot = useMemo(() => {
     const map = new Map<string, Map<string, number>>();
-    for (const r of filtered) {
+    for (const r of filteredRows) {
       if (!map.has(r.purpose)) map.set(r.purpose, new Map());
-      map.get(r.purpose)!.set(r.month, (map.get(r.purpose)!.get(r.month) ?? 0) + Number(r.total_invoiced));
+      map.get(r.purpose)!.set(r.month, (map.get(r.purpose)!.get(r.month) ?? 0) + Number(r.total));
     }
     return map;
-  }, [filtered]);
-
-  const cfPivot = useMemo(() => {
-    const map = new Map<string, Map<string, number>>();
-    for (const r of filtered) {
-      if (Number(r.total_paid) === 0) continue;
-      if (!map.has(r.purpose)) map.set(r.purpose, new Map());
-      map.get(r.purpose)!.set(r.month, (map.get(r.purpose)!.get(r.month) ?? 0) + Number(r.total_paid));
-    }
-    return map;
-  }, [filtered]);
+  }, [filteredRows]);
 
   function monthLabel(ym: string): string {
     const [y, m] = ym.split('-');
@@ -75,62 +74,17 @@ export default function MgmtCashflow() {
     return `${names[parseInt(m, 10) - 1]} ${y.slice(2)}`;
   }
 
-  function renderPivotTable(pivot: Map<string, Map<string, number>>, title: string, subtitle: string) {
-    const cats = Array.from(pivot.keys()).sort();
-    const totals = months.map(m => cats.reduce((s, c) => s + (pivot.get(c)?.get(m) ?? 0), 0));
-    const grandTotal = totals.reduce((s, v) => s + v, 0);
-    const isEmpty = cats.length === 0 || grandTotal === 0;
-
-    return (
-      <div className="mb-8">
-        <div className="mb-3">
-          <span className="text-sm font-medium text-gray-900">{title}</span>
-          <span className="text-xs text-gray-400 ml-2">{subtitle}</span>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-2.5 text-left font-medium text-gray-500 sticky left-0 bg-gray-50 z-10">Category</th>
-                {months.map(m => <th key={m} className="px-4 py-2.5 text-right font-medium text-gray-500 whitespace-nowrap">{monthLabel(m)}</th>)}
-                <th className="px-4 py-2.5 text-right font-medium text-gray-900">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isEmpty ? (
-                <tr><td colSpan={months.length + 2} className="px-4 py-10 text-center text-gray-400 text-sm">No payments recorded yet for selected filters.</td></tr>
-              ) : cats.map(c => {
-                const row = pivot.get(c)!;
-                const rowTotal = months.reduce((s, m) => s + (row.get(m) ?? 0), 0);
-                return (
-                  <tr key={c} className="border-t border-gray-50 hover:bg-gray-50/50">
-                    <td className="px-4 py-3 font-medium text-gray-900 sticky left-0 bg-white z-10">{c}</td>
-                    {months.map(m => { const v = row.get(m) ?? 0; return <td key={m} className="px-4 py-3 text-right text-gray-700">{v > 0 ? formatINR(v) : '—'}</td>; })}
-                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatINR(rowTotal)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            {!isEmpty && (
-              <tfoot className="border-t-2 border-gray-200 bg-gray-50">
-                <tr>
-                  <td className="px-4 py-2.5 font-medium text-gray-900 sticky left-0 bg-gray-50 z-10">Total</td>
-                  {totals.map((t, i) => <td key={months[i]} className="px-4 py-2.5 text-right font-semibold text-gray-900">{formatINR(t)}</td>)}
-                  <td className="px-4 py-2.5 text-right font-bold text-gray-900">{formatINR(grandTotal)}</td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
-    );
-  }
+  const cats = Array.from(pivot.keys()).sort();
+  const totals = months.map(m => cats.reduce((s, c) => s + (pivot.get(c)?.get(m) ?? 0), 0));
+  const grandTotal = totals.reduce((s, v) => s + v, 0);
+  const isEmpty = cats.length === 0 || grandTotal === 0;
 
   return (
     <AppShell>
-      <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
+      <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
         <div>
           <div className="text-lg font-medium text-gray-900">Cashflow & Expenditure</div>
+          <div className="text-xs text-gray-500 mt-1">Monthly breakdown by accounting month</div>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <select value={fSite} onChange={e => setFSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
@@ -139,10 +93,10 @@ export default function MgmtCashflow() {
           </select>
           <select value={fCategory} onChange={e => setFCategory(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
             <option value="All">All Categories</option>
-            {categories.map(c => <option key={c}>{c}</option>)}
+            {allCategories.map(c => <option key={c}>{c}</option>)}
           </select>
           <select value={fVendor} onChange={e => setFVendor(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-            <option value="">Select Vendor</option>
+            <option value="">All Vendors</option>
             {vendors.map(v => <option key={v.id} value={v.name}>{v.name}</option>)}
           </select>
         </div>
@@ -152,8 +106,83 @@ export default function MgmtCashflow() {
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>
       ) : (
         <>
-          {renderPivotTable(expPivot, 'Expenditure', `Invoice amounts · ${fSite === 'All' ? 'All Sites' : fSite}`)}
-          {renderPivotTable(cfPivot, 'Cashflow', `Payments made · ${fSite === 'All' ? 'All Sites' : fSite}`)}
+          <div className="flex items-center gap-1 mb-4">
+            <button
+              onClick={() => setActiveTab('expenditure')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg ${
+                activeTab === 'expenditure'
+                  ? 'bg-[#1a3c5e] text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              Expenditure
+            </button>
+            <button
+              onClick={() => setActiveTab('cashflow')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg ${
+                activeTab === 'cashflow'
+                  ? 'bg-[#1a3c5e] text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              Cashflow (Payments)
+            </button>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto max-h-[70vh] overflow-y-auto relative
+            [&_th:first-child]:shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] [&_td:first-child]:shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]
+            [&_th:last-child]:shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.1)] [&_td:last-child]:shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.1)]">
+            <table className="w-full text-[13px]">
+              <thead className="bg-gray-50 sticky top-0 z-20">
+                <tr>
+                  <th className="px-4 py-2.5 text-left font-medium text-gray-500 sticky left-0 bg-gray-50 z-30">{drillByVendor ? 'Vendor' : 'Category'}</th>
+                  {months.map(m => (
+                    <th key={m} className="px-4 py-2.5 text-right font-medium text-gray-500 whitespace-nowrap">{monthLabel(m)}</th>
+                  ))}
+                  <th className="px-4 pl-6 py-2.5 text-right font-medium text-gray-900 sticky right-0 bg-gray-50 z-30 border-l border-gray-200">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {isEmpty ? (
+                  <tr>
+                    <td colSpan={months.length + 2} className="px-4 py-10 text-center text-gray-400 text-sm">
+                      {activeTab === 'cashflow' ? 'No payments recorded yet for selected filters.' : 'No data for selected filters.'}
+                    </td>
+                  </tr>
+                ) : (
+                  cats.map(c => {
+                    const row = pivot.get(c)!;
+                    const rowTotal = months.reduce((s, m) => s + (row.get(m) ?? 0), 0);
+                    return (
+                      <tr key={c} className="border-t border-gray-50 hover:bg-gray-50/50">
+                        <td className="px-4 py-3 font-medium text-gray-900 sticky left-0 bg-white z-10 whitespace-nowrap">{c}</td>
+                        {months.map(m => {
+                          const v = row.get(m) ?? 0;
+                          return <td key={m} className="px-4 py-3 text-right text-gray-700 whitespace-nowrap">{v > 0 ? formatINR(v) : '—'}</td>;
+                        })}
+                        <td className="px-4 pl-6 py-3 text-right font-semibold text-gray-900 whitespace-nowrap sticky right-0 bg-white z-10 border-l border-gray-100">{formatINR(rowTotal)}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+              {!isEmpty && (
+                <tfoot className="border-t-2 border-gray-200 bg-gray-50 sticky bottom-0 z-20">
+                  <tr>
+                    <td className="px-4 py-2.5 font-medium text-gray-900 sticky left-0 bg-gray-50 z-30">Total</td>
+                    {totals.map((t, i) => (
+                      <td key={months[i]} className="px-4 py-2.5 text-right font-semibold text-gray-900 whitespace-nowrap">{formatINR(t)}</td>
+                    ))}
+                    <td className="px-4 pl-6 py-2.5 text-right font-bold text-gray-900 whitespace-nowrap sticky right-0 bg-gray-50 z-30 border-l border-gray-200">{formatINR(grandTotal)}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+
+          <div className="mt-3 text-xs text-gray-400">
+            {activeTab === 'expenditure' ? 'Invoice amounts' : 'Payments made'} · {fSite === 'All' ? 'All Sites' : fSite}
+          </div>
         </>
       )}
     </AppShell>
