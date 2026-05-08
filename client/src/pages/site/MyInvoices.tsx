@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, Fragment, FormEvent, DragEvent, ChangeEvent } from 'react';
+import { useState, useMemo, useEffect, useRef, Fragment, FormEvent, DragEvent, ChangeEvent, useCallback } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useVendors } from '../../hooks/useVendors';
@@ -13,6 +13,8 @@ import BulkImportModal from '../../components/shared/BulkImportModal';
 import DisputeModal from '../../components/shared/DisputeModal';
 import PayFromPettyCashModal from '../../components/shared/PayFromPettyCashModal';
 import SiteBulkPayModal from '../../components/shared/SiteBulkPayModal';
+import { getAllBalances } from '../../api/pettyCash';
+import { PettyCashBalance } from '../../types/pettyCash';
 import { useToast } from '../../context/ToastContext';
 
 const MINOR_LIMIT = 50000;
@@ -48,6 +50,51 @@ export default function MyInvoices() {
   }
   function clearSelection() { setSelectedIds(new Set()); }
 
+  // Petty-cash balance per assigned site — used to gate the bulk-pay button.
+  const [pettyBalances, setPettyBalances] = useState<PettyCashBalance[]>([]);
+  const refreshPettyBalances = useCallback(async () => {
+    try {
+      const all = await getAllBalances();
+      setPettyBalances(Array.isArray(all) ? all : []);
+    } catch { /* ignore — gate stays closed if we can't read it */ }
+  }, []);
+  useEffect(() => { refreshPettyBalances(); }, [refreshPettyBalances]);
+
+  // Map site → available petty cash. Aggregates the API response across all
+  // of the user's assigned sites.
+  const balanceBySite = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const b of pettyBalances) m.set(b.site, Number(b.balance ?? 0));
+    return m;
+  }, [pettyBalances]);
+
+  // Group selected payable invoices by their site so we can check coverage
+  // independently — petty cash is per-site, not portable.
+  const bulkPaySummary = useMemo(() => {
+    const bySite = new Map<string, { sum: number; count: number }>();
+    for (const inv of bulkPayable) {
+      const cur = bySite.get(inv.site) ?? { sum: 0, count: 0 };
+      cur.sum += Number(inv.invoice_amount);
+      cur.count += 1;
+      bySite.set(inv.site, cur);
+    }
+    const insufficient: Array<{ site: string; need: number; have: number; short: number }> = [];
+    let totalSelected = 0;
+    let totalAvailable = 0;
+    for (const [site, { sum }] of bySite) {
+      const have = balanceBySite.get(site) ?? 0;
+      totalSelected += sum;
+      totalAvailable += have;
+      if (sum > have + 0.01) insufficient.push({ site, need: sum, have, short: sum - have });
+    }
+    return {
+      totalSelected: +totalSelected.toFixed(2),
+      totalAvailable: +totalAvailable.toFixed(2),
+      insufficient,
+      canPay: bulkPayable.length > 0 && insufficient.length === 0,
+    };
+  }, [bulkPayable, balanceBySite]);
+
   const filtered = useMemo(() => invoices.filter(i => {
     if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
     if (search) {
@@ -67,7 +114,28 @@ export default function MyInvoices() {
               {selectedIds.size} selected · <button type="button" onClick={clearSelection} className="text-blue-600 hover:underline">clear</button>
             </span>
           )}
-          {/* Bulk Pay Selected hidden for site role — payment processing is HO's responsibility. */}
+          {/* Bulk Pay Selected — only enabled when the user's petty cash for
+              every selected invoice's site covers that site's selected total.
+              Each individual invoice still must be ≤ ₹50,000 (existing rule). */}
+          {bulkPayable.length > 0 && (
+            bulkPaySummary.canPay ? (
+              <button
+                onClick={() => setBulkPayOpen(true)}
+                className="px-3 py-2 bg-green-700 text-white text-sm font-medium rounded-lg hover:bg-green-800"
+                title={`Pay ${bulkPayable.length} invoice${bulkPayable.length > 1 ? 's' : ''} (${formatINR(bulkPaySummary.totalSelected)}) from petty cash. Available: ${formatINR(bulkPaySummary.totalAvailable)}.`}
+              >
+                Pay Selected ({bulkPayable.length})
+                <span className="ml-1 text-[11px] opacity-90">{formatINR(bulkPaySummary.totalSelected)}</span>
+              </button>
+            ) : (
+              <span
+                className="px-3 py-2 bg-gray-100 text-gray-500 text-sm font-medium rounded-lg cursor-not-allowed"
+                title={`Need ${formatINR(bulkPaySummary.totalSelected)} but petty cash is ${formatINR(bulkPaySummary.totalAvailable)}. Short on: ${bulkPaySummary.insufficient.map(s => `${s.site} (${formatINR(s.short)})`).join(', ')}.`}
+              >
+                Pay Selected — Insufficient Petty Cash
+              </span>
+            )
+          )}
           {selectedInvoice && (
             <button
               onClick={() => setDisputeInv(selectedInvoice)}
@@ -124,6 +192,7 @@ export default function MyInvoices() {
             setPayInv(null);
             notify(`Paid ${formatINR(amt)} from petty cash`);
             refresh();
+            refreshPettyBalances();
           }}
         />
       )}
@@ -140,6 +209,7 @@ export default function MyInvoices() {
             if (failed === 0) notify(`Paid ${paid} invoice${paid > 1 ? 's' : ''} from petty cash`);
             else notify(`${paid} paid, ${failed} failed`, 'error');
             refresh();
+            refreshPettyBalances();
           }}
         />
       )}
