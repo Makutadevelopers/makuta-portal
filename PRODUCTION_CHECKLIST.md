@@ -24,7 +24,7 @@ lives in `server/src/config/env.ts`.
 - [ ] **Private subnets** for EC2/ECS running the Node server; public load balancer in front.
 - [ ] **HTTPS everywhere** — terminate TLS at the ALB. Never serve `/api` over plain HTTP (the JWT would leak).
 - [ ] **Automated backups** — RDS automated backup window set, retention ≥ 7 days. See [BACKUP.md](BACKUP.md) for the application-level backup pipeline (DB dump + S3 file mirror, daily).
-- [ ] **Frontend**: Vercel project deploying `client/` on every push to `main`. DNS via Cloudflare.
+- [ ] **Frontend**: built into a Docker image (`infra/prod/Dockerfile.web`, multi-stage Vite build → nginx:alpine) and run as the `makuta_portal_web_prod` container on the same EC2 box as the API. Served by the CRM nginx at `invoice.makutadevelopers.com`. (The Vercel preview link still posted on PRs is a leftover GitHub integration — not the production frontend.)
 
 ## 3. CORS & client config
 
