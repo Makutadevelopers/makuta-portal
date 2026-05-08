@@ -826,7 +826,7 @@ function InvoiceInfoPanel({ invoice, history, loading, onClose }: {
             <div className="font-mono font-medium text-purple-700">{invoice.internal_no ?? '—'}</div>
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
-            <div className="text-xs text-gray-500">Amount</div>
+            <div className="text-xs text-gray-500">Total Amount</div>
             <div className="font-medium">{formatINR(Number(invoice.invoice_amount))}</div>
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
@@ -838,6 +838,70 @@ function InvoiceInfoPanel({ invoice, history, loading, onClose }: {
             <div className="font-medium">{formatDate(invoice.created_at)}</div>
           </div>
         </div>
+
+        {/* Amount breakdown — base, GST split, total */}
+        {(() => {
+          const base = Number(invoice.base_amount ?? invoice.invoice_amount);
+          const cgstPct = Number(invoice.cgst_pct ?? 0);
+          const sgstPct = Number(invoice.sgst_pct ?? 0);
+          const igstPct = Number(invoice.igst_pct ?? 0);
+          const cgstAmt = +(base * cgstPct / 100).toFixed(2);
+          const sgstAmt = +(base * sgstPct / 100).toFixed(2);
+          const igstAmt = +(base * igstPct / 100).toFixed(2);
+          const total = Number(invoice.invoice_amount);
+          const hasTax = cgstPct > 0 || sgstPct > 0 || igstPct > 0;
+          if (!hasTax && Math.abs(base - total) < 0.01) return null;
+          return (
+            <div className="mb-5">
+              <div className="text-sm font-medium text-gray-900 mb-2">Amount Breakdown</div>
+              <div className="bg-gray-50 rounded-lg overflow-hidden border border-gray-100">
+                <table className="w-full text-[13px]">
+                  <thead className="bg-gray-100">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-gray-500">Component</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-500">Rate</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-500">Amount (₹)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-t border-gray-100">
+                      <td className="px-3 py-2 text-gray-800">Taxable Value (Base)</td>
+                      <td className="px-3 py-2 text-right text-gray-400">—</td>
+                      <td className="px-3 py-2 text-right font-medium">{formatINR(base)}</td>
+                    </tr>
+                    {cgstPct > 0 && (
+                      <tr className="border-t border-gray-100">
+                        <td className="px-3 py-2 text-gray-700">Central Tax (CGST)</td>
+                        <td className="px-3 py-2 text-right text-gray-600">{cgstPct.toFixed(2)} %</td>
+                        <td className="px-3 py-2 text-right">{formatINR(cgstAmt)}</td>
+                      </tr>
+                    )}
+                    {sgstPct > 0 && (
+                      <tr className="border-t border-gray-100">
+                        <td className="px-3 py-2 text-gray-700">State/UT Tax (SGST)</td>
+                        <td className="px-3 py-2 text-right text-gray-600">{sgstPct.toFixed(2)} %</td>
+                        <td className="px-3 py-2 text-right">{formatINR(sgstAmt)}</td>
+                      </tr>
+                    )}
+                    {igstPct > 0 && (
+                      <tr className="border-t border-gray-100">
+                        <td className="px-3 py-2 text-gray-700">Integrated Tax (IGST)</td>
+                        <td className="px-3 py-2 text-right text-gray-600">{igstPct.toFixed(2)} %</td>
+                        <td className="px-3 py-2 text-right">{formatINR(igstAmt)}</td>
+                      </tr>
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-gray-300 bg-white">
+                      <td className="px-3 py-2 font-medium text-gray-900" colSpan={2}>Total Value</td>
+                      <td className="px-3 py-2 text-right font-semibold text-[#1a3c5e]">{formatINR(total)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Activity log */}
         <div className="text-sm font-medium text-gray-900 mb-3">Activity Log</div>
