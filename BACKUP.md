@@ -13,8 +13,13 @@ S3 invoice-attachment files. Three independent destinations:
 2. **GitHub Actions artifact (off-AWS copy)** — a workflow runs at 05:00
    UTC, downloads the latest dump from the backup bucket, and stores it
    as a 90-day GHA artifact. Survives "AWS account lost" scenarios.
-3. **External hard drive** — runs **on demand** when you plug a backup
-   drive into the Mac and run one command. Nothing scheduled.
+3. **External hard drive (`mac-scratch`)** — a macOS LaunchAgent on the
+   admin's Mac runs at 14:00 IST daily, downloads the freshest dump and
+   file mirror from the AWS backup bucket to
+   `/Volumes/mac-scratch/Backups/invoice portal/<date>/`. Catch-up if the
+   Mac was off. **Setup walkthrough:** [scripts/local-backup/INSTALL.md](scripts/local-backup/INSTALL.md).
+   The on-demand `backup-to-drive.sh` flow described below remains
+   available for ad-hoc/full-from-prod backups.
 
 ## What gets backed up
 
@@ -161,10 +166,14 @@ you build.
 ### Database
 
 ```
+# From the automated daily local mirror (most common path)
+./scripts/restore-db.sh "/Volumes/mac-scratch/Backups/invoice portal/<YYYY-MM-DD>/db/makuta_portal_<timestamp>.sql.gz"
+
+# From an on-demand drive backup (legacy path)
 ./scripts/restore-db.sh /Volumes/MakutaBackup/makuta-portal/makuta_makuta_portal_20260505_020000.sql.gz
 
-# or from S3
-./scripts/restore-db.sh s3://makuta-backups-prod/db-backups/2026-05-05/makuta_makuta_portal_20260505_020000.sql.gz
+# From S3 directly
+./scripts/restore-db.sh s3://makuta-backup-use1/db-backups/2026-05-05/makuta_portal_<timestamp>.sql.gz
 ```
 
 The script prompts for confirmation before overwriting.
