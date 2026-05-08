@@ -127,8 +127,8 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
 
     // Vendor must exist in Vendor Master. Pull the canonical name from the master row
     // so the denormalized invoice.vendor_name can never drift from vendors.name.
-    const masterVendor = await queryOne<{ id: string; name: string }>(
-      'SELECT id, name FROM vendors WHERE id = $1',
+    const masterVendor = await queryOne<{ id: string; name: string; category: string | null }>(
+      'SELECT id, name, category FROM vendors WHERE id = $1',
       [data.vendor_id]
     );
     if (!masterVendor) {
@@ -136,6 +136,21 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
       return;
     }
     data.vendor_name = masterVendor.name;
+
+    // Material category must match the vendor's category in Vendor Master.
+    // Vendors with a null/blank category are treated as legacy and skip the check.
+    if (masterVendor.category && masterVendor.category.trim()) {
+      const expected = masterVendor.category.trim().toLowerCase();
+      const actual = data.purpose.trim().toLowerCase();
+      if (expected !== actual) {
+        res.status(400).json({
+          error: 'Bad Request',
+          code: 'category_mismatch',
+          message: `Category "${data.purpose}" does not match vendor "${masterVendor.name}" (Vendor Master: "${masterVendor.category}")`,
+        });
+        return;
+      }
+    }
 
     // H5: Duplicate check — same invoice_no + same vendor (case-insensitive), not deleted.
     // If invoice_no is null/blank, fall back to vendor + amount + date match.
@@ -246,7 +261,7 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
 
     // Verify invoice exists (excludes soft-deleted), check site ownership, and finalized status
     const existing = await queryOne<InvoiceRow>(
-      'SELECT id, site, pushed FROM invoices WHERE id = $1 AND deleted_at IS NULL',
+      'SELECT id, site, pushed, vendor_id, purpose FROM invoices WHERE id = $1 AND deleted_at IS NULL',
       [id]
     );
 
@@ -273,17 +288,42 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
       return;
     }
 
-    // If vendor_id is being changed, verify the new vendor exists and pull its canonical name
+    // If vendor_id is being changed, verify the new vendor exists and pull its canonical name.
+    // We also need vendor.category so we can enforce material/category matching below.
+    let resolvedVendor: { id: string; name: string; category: string | null } | null = null;
     if (data.vendor_id !== undefined) {
-      const masterVendor = await queryOne<{ id: string; name: string }>(
-        'SELECT id, name FROM vendors WHERE id = $1',
+      resolvedVendor = await queryOne<{ id: string; name: string; category: string | null }>(
+        'SELECT id, name, category FROM vendors WHERE id = $1',
         [data.vendor_id]
       );
-      if (!masterVendor) {
+      if (!resolvedVendor) {
         res.status(400).json({ error: 'Bad Request', message: 'Selected vendor is not in Vendor Master' });
         return;
       }
-      data.vendor_name = masterVendor.name;
+      data.vendor_name = resolvedVendor.name;
+    }
+
+    // Material category must match the vendor's category. Run this whenever
+    // either vendor_id or purpose is being changed, against the resulting state.
+    if (data.vendor_id !== undefined || data.purpose !== undefined) {
+      if (!resolvedVendor) {
+        resolvedVendor = await queryOne<{ id: string; name: string; category: string | null }>(
+          'SELECT id, name, category FROM vendors WHERE id = $1',
+          [existing.vendor_id]
+        );
+      }
+      if (resolvedVendor?.category && resolvedVendor.category.trim()) {
+        const finalPurpose = (data.purpose ?? (existing.purpose as string | null) ?? '').trim();
+        const expected = resolvedVendor.category.trim().toLowerCase();
+        if (expected !== finalPurpose.toLowerCase()) {
+          res.status(400).json({
+            error: 'Bad Request',
+            code: 'category_mismatch',
+            message: `Category "${finalPurpose}" does not match vendor "${resolvedVendor.name}" (Vendor Master: "${resolvedVendor.category}")`,
+          });
+          return;
+        }
+      }
     }
 
     const ALLOWED_UPDATE_FIELDS = [
