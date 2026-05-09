@@ -293,26 +293,27 @@ export default function VendorMaster() {
                       <td className="px-4 py-3 text-gray-600 text-xs">{v.email ?? '—'}</td>
                       <td className="px-4 py-3 text-gray-500 text-xs max-w-[140px] truncate" title={v.notes ?? ''}>{v.notes || '—'}</td>
                       <td className="px-4 py-3">
-                        {canManage(v) ? (
-                          <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          {canManage(v) && (
                             <button
                               onClick={() => { setShowForm(false); setExpandedEditId(isExpanded ? null : v.id); }}
                               className="text-xs text-blue-600 hover:underline"
                             >
                               {isExpanded ? 'Close' : 'Edit'}
                             </button>
-                            <button
-                              onClick={() => setMergeFrom(v)}
-                              className="text-xs text-amber-600 hover:underline"
-                              title="Merge this vendor into another (this row will be removed; can be reverted)"
-                            >
-                              Merge
-                            </button>
+                          )}
+                          {/* Merge is open to HO and site on every vendor — revert is one click away. */}
+                          <button
+                            onClick={() => setMergeFrom(v)}
+                            className="text-xs text-amber-600 hover:underline"
+                            title="Merge this vendor into another (this row will be removed; can be reverted)"
+                          >
+                            Merge
+                          </button>
+                          {canManage(v) && (
                             <button onClick={() => handleDelete(v)} className="text-xs text-red-500 hover:underline">Delete</button>
-                          </div>
-                        ) : (
-                          <span className="text-xs text-gray-300">—</span>
-                        )}
+                          )}
+                        </div>
                       </td>
                     </tr>
                     {isExpanded && (

@@ -290,24 +290,9 @@ export async function mergeVendors(
       return;
     }
 
-    // Site accountants can only merge a vendor they themselves created — same
-    // boundary as their delete permission. The "kept" target may be any
-    // vendor (consistent with how merge UX works).
-    if (req.user!.role === 'site') {
-      const removeVendor = await getVendorById(removeId);
-      if (!removeVendor) {
-        res.status(404).json({ error: 'Not Found', message: 'Vendor to remove not found' });
-        return;
-      }
-      if (removeVendor.created_by !== req.user!.id) {
-        res.status(403).json({
-          error: 'Forbidden',
-          message: 'You can only merge vendors you originally created. Ask HO to merge this one.',
-        });
-        return;
-      }
-    }
-
+    // Site accountants can merge any two vendors. The audit log records who
+    // did the merge and revert is one click from Recent Merges, so HO has a
+    // clear undo path if a merge was wrong.
     const result = await mergeVendorsService(keepId, removeId, req.user!.id);
     if (!result) {
       res.status(404).json({ error: 'Not Found', message: 'One or both vendors not found' });
