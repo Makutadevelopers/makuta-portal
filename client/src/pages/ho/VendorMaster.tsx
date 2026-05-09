@@ -1,10 +1,14 @@
-import { useState, FormEvent, Fragment } from 'react';
+import { useState, useEffect, useCallback, FormEvent, Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import { useVendors } from '../../hooks/useVendors';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useAuth } from '../../hooks/useAuth';
-import { createVendor, updateVendor, deleteVendor, getSimilarVendors } from '../../api/vendors';
-import { formatINR } from '../../utils/formatters';
+import {
+  createVendor, updateVendor, deleteVendor, getSimilarVendors,
+  mergeVendors as mergeVendorsApi,
+  getVendorMerges, revertVendorMerge, VendorMerge,
+} from '../../api/vendors';
+import { formatINR, formatDate } from '../../utils/formatters';
 import { PURPOSES } from '../../utils/constants';
 import { Vendor } from '../../types/vendor';
 import AppShell from '../../components/layout/AppShell';
@@ -31,7 +35,15 @@ export default function VendorMaster() {
   const [showImport, setShowImport] = useState(false);
   const [editingTermsId, setEditingTermsId] = useState<string | null>(null);
   const [savingTermsId, setSavingTermsId] = useState<string | null>(null);
+  const [mergeFrom, setMergeFrom] = useState<Vendor | null>(null);
+  const [merges, setMerges] = useState<VendorMerge[]>([]);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
   const { notify } = useToast();
+
+  const loadMerges = useCallback(() => {
+    getVendorMerges().then(setMerges).catch(() => setMerges([]));
+  }, []);
+  useEffect(() => { loadMerges(); }, [loadMerges]);
 
   async function handleQuickTermsChange(v: Vendor, newTerms: number) {
     if (newTerms === v.payment_terms) {
@@ -91,6 +103,21 @@ export default function VendorMaster() {
     refresh();
   }
 
+  async function handleRevert(m: VendorMerge) {
+    if (!confirm(`Revert this merge? "${m.removed_vendor_name}" will be restored as a separate vendor and ${m.invoice_count} invoice${m.invoice_count === 1 ? '' : 's'} will be re-pointed back to it.`)) return;
+    setRevertingId(m.id);
+    try {
+      await revertVendorMerge(m.id);
+      notify(`Restored "${m.removed_vendor_name}"`);
+      loadMerges();
+      refresh();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Revert failed', 'error');
+    } finally {
+      setRevertingId(null);
+    }
+  }
+
   return (
     <AppShell>
       <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
@@ -143,6 +170,52 @@ export default function VendorMaster() {
           onCancel={() => { setShowForm(false); setInitialName(''); }}
           onSaved={() => { setShowForm(false); setInitialName(''); notify('Vendor added'); refresh(); }}
           onMerged={() => { setShowForm(false); setInitialName(''); notify('Vendors merged'); refresh(); }}
+        />
+      )}
+
+      {merges.filter(m => !m.reverted_at).length > 0 && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="text-xs font-medium text-blue-900 mb-2">
+            Recent merges {isSite ? '(yours)' : ''} — you can revert if needed
+          </div>
+          <div className="space-y-1.5">
+            {merges.filter(m => !m.reverted_at).slice(0, 5).map(m => (
+              <div key={m.id} className="flex items-center justify-between gap-3 px-3 py-2 bg-white rounded border border-blue-100 text-xs">
+                <div className="min-w-0 flex-1 text-gray-800">
+                  <span className="font-medium">{m.removed_vendor_name}</span>
+                  <span className="text-blue-600 mx-2">→</span>
+                  <span className="font-medium">{m.kept_vendor_name ?? '(deleted)'}</span>
+                  <span className="text-gray-500 ml-2">
+                    · {m.invoice_count} invoice{m.invoice_count === 1 ? '' : 's'}
+                    {m.merged_by_name ? ` · by ${m.merged_by_name}` : ''}
+                    {' · '}{formatDate(m.merged_at)}
+                  </span>
+                </div>
+                <button
+                  onClick={() => handleRevert(m)}
+                  disabled={revertingId === m.id}
+                  className="text-xs text-amber-700 hover:bg-amber-50 rounded px-2 py-1 disabled:opacity-50 flex-shrink-0"
+                >
+                  {revertingId === m.id ? 'Reverting…' : 'Revert'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {mergeFrom && (
+        <MergeIntoModal
+          removeVendor={mergeFrom}
+          allVendors={vendors}
+          onClose={() => setMergeFrom(null)}
+          onMerged={(removedName, keptName) => {
+            setMergeFrom(null);
+            notify(`Merged "${removedName}" into "${keptName}"`);
+            refresh();
+            loadMerges();
+          }}
+          onError={msg => notify(msg, 'error')}
         />
       )}
 
@@ -227,6 +300,13 @@ export default function VendorMaster() {
                               className="text-xs text-blue-600 hover:underline"
                             >
                               {isExpanded ? 'Close' : 'Edit'}
+                            </button>
+                            <button
+                              onClick={() => setMergeFrom(v)}
+                              className="text-xs text-amber-600 hover:underline"
+                              title="Merge this vendor into another (this row will be removed; can be reverted)"
+                            >
+                              Merge
                             </button>
                             <button onClick={() => handleDelete(v)} className="text-xs text-red-500 hover:underline">Delete</button>
                           </div>
@@ -446,6 +526,92 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
           <button type="button" onClick={onCancel} className="px-5 py-2.5 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// ── Merge-into modal ────────────────────────────────────────────────────────
+function MergeIntoModal({
+  removeVendor, allVendors, onClose, onMerged, onError,
+}: {
+  removeVendor: Vendor;
+  allVendors: Vendor[];
+  onClose: () => void;
+  onMerged: (removedName: string, keptName: string) => void;
+  onError: (msg: string) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [keepId, setKeepId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const candidates = allVendors
+    .filter(v => v.id !== removeVendor.id)
+    .filter(v => !search || v.name.toLowerCase().includes(search.toLowerCase()))
+    .slice(0, 30);
+
+  async function handleConfirm() {
+    if (!keepId) return;
+    const keepVendor = allVendors.find(v => v.id === keepId);
+    if (!keepVendor) return;
+    setSubmitting(true);
+    try {
+      await mergeVendorsApi(keepId, removeVendor.id);
+      onMerged(removeVendor.name, keepVendor.name);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Merge failed');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-lg max-h-[80vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-base font-medium text-gray-900">Merge vendor</div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">&#10005;</button>
+        </div>
+        <div className="text-xs text-gray-600 mb-4">
+          All invoices for <strong>{removeVendor.name}</strong> will be re-pointed to the vendor you pick below, and <strong>{removeVendor.name}</strong> will be removed from Vendor Master. You can revert this from the Recent Merges list.
+        </div>
+
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search for the vendor to keep…"
+          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-blue-200"
+          autoFocus
+        />
+
+        <div className="max-h-64 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-100 mb-4">
+          {candidates.length === 0 ? (
+            <div className="px-3 py-6 text-center text-xs text-gray-400">No matching vendors</div>
+          ) : candidates.map(v => (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => setKeepId(v.id)}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${keepId === v.id ? 'bg-blue-50' : ''}`}
+            >
+              <div className="font-medium text-gray-900">{v.name}</div>
+              <div className="text-[11px] text-gray-500">
+                {v.category ?? 'Uncategorised'} · {v.payment_terms} day terms
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 justify-end">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg">Cancel</button>
+          <button
+            onClick={handleConfirm}
+            disabled={!keepId || submitting}
+            className="px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50"
+          >
+            {submitting ? 'Merging…' : 'Merge'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

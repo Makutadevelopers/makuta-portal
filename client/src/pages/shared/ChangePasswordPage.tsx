@@ -2,11 +2,13 @@ import { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { changePasswordApi } from '../../api/auth';
 import { useAuth } from '../../hooks/useAuth';
+import { useToast } from '../../context/ToastContext';
 import PasswordInput from '../../components/shared/PasswordInput';
 
 export default function ChangePasswordPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { notify } = useToast();
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -38,10 +40,14 @@ export default function ChangePasswordPage() {
     setLoading(true);
     try {
       await changePasswordApi(currentPassword, newPassword);
-      setSuccess('Password updated.');
+      setSuccess('Password updated. Redirecting…');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      notify('Password updated');
+      // Send the user back to their landing page — exact target depends on
+      // role (the router redirects "/" to the right dashboard for each role).
+      setTimeout(() => navigate('/', { replace: true }), 600);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not change password');
     } finally {
