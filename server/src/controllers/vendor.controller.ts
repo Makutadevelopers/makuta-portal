@@ -15,6 +15,7 @@ import {
   deleteVendor as deleteVendorService,
   findSimilarVendors,
   findAllDuplicatePairs,
+  dismissDuplicatePair,
   mergeVendors as mergeVendorsService,
   getVendorDetail as getVendorDetailService,
 } from '../services/vendor.service';
@@ -240,6 +241,29 @@ export async function getDuplicates(
   try {
     const pairs = await findAllDuplicatePairs();
     res.json(pairs);
+  } catch (err) {
+    next(err);
+  }
+}
+
+const dismissBodySchema = z.object({
+  vendorAId: z.string().uuid(),
+  vendorBId: z.string().uuid(),
+});
+
+export async function dismissDuplicate(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { vendorAId, vendorBId } = dismissBodySchema.parse(req.body);
+    if (vendorAId === vendorBId) {
+      res.status(400).json({ error: 'Bad Request', message: 'Cannot dismiss a pair of the same vendor' });
+      return;
+    }
+    await dismissDuplicatePair(vendorAId, vendorBId, req.user!.id);
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

@@ -378,6 +378,10 @@ export interface DuplicatePair {
 
 export async function findAllDuplicatePairs(): Promise<DuplicatePair[]> {
   const vendors = await getAllVendors();
+  const dismissedRows = await query<{ vendor_a_id: string; vendor_b_id: string }>(
+    'SELECT vendor_a_id, vendor_b_id FROM vendor_dedup_dismissed'
+  );
+  const dismissed = new Set(dismissedRows.map(r => `${r.vendor_a_id}:${r.vendor_b_id}`));
   const pairs: DuplicatePair[] = [];
   const seen = new Set<string>();
 
@@ -390,6 +394,7 @@ export async function findAllDuplicatePairs(): Promise<DuplicatePair[]> {
 
       const pairKey = [a.id, b.id].sort().join(':');
       if (seen.has(pairKey)) continue;
+      if (dismissed.has(pairKey)) continue;
 
       // Normalized exact match
       if (normA === normB) {
@@ -418,6 +423,26 @@ export async function findAllDuplicatePairs(): Promise<DuplicatePair[]> {
   }
 
   return pairs;
+}
+
+// ── Dedup dismissal ────────────────────────────────────────────────────────
+
+export async function dismissDuplicatePair(
+  vendorAId: string,
+  vendorBId: string,
+  userId: string
+): Promise<boolean> {
+  if (vendorAId === vendorBId) return false;
+  // Canonicalise so the unique pair is always stored with the smaller UUID
+  // first (matches the CHECK constraint in migration 022).
+  const [lo, hi] = [vendorAId, vendorBId].sort();
+  await query(
+    `INSERT INTO vendor_dedup_dismissed (vendor_a_id, vendor_b_id, dismissed_by)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (vendor_a_id, vendor_b_id) DO NOTHING`,
+    [lo, hi, userId]
+  );
+  return true;
 }
 
 // ── Vendor merge ───────────────────────────────────────────────────────────
