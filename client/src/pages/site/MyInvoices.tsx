@@ -25,6 +25,7 @@ export default function MyInvoices() {
   const { vendors } = useVendors();
   const [search, setSearch] = useState('');
   const [fPurpose, setFPurpose] = useState('All');
+  const [sortBy, setSortBy] = useState<'invoice_date' | 'created_at'>('invoice_date');
   const [showForm, setShowForm] = useState(false);
   const [expandedEditId, setExpandedEditId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
@@ -95,14 +96,29 @@ export default function MyInvoices() {
     };
   }, [bulkPayable, balanceBySite]);
 
-  const filtered = useMemo(() => invoices.filter(i => {
-    if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      if (!`${i.vendor_name} ${i.invoice_no} ${i.po_number ?? ''}`.toLowerCase().includes(q)) return false;
+  const filtered = useMemo(() => {
+    const result = invoices.filter(i => {
+      if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        if (!`${i.vendor_name} ${i.invoice_no} ${i.po_number ?? ''}`.toLowerCase().includes(q)) return false;
+      }
+      return true;
+    });
+    // Sort: invoice_date is the printed bill date; created_at is when the
+    // accountant typed it in. Tie-break date sort with created_at so
+    // back-dated entries entered today still rise above older same-day rows.
+    if (sortBy === 'created_at') {
+      result.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    } else {
+      result.sort((a, b) => {
+        const cmp = (b.invoice_date || '').localeCompare(a.invoice_date || '');
+        if (cmp !== 0) return cmp;
+        return (b.created_at || '').localeCompare(a.created_at || '');
+      });
     }
-    return true;
-  }), [invoices, fPurpose, search]);
+    return result;
+  }, [invoices, fPurpose, search, sortBy]);
 
   return (
     <AppShell>
@@ -235,6 +251,15 @@ export default function MyInvoices() {
         <select value={fPurpose} onChange={e => setFPurpose(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
           <option value="All">All Categories</option>
           {PURPOSES.map(p => <option key={p}>{p}</option>)}
+        </select>
+        <select
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at')}
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
+          title="Sort order"
+        >
+          <option value="invoice_date">Latest invoice date first</option>
+          <option value="created_at">Latest added first</option>
         </select>
         <span className="text-xs text-gray-400 ml-auto">{filtered.length} records</span>
       </div>
