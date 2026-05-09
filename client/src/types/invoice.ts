@@ -28,6 +28,10 @@ export interface Invoice {
   disputed_by: string | null;
   disputed_at: string | null;
   payment_status?: string;    // excluded for site role
+  // Outstanding balance — invoice_amount minus sum of payments. Available
+  // to all roles (site dashboards show "outstanding per project"). Aging
+  // data (days_past_due, overdue, total_paid) remains HO+mgmt only.
+  balance?: number | string;
   remarks: string | null;
   pushed: boolean;
   pushed_at: string | null;

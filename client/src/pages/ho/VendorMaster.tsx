@@ -250,12 +250,8 @@ export default function VendorMaster() {
                   <Fragment key={v.id}>
                     <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${isExpanded ? 'bg-blue-50/40' : ''}`}>
                       <td className="px-4 py-3">
-                        {isSite ? (
-                          <span className="font-medium text-gray-900">{v.name}</span>
-                        ) : (
-                          <Link to={`/vendors/${v.id}`} className="font-medium text-blue-700 hover:underline">{v.name}</Link>
-                        )}
-                        {!isSite && outstanding && outstanding > 0 && (
+                        <Link to={`/vendors/${v.id}`} className="font-medium text-blue-700 hover:underline">{v.name}</Link>
+                        {outstanding && outstanding > 0 && (
                           <div className="text-[11px] text-red-500 mt-0.5">{formatINR(outstanding)} outstanding</div>
                         )}
                       </td>

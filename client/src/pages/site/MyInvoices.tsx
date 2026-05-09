@@ -25,6 +25,7 @@ export default function MyInvoices() {
   const { vendors } = useVendors();
   const [search, setSearch] = useState('');
   const [fPurpose, setFPurpose] = useState('All');
+  const [fMonth, setFMonth] = useState('');
   const [sortBy, setSortBy] = useState<'invoice_date' | 'created_at'>('invoice_date');
   const [showForm, setShowForm] = useState(false);
   const [expandedEditId, setExpandedEditId] = useState<string | null>(null);
@@ -99,6 +100,11 @@ export default function MyInvoices() {
   const filtered = useMemo(() => {
     const result = invoices.filter(i => {
       if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
+      if (fMonth) {
+        // Match against the invoice's month bucket — same field HO uses.
+        const invMonth = (i.month || i.invoice_date || '').slice(0, 7);
+        if (invMonth !== fMonth) return false;
+      }
       if (search) {
         const q = search.toLowerCase();
         if (!`${i.vendor_name} ${i.invoice_no} ${i.po_number ?? ''}`.toLowerCase().includes(q)) return false;
@@ -118,7 +124,7 @@ export default function MyInvoices() {
       });
     }
     return result;
-  }, [invoices, fPurpose, search, sortBy]);
+  }, [invoices, fPurpose, fMonth, search, sortBy]);
 
   return (
     <AppShell>
@@ -252,6 +258,22 @@ export default function MyInvoices() {
           <option value="All">All Categories</option>
           {PURPOSES.map(p => <option key={p}>{p}</option>)}
         </select>
+        <input
+          type="month"
+          value={fMonth}
+          onChange={e => setFMonth(e.target.value)}
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200"
+          title="Filter by month"
+        />
+        {fMonth && (
+          <button
+            type="button"
+            onClick={() => setFMonth('')}
+            className="text-xs text-gray-500 hover:text-gray-700 underline"
+          >
+            Clear month
+          </button>
+        )}
         <select
           value={sortBy}
           onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at')}

@@ -50,8 +50,9 @@ const createInvoiceSchema = z.object({
 
 const updateInvoiceSchema = createInvoiceSchema.partial();
 
-// Columns safe for site role — includes payment_status badge but excludes
-// payment amounts (total_paid, balance) and aging data (days_past_due, overdue).
+// Columns safe for site role — payment_status badge plus the outstanding
+// balance (so site dashboards can show "outstanding per project"). Aging
+// data (days_past_due, overdue) and total_paid stay HO+mgmt only.
 const SITE_COLUMNS = `
   id, sl_no, internal_no, month, invoice_date, vendor_id, vendor_name,
   invoice_no, po_number, purpose, site, invoice_amount,
@@ -60,6 +61,9 @@ const SITE_COLUMNS = `
   additional_charge_igst_pct, additional_charge_reason,
   disputed, dispute_severity, dispute_reason, disputed_by, disputed_at,
   payment_status,
+  (invoice_amount - COALESCE(
+    (SELECT SUM(p.amount) FROM payments p WHERE p.invoice_id = invoices.id), 0
+  ))::NUMERIC(14,2) AS balance,
   remarks, pushed, pushed_at, minor_payment,
   created_by, created_at, updated_at
 `;
