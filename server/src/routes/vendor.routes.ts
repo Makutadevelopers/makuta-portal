@@ -13,15 +13,17 @@ const router = Router();
 
 router.use(authenticate);
 
+// Static / fixed-path routes MUST come before /:id, otherwise Express
+// matches "/merges" against "/:id" and treats "merges" as a vendor UUID.
 router.get('/similar', getSimilar);
 router.get('/duplicates', requireRole(['ho']), getDuplicates);
 router.post('/duplicates/dismiss', requireRole(['ho']), dismissDuplicate);
+router.get('/merges', requireRole(['ho', 'mgmt', 'site']), listVendorMerges);
+router.post('/merge', requireRole(['ho', 'site']), mergeVendors);
+router.post('/merges/:id/revert', requireRole(['ho', 'site']), revertVendorMerge);
 router.get('/', getVendors);
 router.get('/:id/detail', requireRole(['ho', 'mgmt']), getVendorDetailHandler);
 router.get('/:id', getVendor);
-router.post('/merge', requireRole(['ho', 'site']), mergeVendors);
-router.get('/merges', requireRole(['ho', 'mgmt', 'site']), listVendorMerges);
-router.post('/merges/:id/revert', requireRole(['ho', 'site']), revertVendorMerge);
 router.post('/', requireRole(['ho', 'site']), createVendor);
 router.patch('/:id', requireRole(['ho', 'site']), updateVendor);
 router.delete('/:id', requireRole(['ho', 'site']), deleteVendor);
