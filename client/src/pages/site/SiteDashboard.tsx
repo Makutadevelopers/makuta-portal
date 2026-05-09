@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { useInvoices } from '../../hooks/useInvoices';
 import { formatINR, formatDate } from '../../utils/formatters';
@@ -7,6 +7,7 @@ import AppShell from '../../components/layout/AppShell';
 export default function SiteDashboard() {
   const { user } = useAuth();
   const { invoices, loading } = useInvoices();
+  const [trendSite, setTrendSite] = useState<string>('all');
 
   // KPI computations
   const totalInvoices = invoices.length;
@@ -14,10 +15,12 @@ export default function SiteDashboard() {
   const categoriesUsed = new Set(invoices.map(i => i.purpose)).size;
   const vendorsUsed = new Set(invoices.map(i => i.vendor_name)).size;
 
-  // Monthly trend: group invoices by YYYY-MM
+  // Monthly trend: group invoices by YYYY-MM, optionally scoped to a single
+  // site so multi-site accountants can see one project at a time.
   const monthlyTrend = useMemo(() => {
     const map = new Map<string, number>();
     for (const inv of invoices) {
+      if (trendSite !== 'all' && inv.site !== trendSite) continue;
       const ym = inv.month?.slice(0, 7);
       if (!ym) continue;
       map.set(ym, (map.get(ym) ?? 0) + Number(inv.invoice_amount));
@@ -25,7 +28,7 @@ export default function SiteDashboard() {
     return Array.from(map.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([ym, total]) => ({ ym, total }));
-  }, [invoices]);
+  }, [invoices, trendSite]);
 
   const maxMonthly = Math.max(...monthlyTrend.map(m => m.total), 1);
 
@@ -144,8 +147,24 @@ export default function SiteDashboard() {
 
           {/* Monthly Invoice Trend */}
           <div className="bg-white rounded-xl border border-gray-100 mb-6">
-            <div className="px-5 py-4 border-b border-gray-100">
-              <div className="text-sm font-medium text-gray-900">Monthly Invoice Trend</div>
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+              <div className="text-sm font-medium text-gray-900">
+                Monthly Invoice Trend
+                {trendSite !== 'all' && (
+                  <span className="text-xs text-gray-500 font-normal ml-2">· {trendSite}</span>
+                )}
+              </div>
+              {isMulti && (
+                <select
+                  value={trendSite}
+                  onChange={e => setTrendSite(e.target.value)}
+                  className="text-xs px-2 py-1 border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  title="Filter the chart to a single site"
+                >
+                  <option value="all">All sites</option>
+                  {userSites.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              )}
             </div>
             <div className="px-5 py-4">
               {monthlyTrend.length === 0 ? (
