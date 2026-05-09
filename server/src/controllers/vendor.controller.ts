@@ -142,18 +142,24 @@ export async function updateVendor(
       }
     }
 
-    const vendor = await updateVendorService(id, data, req.user!.id);
-    if (!vendor) {
+    const result = await updateVendorService(id, data, req.user!.id);
+    if (!result) {
       res.status(404).json({ error: 'Not Found', message: 'Vendor not found' });
       return;
     }
+    const { vendor, invoicesRecategorised } = result;
 
     await logAudit({
       userId: req.user!.id,
-      action: `Updated vendor "${vendor.name}" in Vendor Master`,
+      action: invoicesRecategorised > 0
+        ? `Updated vendor "${vendor.name}" in Vendor Master — recategorised ${invoicesRecategorised} invoice${invoicesRecategorised === 1 ? '' : 's'} to "${vendor.category}"`
+        : `Updated vendor "${vendor.name}" in Vendor Master`,
+      metadata: invoicesRecategorised > 0
+        ? { vendorId: vendor.id, newCategory: vendor.category, invoicesRecategorised }
+        : undefined,
     });
 
-    res.json(vendor);
+    res.json({ ...vendor, invoicesRecategorised });
   } catch (err) {
     next(err);
   }

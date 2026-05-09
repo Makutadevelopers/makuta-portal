@@ -69,8 +69,12 @@ export function createVendor(data: Partial<Vendor>): Promise<Vendor> {
   });
 }
 
-export function updateVendor(id: string, data: Partial<Vendor>): Promise<Vendor> {
-  return apiFetch<Vendor>(`/vendors/${id}`, {
+export interface UpdateVendorResponse extends Vendor {
+  invoicesRecategorised?: number;
+}
+
+export function updateVendor(id: string, data: Partial<Vendor>): Promise<UpdateVendorResponse> {
+  return apiFetch<UpdateVendorResponse>(`/vendors/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(data),
   });
