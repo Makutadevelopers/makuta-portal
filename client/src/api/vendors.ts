@@ -103,9 +103,42 @@ export function dismissDuplicateVendorPair(vendorAId: string, vendorBId: string)
   });
 }
 
-export function mergeVendors(keepId: string, removeId: string): Promise<Vendor> {
-  return apiFetch<Vendor>('/vendors/merge', {
+export interface MergeVendorsResponse extends Vendor {
+  mergeId: string;
+  repointedCount: number;
+  removedName: string;
+}
+
+export function mergeVendors(keepId: string, removeId: string): Promise<MergeVendorsResponse> {
+  return apiFetch<MergeVendorsResponse>('/vendors/merge', {
     method: 'POST',
     body: JSON.stringify({ keepId, removeId }),
   });
+}
+
+export interface VendorMerge {
+  id: string;
+  kept_vendor_id: string;
+  removed_vendor_id: string;
+  removed_vendor_name: string;
+  kept_vendor_name: string | null;
+  invoice_count: number;
+  merged_by: string | null;
+  merged_by_name: string | null;
+  merged_at: string;
+  reverted_at: string | null;
+  reverted_by: string | null;
+}
+
+export function getVendorMerges(includeReverted = false): Promise<VendorMerge[]> {
+  const q = includeReverted ? '?includeReverted=true' : '';
+  return apiFetch<VendorMerge[]>(`/vendors/merges${q}`);
+}
+
+export function revertVendorMerge(mergeId: string): Promise<{
+  ok: true;
+  restoredVendor: Vendor;
+  restoredInvoiceCount: number;
+}> {
+  return apiFetch(`/vendors/merges/${mergeId}/revert`, { method: 'POST' });
 }

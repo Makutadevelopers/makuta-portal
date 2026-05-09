@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requireRole } from '../middleware/rbac';
-import { getVendors, getVendor, createVendor, updateVendor, deleteVendor, getSimilar, getDuplicates, dismissDuplicate, mergeVendors, getVendorDetailHandler } from '../controllers/vendor.controller';
+import { getVendors, getVendor, createVendor, updateVendor, deleteVendor, getSimilar, getDuplicates, dismissDuplicate, mergeVendors, listVendorMerges, revertVendorMerge, getVendorDetailHandler } from '../controllers/vendor.controller';
 
 const router = Router();
 
@@ -19,7 +19,9 @@ router.post('/duplicates/dismiss', requireRole(['ho']), dismissDuplicate);
 router.get('/', getVendors);
 router.get('/:id/detail', requireRole(['ho', 'mgmt']), getVendorDetailHandler);
 router.get('/:id', getVendor);
-router.post('/merge', requireRole(['ho']), mergeVendors);
+router.post('/merge', requireRole(['ho', 'site']), mergeVendors);
+router.get('/merges', requireRole(['ho', 'mgmt', 'site']), listVendorMerges);
+router.post('/merges/:id/revert', requireRole(['ho', 'site']), revertVendorMerge);
 router.post('/', requireRole(['ho', 'site']), createVendor);
 router.patch('/:id', requireRole(['ho', 'site']), updateVendor);
 router.delete('/:id', requireRole(['ho', 'site']), deleteVendor);

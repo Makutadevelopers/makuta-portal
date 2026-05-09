@@ -448,46 +448,230 @@ export async function dismissDuplicatePair(
 // ── Vendor merge ───────────────────────────────────────────────────────────
 
 export interface MergeResult {
+  mergeId: string;
   keptVendor: VendorRow;
   repointedCount: number;
   removedName: string;
 }
 
-export async function mergeVendors(keepId: string, removeId: string): Promise<MergeResult | null> {
+interface InvoiceChange {
+  invoice_id: string;
+  prev_vendor_id: string | null;
+  prev_vendor_name: string;
+}
+
+export async function mergeVendors(
+  keepId: string,
+  removeId: string,
+  mergedByUserId: string
+): Promise<MergeResult | null> {
   const keepVendor = await getVendorById(keepId);
   const removeVendor = await getVendorById(removeId);
-
   if (!keepVendor || !removeVendor) return null;
 
-  // Re-point invoices by vendor_id.
-  // Also rewrite the denormalized vendor_name so the "unmastered vendors"
-  // banner on Vendor Master doesn't keep resurfacing the old/variant name
-  // after a merge (the invoice text is a denormalized copy, not an FK).
-  const byId = await query<{ id: string }>(
+  // Snapshot every invoice that's about to be re-pointed, so revert can put
+  // each one back to exactly the vendor_id / vendor_name it had before.
+  // Two paths: rows linked by vendor_id (the canonical case) and rows linked
+  // only by the denormalised vendor_name (legacy / unmastered rows).
+  const byIdRows = await query<{ id: string; vendor_id: string | null; vendor_name: string }>(
+    `SELECT id, vendor_id, vendor_name FROM invoices WHERE vendor_id = $1`,
+    [removeId]
+  );
+  const byNameRows = await query<{ id: string; vendor_id: string | null; vendor_name: string }>(
+    `SELECT id, vendor_id, vendor_name FROM invoices
+     WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM($1)) AND vendor_id IS DISTINCT FROM $2`,
+    [removeVendor.name, keepId]
+  );
+
+  const seen = new Set<string>();
+  const invoiceChanges: InvoiceChange[] = [];
+  for (const r of [...byIdRows, ...byNameRows]) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    invoiceChanges.push({
+      invoice_id: r.id,
+      prev_vendor_id: r.vendor_id,
+      prev_vendor_name: r.vendor_name,
+    });
+  }
+
+  // Re-point by vendor_id.
+  await query(
     `UPDATE invoices
      SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
-     WHERE vendor_id = $3
-     RETURNING id`,
+     WHERE vendor_id = $3`,
     [keepId, keepVendor.name, removeId]
   );
 
-  // Re-point invoices by vendor_name (catches unlinked rows matching the removed vendor).
-  // IS DISTINCT FROM handles NULL vendor_id correctly (plain != would skip NULLs).
-  const byName = await query<{ id: string }>(
+  // Re-point by vendor_name (catches unlinked rows matching the removed vendor).
+  await query(
     `UPDATE invoices SET vendor_name = $1, vendor_id = $2, updated_at = NOW()
-     WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM($3)) AND vendor_id IS DISTINCT FROM $2
-     RETURNING id`,
+     WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM($3)) AND vendor_id IS DISTINCT FROM $2`,
     [keepVendor.name, keepId, removeVendor.name]
   );
 
-  // Delete the removed vendor
+  // Delete the removed vendor.  Cascades clean up vendor_dedup_dismissed
+  // rows that reference this UUID; those won't be restored on revert
+  // (intentional — dismissals are advisory and easy to redo).
   await query('DELETE FROM vendors WHERE id = $1', [removeId]);
 
-  // Unique count of re-pointed invoices
-  const uniqueIds = new Set([...byId.map(r => r.id), ...byName.map(r => r.id)]);
+  // Persist the merge so it can be reverted.
+  const inserted = await queryOne<{ id: string }>(
+    `INSERT INTO vendor_merges (
+       kept_vendor_id, removed_vendor_id, removed_vendor_snapshot,
+       invoice_changes, merged_by
+     ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5)
+     RETURNING id`,
+    [
+      keepId,
+      removeId,
+      JSON.stringify(removeVendor),
+      JSON.stringify(invoiceChanges),
+      mergedByUserId,
+    ]
+  );
+
   return {
+    mergeId: inserted!.id,
     keptVendor: keepVendor,
-    repointedCount: uniqueIds.size,
+    repointedCount: invoiceChanges.length,
     removedName: removeVendor.name,
   };
+}
+
+// ── Revert ────────────────────────────────────────────────────────────────
+
+export interface VendorMergeRow {
+  id: string;
+  kept_vendor_id: string;
+  removed_vendor_id: string;
+  removed_vendor_snapshot: VendorRow;
+  invoice_changes: InvoiceChange[];
+  merged_by: string | null;
+  merged_at: string;
+  reverted_at: string | null;
+  reverted_by: string | null;
+}
+
+export async function getVendorMergeById(id: string): Promise<VendorMergeRow | null> {
+  return queryOne<VendorMergeRow>(
+    `SELECT id, kept_vendor_id, removed_vendor_id, removed_vendor_snapshot,
+            invoice_changes, merged_by, merged_at, reverted_at, reverted_by
+     FROM vendor_merges WHERE id = $1`,
+    [id]
+  );
+}
+
+export interface RevertResult {
+  restoredVendor: VendorRow;
+  restoredInvoiceCount: number;
+}
+
+export async function revertVendorMerge(
+  mergeId: string,
+  revertedByUserId: string
+): Promise<RevertResult | null> {
+  const merge = await getVendorMergeById(mergeId);
+  if (!merge || merge.reverted_at) return null;
+
+  const snap = merge.removed_vendor_snapshot;
+
+  // Re-create the removed vendor with the same UUID.  Use ON CONFLICT DO
+  // NOTHING in case a vendor with that ID somehow still exists (shouldn't,
+  // but cheap insurance).
+  const restored = await queryOne<VendorRow>(
+    `INSERT INTO vendors (
+       id, name, payment_terms, category, gstin, contact_name,
+       phone, email, notes, created_by, created_at, updated_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+     ON CONFLICT (id) DO UPDATE SET
+       name = EXCLUDED.name,
+       payment_terms = EXCLUDED.payment_terms,
+       category = EXCLUDED.category,
+       gstin = EXCLUDED.gstin,
+       contact_name = EXCLUDED.contact_name,
+       phone = EXCLUDED.phone,
+       email = EXCLUDED.email,
+       notes = EXCLUDED.notes,
+       updated_at = NOW()
+     RETURNING *`,
+    [
+      snap.id, snap.name, snap.payment_terms, snap.category, snap.gstin,
+      snap.contact_name, snap.phone, snap.email, snap.notes, snap.created_by,
+      snap.created_at,
+    ]
+  );
+
+  // Restore each invoice's previous vendor link.
+  for (const ch of merge.invoice_changes) {
+    await query(
+      `UPDATE invoices
+       SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
+       WHERE id = $3`,
+      [ch.prev_vendor_id, ch.prev_vendor_name, ch.invoice_id]
+    );
+  }
+
+  await query(
+    `UPDATE vendor_merges SET reverted_at = NOW(), reverted_by = $1 WHERE id = $2`,
+    [revertedByUserId, mergeId]
+  );
+
+  return {
+    restoredVendor: restored!,
+    restoredInvoiceCount: merge.invoice_changes.length,
+  };
+}
+
+// ── List ──────────────────────────────────────────────────────────────────
+
+export interface VendorMergeListItem {
+  id: string;
+  kept_vendor_id: string;
+  removed_vendor_id: string;
+  removed_vendor_name: string;
+  kept_vendor_name: string | null;
+  invoice_count: number;
+  merged_by: string | null;
+  merged_by_name: string | null;
+  merged_at: string;
+  reverted_at: string | null;
+  reverted_by: string | null;
+}
+
+export async function listVendorMerges(opts: {
+  onlyUserId?: string;
+  includeReverted?: boolean;
+  limit?: number;
+}): Promise<VendorMergeListItem[]> {
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
+
+  if (opts.onlyUserId) {
+    conditions.push(`vm.merged_by = $${idx++}`);
+    values.push(opts.onlyUserId);
+  }
+  if (!opts.includeReverted) {
+    conditions.push('vm.reverted_at IS NULL');
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
+  values.push(limit);
+
+  return query<VendorMergeListItem>(
+    `SELECT vm.id, vm.kept_vendor_id, vm.removed_vendor_id,
+            (vm.removed_vendor_snapshot->>'name') AS removed_vendor_name,
+            v.name AS kept_vendor_name,
+            jsonb_array_length(vm.invoice_changes) AS invoice_count,
+            vm.merged_by, u.name AS merged_by_name,
+            vm.merged_at, vm.reverted_at, vm.reverted_by
+     FROM vendor_merges vm
+     LEFT JOIN vendors v ON v.id = vm.kept_vendor_id
+     LEFT JOIN users u ON u.id = vm.merged_by
+     ${where}
+     ORDER BY vm.merged_at DESC
+     LIMIT $${idx}`,
+    values
+  );
 }

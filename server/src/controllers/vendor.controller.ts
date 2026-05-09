@@ -17,6 +17,9 @@ import {
   findAllDuplicatePairs,
   dismissDuplicatePair,
   mergeVendors as mergeVendorsService,
+  revertVendorMerge as revertVendorMergeService,
+  listVendorMerges as listVendorMergesService,
+  getVendorMergeById,
   getVendorDetail as getVendorDetailService,
 } from '../services/vendor.service';
 import { logAudit } from '../services/audit.service';
@@ -287,7 +290,25 @@ export async function mergeVendors(
       return;
     }
 
-    const result = await mergeVendorsService(keepId, removeId);
+    // Site accountants can only merge a vendor they themselves created — same
+    // boundary as their delete permission. The "kept" target may be any
+    // vendor (consistent with how merge UX works).
+    if (req.user!.role === 'site') {
+      const removeVendor = await getVendorById(removeId);
+      if (!removeVendor) {
+        res.status(404).json({ error: 'Not Found', message: 'Vendor to remove not found' });
+        return;
+      }
+      if (removeVendor.created_by !== req.user!.id) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'You can only merge vendors you originally created. Ask HO to merge this one.',
+        });
+        return;
+      }
+    }
+
+    const result = await mergeVendorsService(keepId, removeId, req.user!.id);
     if (!result) {
       res.status(404).json({ error: 'Not Found', message: 'One or both vendors not found' });
       return;
@@ -296,13 +317,93 @@ export async function mergeVendors(
     await logAudit({
       userId: req.user!.id,
       action: `Merged vendor "${result.removedName}" into "${result.keptVendor.name}" (${result.repointedCount} invoice${result.repointedCount === 1 ? '' : 's'} re-pointed)`,
-      metadata: { keepId, removeId, repointedCount: result.repointedCount, removedName: result.removedName },
+      metadata: {
+        mergeId: result.mergeId,
+        keepId,
+        removeId,
+        repointedCount: result.repointedCount,
+        removedName: result.removedName,
+      },
     });
 
     res.json({
       ...result.keptVendor,
+      mergeId: result.mergeId,
       repointedCount: result.repointedCount,
       removedName: result.removedName,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── Revert + list ─────────────────────────────────────────────────────────
+
+export async function listVendorMerges(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const role = req.user!.role;
+    const includeReverted = req.query.includeReverted === 'true';
+    const merges = await listVendorMergesService({
+      // Site accountants only see their own merges.  HO/mgmt see everything.
+      onlyUserId: role === 'site' ? req.user!.id : undefined,
+      includeReverted,
+      limit: 100,
+    });
+    res.json(merges);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function revertVendorMerge(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const id = req.params.id as string;
+    const merge = await getVendorMergeById(id);
+    if (!merge) {
+      res.status(404).json({ error: 'Not Found', message: 'Merge record not found' });
+      return;
+    }
+    if (merge.reverted_at) {
+      res.status(409).json({ error: 'Conflict', message: 'This merge has already been reverted' });
+      return;
+    }
+    if (req.user!.role === 'site' && merge.merged_by !== req.user!.id) {
+      res.status(403).json({
+        error: 'Forbidden',
+        message: 'You can only revert merges you performed. Ask HO to revert this one.',
+      });
+      return;
+    }
+
+    const result = await revertVendorMergeService(id, req.user!.id);
+    if (!result) {
+      res.status(409).json({ error: 'Conflict', message: 'Could not revert merge' });
+      return;
+    }
+
+    await logAudit({
+      userId: req.user!.id,
+      action: `Reverted vendor merge — restored "${result.restoredVendor.name}" (${result.restoredInvoiceCount} invoice${result.restoredInvoiceCount === 1 ? '' : 's'} re-pointed back)`,
+      metadata: {
+        mergeId: id,
+        restoredVendorId: result.restoredVendor.id,
+        restoredVendorName: result.restoredVendor.name,
+        restoredInvoiceCount: result.restoredInvoiceCount,
+      },
+    });
+
+    res.json({
+      ok: true,
+      restoredVendor: result.restoredVendor,
+      restoredInvoiceCount: result.restoredInvoiceCount,
     });
   } catch (err) {
     next(err);
