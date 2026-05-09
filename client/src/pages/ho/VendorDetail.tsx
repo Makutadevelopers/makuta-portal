@@ -1,9 +1,12 @@
-import { useState, useEffect, useMemo, Fragment } from 'react';
+import { useState, useEffect, useMemo, Fragment, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getVendorDetail, VendorDetailResponse } from '../../api/vendors';
+import { deleteInvoice } from '../../api/invoices';
 import { getVendorCreditBalance } from '../../api/creditNotes';
 import { VendorCreditBalance } from '../../types/creditNote';
 import { formatINR, formatDate } from '../../utils/formatters';
+import { useAuth } from '../../hooks/useAuth';
+import { useToast } from '../../context/ToastContext';
 import AppShell from '../../components/layout/AppShell';
 
 type StatusFilter = 'All' | 'Paid' | 'Partial' | 'Not Paid';
@@ -21,8 +24,12 @@ export default function VendorDetail() {
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
   const [showAllFiles, setShowAllFiles] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const { user } = useAuth();
+  const { notify } = useToast();
+  const isHO = user?.role === 'ho';
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     if (!id) return;
     setLoading(true);
     setError('');
@@ -32,6 +39,8 @@ export default function VendorDetail() {
       .finally(() => setLoading(false));
     getVendorCreditBalance(id).then(setCreditBalance).catch(() => setCreditBalance(null));
   }, [id]);
+
+  useEffect(() => { reload(); }, [reload]);
 
   // Hooks must run unconditionally on every render — keep this above the
   // loading/error early-returns so the hook count stays stable. The previous
@@ -116,6 +125,26 @@ export default function VendorDetail() {
       }
       return next;
     });
+  }
+
+  async function handleDelete(invId: string, invoiceNo: string | null) {
+    if (!confirm(`Delete invoice ${invoiceNo ? `#${invoiceNo}` : ''}? It will move to the bin and can be restored from there.`)) return;
+    setDeletingId(invId);
+    try {
+      await deleteInvoice(invId);
+      notify('Invoice moved to bin');
+      setSelectedIds(prev => {
+        if (!prev.has(invId)) return prev;
+        const next = new Set(prev);
+        next.delete(invId);
+        return next;
+      });
+      reload();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to delete invoice');
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   const statusCounts = {
@@ -352,6 +381,7 @@ export default function VendorDetail() {
                     {h}
                   </th>
                 ))}
+                {isHO && <th className="px-4 py-2.5 w-20 text-right font-medium text-gray-500 whitespace-nowrap">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -411,10 +441,23 @@ export default function VendorDetail() {
                           <span className="text-xs text-gray-300">—</span>
                         )}
                       </td>
+                      {isHO && (
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(inv.id, inv.invoice_no)}
+                            disabled={deletingId === inv.id}
+                            className="text-xs text-red-600 hover:bg-red-50 rounded px-2 py-1 disabled:opacity-50"
+                            title="Move this invoice to the bin"
+                          >
+                            {deletingId === inv.id ? 'Deleting…' : 'Delete'}
+                          </button>
+                        </td>
+                      )}
                     </tr>
                     {expanded && hasFiles && (
                       <tr className="bg-gray-50/60 border-t border-gray-100">
-                        <td colSpan={11} className="px-4 py-3">
+                        <td colSpan={isHO ? 12 : 11} className="px-4 py-3">
                           <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">
                             Attachments for invoice {inv.invoice_no || '—'}
                           </div>
@@ -458,7 +501,7 @@ export default function VendorDetail() {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-4 py-10 text-center text-gray-400 text-sm">
+                  <td colSpan={isHO ? 12 : 11} className="px-4 py-10 text-center text-gray-400 text-sm">
                     {invoices.length === 0 ? 'No invoices for this vendor.' : 'No invoices match the selected filter.'}
                   </td>
                 </tr>
