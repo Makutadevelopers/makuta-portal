@@ -14,8 +14,12 @@ invoices. Head Office processes payments. MD views executive dashboards.
 
 ## Key business rules (enforce these rigorously)
 - Site accountants see the payment_status badge (Paid / Partial / Not Paid)
-  for their own site's invoices, but NOT paid/unpaid amounts or aging data
-  (total_paid, balance, days_past_due, overdue stay HO+mgmt only)
+  AND the outstanding balance for their own site's invoices, so the site
+  dashboard can surface "outstanding per project". Aging data
+  (total_paid, days_past_due, overdue) stays HO+mgmt only.
+- Site accountants can open Vendor Master → Vendor Detail; the invoices
+  and stats shown there are scoped to their assigned sites only (never
+  another project's data) and the per-row Delete action is hidden.
 - Minor payments ≤ ₹50,000 can be processed by site accountants directly
 - Payments above ₹50,000 are HO-only
 - One invoice can have MULTIPLE part-payments (payments[] array)

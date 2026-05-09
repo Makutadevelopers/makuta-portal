@@ -78,19 +78,20 @@ export default function SiteDashboard() {
     : (user?.site ? [user.site] : []);
   const isMulti = userSites.length > 1;
 
-  // Per-site breakdown (multi-site only)
+  // Per-site breakdown — render even for single-site accountants so the
+  // "outstanding per project" surfaces on every site dashboard.
   const perSite = useMemo(() => {
-    if (!isMulti) return [];
-    const map = new Map<string, { count: number; total: number }>();
-    for (const s of userSites) map.set(s, { count: 0, total: 0 });
+    const map = new Map<string, { count: number; total: number; outstanding: number }>();
+    for (const s of userSites) map.set(s, { count: 0, total: 0, outstanding: 0 });
     for (const inv of invoices) {
       const cur = map.get(inv.site);
       if (!cur) continue;
       cur.count += 1;
       cur.total += Number(inv.invoice_amount);
+      cur.outstanding += Number(inv.balance ?? 0);
     }
-    return userSites.map(s => ({ site: s, ...(map.get(s) ?? { count: 0, total: 0 }) }));
-  }, [invoices, isMulti, userSites]);
+    return userSites.map(s => ({ site: s, ...(map.get(s) ?? { count: 0, total: 0, outstanding: 0 }) }));
+  }, [invoices, userSites]);
 
   return (
     <AppShell>
@@ -105,13 +106,23 @@ export default function SiteDashboard() {
         </div>
       </div>
 
-      {isMulti && perSite.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+      {perSite.length > 0 && (
+        <div className={`grid gap-3 mb-5 ${isMulti ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'}`}>
           {perSite.map(s => (
             <div key={s.site} className="bg-blue-50/50 border border-blue-100 rounded-xl p-3">
               <div className="text-[10px] font-medium uppercase tracking-wider text-[#1a3c5e] mb-1">{s.site}</div>
-              <div className="text-base font-semibold text-[#1a3c5e]">{formatINR(s.total)}</div>
-              <div className="text-[11px] text-[#1a3c5e] opacity-70">{s.count} invoice{s.count === 1 ? '' : 's'}</div>
+              <div className="flex items-baseline justify-between gap-3">
+                <div>
+                  <div className="text-base font-semibold text-[#1a3c5e]">{formatINR(s.total)}</div>
+                  <div className="text-[11px] text-[#1a3c5e] opacity-70">{s.count} invoice{s.count === 1 ? '' : 's'} invoiced</div>
+                </div>
+                <div className="text-right">
+                  <div className={`text-base font-semibold ${s.outstanding > 0 ? 'text-red-600' : 'text-green-700'}`}>
+                    {formatINR(s.outstanding)}
+                  </div>
+                  <div className="text-[11px] text-gray-500">outstanding</div>
+                </div>
+              </div>
             </div>
           ))}
         </div>

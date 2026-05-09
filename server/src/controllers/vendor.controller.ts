@@ -207,7 +207,20 @@ export async function getVendorDetailHandler(
   next: NextFunction
 ): Promise<void> {
   try {
-    const detail = await getVendorDetailService(req.params.id as string);
+    // Site role can view vendor detail too, but their invoice list and the
+    // accompanying stats must be scoped to the sites they're assigned to —
+    // they should never see a row from another project.
+    let siteFilter: string[] | undefined;
+    if (req.user!.role === 'site') {
+      siteFilter = (req.user!.sites && req.user!.sites.length > 0)
+        ? req.user!.sites
+        : (req.user!.site ? [req.user!.site] : []);
+      if (siteFilter.length === 0) {
+        res.status(403).json({ error: 'Forbidden', message: 'No sites assigned to this account' });
+        return;
+      }
+    }
+    const detail = await getVendorDetailService(req.params.id as string, { siteFilter });
     if (!detail) {
       res.status(404).json({ error: 'Not Found', message: 'Vendor not found' });
       return;

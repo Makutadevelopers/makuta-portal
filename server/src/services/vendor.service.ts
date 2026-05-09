@@ -186,9 +186,21 @@ interface AttachmentRow {
   uploaded_at: string;
 }
 
-export async function getVendorDetail(id: string): Promise<VendorDetailResult | null> {
+export async function getVendorDetail(
+  id: string,
+  opts: { siteFilter?: string[] } = {}
+): Promise<VendorDetailResult | null> {
   const vendor = await getVendorById(id);
   if (!vendor) return null;
+
+  // Site role passes a list of assigned sites; HO/mgmt pass nothing and see
+  // every invoice for the vendor.
+  const params: unknown[] = [id];
+  let siteClause = '';
+  if (opts.siteFilter && opts.siteFilter.length > 0) {
+    params.push(opts.siteFilter);
+    siteClause = `AND i.site = ANY($${params.length}::text[])`;
+  }
 
   const invoiceRows = await query<Omit<VendorDetailInvoice, 'attachments'>>(
     `SELECT
@@ -206,8 +218,9 @@ export async function getVendorDetail(id: string): Promise<VendorDetailResult | 
      FROM invoices i
      WHERE i.vendor_id = $1
        AND i.deleted_at IS NULL
+       ${siteClause}
      ORDER BY i.invoice_date DESC`,
-    [id]
+    params
   );
 
   const invoiceIds = invoiceRows.map(r => r.id);

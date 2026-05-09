@@ -22,7 +22,7 @@ router.get('/merges', requireRole(['ho', 'mgmt', 'site']), listVendorMerges);
 router.post('/merge', requireRole(['ho', 'site']), mergeVendors);
 router.post('/merges/:id/revert', requireRole(['ho', 'site']), revertVendorMerge);
 router.get('/', getVendors);
-router.get('/:id/detail', requireRole(['ho', 'mgmt']), getVendorDetailHandler);
+router.get('/:id/detail', requireRole(['ho', 'mgmt', 'site']), getVendorDetailHandler);
 router.get('/:id', getVendor);
 router.post('/', requireRole(['ho', 'site']), createVendor);
 router.patch('/:id', requireRole(['ho', 'site']), updateVendor);
