@@ -93,7 +93,7 @@ export async function updateVendor(
   id: string,
   data: UpdateVendorInput,
   _userId: string
-): Promise<VendorRow | null> {
+): Promise<{ vendor: VendorRow; invoicesRecategorised: number } | null> {
   const ALLOWED_FIELDS = [
     'name', 'payment_terms', 'category', 'gstin',
     'contact_name', 'phone', 'email', 'notes',
@@ -118,13 +118,40 @@ export async function updateVendor(
   fields.push('updated_at = NOW()');
   values.push(id);
 
-  return queryOne<VendorRow>(
+  const updated = await queryOne<VendorRow>(
     `UPDATE vendors
      SET ${fields.join(', ')}
      WHERE id = $${paramIndex}
      RETURNING *`,
     values
   );
+
+  if (!updated) return null;
+
+  // Cascade category change to all live invoices for this vendor — invoice
+  // .purpose is a denormalised copy of vendors.category, and the rest of the
+  // app (dashboards, exports, category-mismatch validation on edit) trusts
+  // the invoice row. Skip if the new category is null/blank or hasn't moved.
+  let invoicesRecategorised = 0;
+  if (
+    data.category !== undefined &&
+    typeof data.category === 'string' &&
+    data.category.trim()
+  ) {
+    const newCategory = data.category.trim();
+    const repointed = await query<{ id: string }>(
+      `UPDATE invoices
+       SET purpose = $1, updated_at = NOW()
+       WHERE vendor_id = $2
+         AND deleted_at IS NULL
+         AND purpose IS DISTINCT FROM $1
+       RETURNING id`,
+      [newCategory, id]
+    );
+    invoicesRecategorised = repointed.length;
+  }
+
+  return { vendor: updated, invoicesRecategorised };
 }
 
 export async function deleteVendor(id: string): Promise<VendorRow | null> {

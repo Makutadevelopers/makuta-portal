@@ -168,7 +168,13 @@ export default function VendorMaster() {
           vendor={null}
           initialName={initialName}
           onCancel={() => { setShowForm(false); setInitialName(''); }}
-          onSaved={() => { setShowForm(false); setInitialName(''); notify('Vendor added'); refresh(); }}
+          onSaved={meta => {
+            setShowForm(false);
+            setInitialName('');
+            const recat = meta?.invoicesRecategorised ?? 0;
+            notify(recat > 0 ? `Vendor added · ${recat} invoice${recat === 1 ? '' : 's'} recategorised` : 'Vendor added');
+            refresh();
+          }}
           onMerged={() => { setShowForm(false); setInitialName(''); notify('Vendors merged'); refresh(); }}
         />
       )}
@@ -319,7 +325,12 @@ export default function VendorMaster() {
                             key={`edit-${v.id}`}
                             vendor={v}
                             onCancel={() => setExpandedEditId(null)}
-                            onSaved={() => { setExpandedEditId(null); notify('Vendor updated'); refresh(); }}
+                            onSaved={meta => {
+                              setExpandedEditId(null);
+                              const recat = meta?.invoicesRecategorised ?? 0;
+                              notify(recat > 0 ? `Vendor updated · ${recat} invoice${recat === 1 ? '' : 's'} recategorised` : 'Vendor updated');
+                              refresh();
+                            }}
                             onMerged={() => { setExpandedEditId(null); notify('Vendors merged'); refresh(); }}
                           />
                         </td>
@@ -341,10 +352,15 @@ export default function VendorMaster() {
 
 // ── Vendor Form ─────────────────────────────────────────────────────────────
 function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
+  // onSaved gets the count of invoices whose category was rewritten as a
+  // side-effect of editing the vendor's category — empty for create, often
+  // 0 for edits that didn't move category. Parent decides whether to
+  // surface that in the toast.
+
   vendor: Vendor | null;
   initialName?: string;
   onCancel: () => void;
-  onSaved: () => void;
+  onSaved: (meta?: { invoicesRecategorised?: number }) => void;
   onMerged: () => void;
 }) {
   const isEdit = !!vendor;
@@ -408,11 +424,12 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
     setError('');
     try {
       if (isEdit) {
-        await updateVendor(vendor.id, data);
+        const res = await updateVendor(vendor.id, data);
+        onSaved({ invoicesRecategorised: res.invoicesRecategorised });
       } else {
         await createVendor(data);
+        onSaved();
       }
-      onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
