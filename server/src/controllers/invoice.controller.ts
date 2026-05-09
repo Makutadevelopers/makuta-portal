@@ -14,6 +14,7 @@ import { logAudit } from '../services/audit.service';
 import { notifyInvoicePushed } from '../services/email.service';
 import { deleteInvoiceFilesFromDisk } from './attachment.controller';
 import { userHasSite } from '../middleware/auth';
+import { normaliseSiteName } from '../utils/sites';
 
 // ISO date YYYY-MM-DD (strict — rejects "banana", "2026/04/01", partial dates, etc.)
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
@@ -120,6 +121,10 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
   try {
     const data = createInvoiceSchema.parse(req.body);
     const { role, id: userId } = req.user!;
+
+    // Snap site name to canonical capitalisation so "Nirvana" and "nirvana"
+    // can't both end up in the invoices table.
+    data.site = normaliseSiteName(data.site);
 
     // Site accountants can only create invoices for sites they're assigned to.
     if (role === 'site' && !userHasSite(req.user, data.site)) {
@@ -254,6 +259,11 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
     const id = req.params.id as string;
     const data = updateInvoiceSchema.parse(req.body);
     const { role, site } = req.user!;
+
+    // Same site-name normalisation as create.
+    if (data.site !== undefined) {
+      data.site = normaliseSiteName(data.site);
+    }
 
     // Verify invoice exists (excludes soft-deleted), check site ownership, and finalized status
     const existing = await queryOne<InvoiceRow>(
