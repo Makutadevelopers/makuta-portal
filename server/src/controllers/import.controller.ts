@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import { query, queryOne } from '../db/query';
 import { logAudit } from '../services/audit.service';
 import { paymentStatusCase, recomputeInvoiceStatus } from '../services/payment.service';
+import { normaliseSiteName } from '../utils/sites';
 
 interface CsvRow {
   [key: string]: string;
@@ -210,7 +211,7 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
   const invoiceNo = row['invoice_no'] || row['Invoice no'] || row['Invoice No'] || row['Invoice Number'] || '';
   const poNumber = row['po_number'] || row['PO Number'] || row['PO No'] || '';
   const purpose = row['purpose'] || row['Purpose'] || row['Head'] || row['Category'] || '';
-  const site = row['site'] || row['Site'] || row['Site Location'] || '';
+  const site = normaliseSiteName(row['site'] || row['Site'] || row['Site Location'] || '');
   const amountStr = row['invoice_amount'] || row['Invoice amount'] || row['Invoice Amount'] || row['Amount'] || '0';
   // Optional tax split — if any of these are present we use them; otherwise fall
   // back to amount-as-base with zero taxes (legacy behaviour).
@@ -719,7 +720,7 @@ export async function importPayments(req: Request, res: Response, next: NextFunc
         const rawPaymentMonth = row['Payment Month'] || row['payment_month'] || '';
         const poNumber = row['po_number'] || row['PO Number'] || row['PO No'] || '';
         const purpose = row['purpose'] || row['Purpose'] || row['Head'] || row['Category'] || '';
-        const site = row['site'] || row['Site'] || row['Site Location'] || '';
+        const site = normaliseSiteName(row['site'] || row['Site'] || row['Site Location'] || '');
 
         // Parse dates robustly
         const paymentDate = parseDate(rawPaymentDate) || parseDate(rawInvoiceDate) || new Date().toISOString().split('T')[0];
