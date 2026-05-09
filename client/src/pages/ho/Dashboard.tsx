@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useDashboardData, Kpis, SiteRow, DueSoonRow, VendorOverdue, CategorySpend, MonthTrend } from '../../hooks/useDashboardData';
-import { getDuplicateVendors, mergeVendors, DuplicatePair } from '../../api/vendors';
+import { getDuplicateVendors, mergeVendors, dismissDuplicateVendorPair, DuplicatePair } from '../../api/vendors';
 import { formatINR, formatDate } from '../../utils/formatters';
 import AppShell from '../../components/layout/AppShell';
 import { useToast } from '../../context/ToastContext';
@@ -175,22 +175,9 @@ function KpiCards({ kpis, periodLabel }: { kpis: Kpis; periodLabel: string }) {
 }
 
 // ── Vendor Dedup Alert Panel ────────────────────────────────────────────────
-const DISMISSED_DUPES_KEY = 'makuta:dismissed-vendor-dupes';
-
-function loadDismissedFromStorage(): Set<string> {
-  try {
-    const raw = window.localStorage.getItem(DISMISSED_DUPES_KEY);
-    if (!raw) return new Set();
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? new Set(arr.filter((x): x is string => typeof x === 'string')) : new Set();
-  } catch {
-    return new Set();
-  }
-}
 
 function VendorDedupPanel() {
   const [pairs, setPairs] = useState<DuplicatePair[]>([]);
-  const [dismissed, setDismissed] = useState<Set<string>>(() => loadDismissedFromStorage());
   const [merging, setMerging] = useState<string | null>(null);
   const { notify } = useToast();
 
@@ -205,28 +192,19 @@ function VendorDedupPanel() {
 
   useEffect(() => { loadPairs(); }, [loadPairs]);
 
-  const visible = pairs.filter(p => {
-    const key = [p.vendorA.id, p.vendorB.id].sort().join(':');
-    return !dismissed.has(key);
-  });
+  if (pairs.length === 0) return null;
 
-  if (visible.length === 0) return null;
-
-  function persistDismissed(next: Set<string>) {
-    try {
-      window.localStorage.setItem(DISMISSED_DUPES_KEY, JSON.stringify(Array.from(next)));
-    } catch {
-      // ignore quota / SecurityError; in-memory state still works for this session
-    }
-  }
-
-  function dismiss(pair: DuplicatePair) {
+  async function dismiss(pair: DuplicatePair) {
     const key = [pair.vendorA.id, pair.vendorB.id].sort().join(':');
-    setDismissed(prev => {
-      const next = new Set(prev).add(key);
-      persistDismissed(next);
-      return next;
-    });
+    // Hide immediately for snappy UX; server-side dismissal makes it permanent.
+    setPairs(prev => prev.filter(p => [p.vendorA.id, p.vendorB.id].sort().join(':') !== key));
+    try {
+      await dismissDuplicateVendorPair(pair.vendorA.id, pair.vendorB.id);
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Could not save dismissal');
+      // Re-fetch so state matches the server.
+      loadPairs();
+    }
   }
 
   async function handleMerge(keepId: string, removeId: string, keepName: string, pair: DuplicatePair) {
@@ -251,11 +229,11 @@ function VendorDedupPanel() {
       <div className="px-5 py-3 border-b border-amber-200">
         <div className="text-sm font-medium text-amber-800">Possible Duplicate Vendors</div>
         <div className="text-[11px] text-amber-700 mt-0.5">
-          {visible.length} pair{visible.length !== 1 ? 's' : ''} detected — review and merge if they are the same vendor
+          {pairs.length} pair{pairs.length !== 1 ? 's' : ''} detected — review and merge if they are the same vendor
         </div>
       </div>
       <div className="divide-y divide-amber-100">
-        {visible.map(pair => {
+        {pairs.map(pair => {
           const key = [pair.vendorA.id, pair.vendorB.id].sort().join(':');
           const isMerging = merging === key;
 

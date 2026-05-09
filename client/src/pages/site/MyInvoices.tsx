@@ -491,6 +491,15 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
     }
   }, [editInvoice]);
 
+  // When editing a legacy invoice whose stored purpose differs from its
+  // vendor's master category, snap purpose → vendor.category so the locked
+  // dropdown shows the right value and the server-side validation passes.
+  useEffect(() => {
+    if (!vendorId) return;
+    const v = localVendors.find(v => v.id === vendorId);
+    if (v?.category && v.category !== purpose) setPurpose(v.category);
+  }, [vendorId, localVendors, purpose]);
+
   // Persist draft on every change (new invoice only).
   // If the form has no user-entered content, remove the key so a fresh visit
   // doesn't show a "Draft restored" banner over an empty form.

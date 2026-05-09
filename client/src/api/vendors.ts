@@ -96,6 +96,13 @@ export function getDuplicateVendors(): Promise<DuplicatePair[]> {
   return apiFetch<DuplicatePair[]>('/vendors/duplicates');
 }
 
+export function dismissDuplicateVendorPair(vendorAId: string, vendorBId: string): Promise<{ ok: true }> {
+  return apiFetch<{ ok: true }>('/vendors/duplicates/dismiss', {
+    method: 'POST',
+    body: JSON.stringify({ vendorAId, vendorBId }),
+  });
+}
+
 export function mergeVendors(keepId: string, removeId: string): Promise<Vendor> {
   return apiFetch<Vendor>('/vendors/merge', {
     method: 'POST',

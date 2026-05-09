@@ -1163,6 +1163,15 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
     }
   }, [editInvoice]);
 
+  // When editing a legacy invoice whose stored purpose differs from its
+  // vendor's master category, snap purpose → vendor.category so the locked
+  // dropdown shows the right value and the server-side validation passes.
+  useEffect(() => {
+    if (!vendorId) return;
+    const v = localVendors.find(v => v.id === vendorId);
+    if (v?.category && v.category !== purpose) setPurpose(v.category);
+  }, [vendorId, localVendors, purpose]);
+
   function handleVendorChange(id: string) {
     setVendorId(id);
     const v = localVendors.find(v => v.id === id);
