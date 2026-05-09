@@ -347,16 +347,25 @@ async function findDuplicates(rows: NormalizedRow[]): Promise<Array<{
   for (const r of rows) {
     let existing: { id: string; invoice_no: string | null; invoice_amount: string; invoice_date: string } | null = null;
     if (r.invoiceNo) {
+      // Match by vendor_id (canonical) OR vendor_name (covers legacy rows
+      // where the invoice was never linked to a master vendor).
       existing = await queryOne(
-        `SELECT id, invoice_no, invoice_amount, invoice_date FROM invoices
-         WHERE invoice_no = $1 AND LOWER(TRIM(vendor_name)) = LOWER(TRIM($2)) AND deleted_at IS NULL`,
+        `SELECT i.id, i.invoice_no, i.invoice_amount, i.invoice_date FROM invoices i
+         LEFT JOIN vendors v ON v.id = i.vendor_id
+         WHERE LOWER(TRIM(i.invoice_no)) = LOWER(TRIM($1))
+           AND (LOWER(TRIM(v.name)) = LOWER(TRIM($2)) OR LOWER(TRIM(i.vendor_name)) = LOWER(TRIM($2)))
+           AND i.deleted_at IS NULL
+         LIMIT 1`,
         [r.invoiceNo, r.vendorName]
       );
     } else if (r.vendorName) {
       existing = await queryOne(
-        `SELECT id, invoice_no, invoice_amount, invoice_date FROM invoices
-         WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM($1))
-           AND invoice_amount = $2 AND invoice_date = $3 AND deleted_at IS NULL`,
+        `SELECT i.id, i.invoice_no, i.invoice_amount, i.invoice_date FROM invoices i
+         LEFT JOIN vendors v ON v.id = i.vendor_id
+         WHERE i.invoice_no IS NULL
+           AND (LOWER(TRIM(v.name)) = LOWER(TRIM($1)) OR LOWER(TRIM(i.vendor_name)) = LOWER(TRIM($1)))
+           AND i.invoice_amount = $2 AND i.invoice_date = $3 AND i.deleted_at IS NULL
+         LIMIT 1`,
         [r.vendorName, r.amount, r.invoiceDate]
       );
     }
@@ -396,17 +405,6 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
     // Mode: preview (dry-run, detect dupes), commit (actually write)
     // Default = preview so accidental uploads don't clobber data.
     const mode = (req.body?.mode as string) || 'preview';
-    // Row numbers (from the preview) that HO has explicitly confirmed as "yes, create these duplicates"
-    // Multer form-data gives us an array when the field appears multiple times, a string when it appears once.
-    const confirmedDuplicateRowsRaw = req.body?.confirmedDuplicates;
-    const confirmedAsArray: unknown[] = Array.isArray(confirmedDuplicateRowsRaw)
-      ? confirmedDuplicateRowsRaw
-      : confirmedDuplicateRowsRaw != null
-        ? [confirmedDuplicateRowsRaw]
-        : [];
-    const confirmedDuplicateRows = new Set<number>(
-      confirmedAsArray.map(n => Number(n)).filter(Number.isFinite)
-    );
 
     const callerRole = req.user!.role;
     const callerSites = (req.user!.sites && req.user!.sites.length > 0)
@@ -464,18 +462,24 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
       return;
     }
 
-    // Commit mode — write to DB
+    // Commit mode — write to DB. Duplicates (per-vendor invoice_no, or
+    // vendor+amount+date when invoice_no is blank) are unconditionally
+    // skipped — the strict business rule is that one vendor cannot have two
+    // invoices with the same invoice number, and there is no override path.
     const batchId = randomUUID();
     let imported = 0;
     let vendorsCreated = 0;
     const errors: string[] = [];
-    const forcedDuplicates: Array<{ row: number; invoiceNo: string; vendorName: string }> = [];
+    const skippedDuplicates: Array<{ row: number; invoiceNo: string; vendorName: string }> = [];
 
     for (const r of normalized) {
       try {
-        const isDup = duplicateRowNums.has(r.rowNum);
-        if (isDup && !confirmedDuplicateRows.has(r.rowNum)) {
-          // Duplicate that HO did NOT confirm → skip silently in commit mode
+        if (duplicateRowNums.has(r.rowNum)) {
+          skippedDuplicates.push({
+            row: r.rowNum,
+            invoiceNo: r.invoiceNo || '(no invoice no)',
+            vendorName: r.vendorName,
+          });
           continue;
         }
 
@@ -594,20 +598,6 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
           );
         }
 
-        if (isDup) {
-          forcedDuplicates.push({ row: r.rowNum, invoiceNo: r.invoiceNo || '(no invoice no)', vendorName: r.vendorName });
-          // Log to alerts so the duplicate is visible later
-          await queryOne(
-            `INSERT INTO alerts (alert_type, title, message, metadata)
-             VALUES ('duplicate_invoice', $1, $2, $3)`,
-            [
-              `Duplicate invoice #${r.invoiceNo || '(none)'} (force-imported)`,
-              `HO explicitly confirmed importing duplicate invoice #${r.invoiceNo || '(no invoice no)'} from "${r.vendorName}" during bulk upload.`,
-              JSON.stringify({ row: r.rowNum, batchId, vendorName: r.vendorName }),
-            ]
-          ).catch(() => { /* alerts are best-effort */ });
-        }
-
         imported++;
       } catch (err) {
         errors.push(`Row ${r.rowNum}: ${err instanceof Error ? err.message : 'unknown error'}`);
@@ -616,17 +606,23 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
 
     await logAudit({
       userId: req.user!.id,
-      action: `Bulk imported ${imported} invoices (${forcedDuplicates.length} confirmed duplicates, ${skippedRows.length} skipped)`,
-      metadata: { batchId, type: 'invoices', imported, forcedDuplicates: forcedDuplicates.length, skipped: skippedRows.length },
+      action: `Bulk imported ${imported} invoices (${skippedDuplicates.length} duplicates skipped, ${skippedRows.length} other skipped)`,
+      metadata: {
+        batchId,
+        type: 'invoices',
+        imported,
+        skippedDuplicates: skippedDuplicates.length,
+        skipped: skippedRows.length,
+      },
     });
 
     res.json({
       mode: 'commit',
-      message: `Imported ${imported} invoice${imported === 1 ? '' : 's'}${vendorsCreated > 0 ? ` (auto-created ${vendorsCreated} vendors)` : ''}${forcedDuplicates.length > 0 ? `, including ${forcedDuplicates.length} confirmed duplicate${forcedDuplicates.length === 1 ? '' : 's'}` : ''}`,
+      message: `Imported ${imported} invoice${imported === 1 ? '' : 's'}${vendorsCreated > 0 ? ` (auto-created ${vendorsCreated} vendors)` : ''}${skippedDuplicates.length > 0 ? `, skipped ${skippedDuplicates.length} duplicate${skippedDuplicates.length === 1 ? '' : 's'}` : ''}`,
       imported,
       total: records.length,
       batchId,
-      forcedDuplicates,
+      skippedDuplicates,
       skipped: skippedRows,
       errors: errors.slice(0, 20),
     });

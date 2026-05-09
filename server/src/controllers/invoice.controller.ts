@@ -46,8 +46,6 @@ const createInvoiceSchema = z.object({
   additional_charge_igst_pct: z.number().min(0).max(100).optional(),
   additional_charge_reason: z.string().max(500).nullable().optional(),
   remarks: z.string().max(2000).nullable().optional(),
-  // H5: client sets this to true only after user confirms the duplicate warning
-  confirm_duplicate: z.boolean().optional(),
 });
 
 const updateInvoiceSchema = createInvoiceSchema.partial();
@@ -152,30 +150,36 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
       }
     }
 
-    // H5: Duplicate check — same invoice_no + same vendor (case-insensitive), not deleted.
-    // If invoice_no is null/blank, fall back to vendor + amount + date match.
-    // By default we REFUSE to create and return 409 with the existing invoice info.
-    // The client can retry with `confirm_duplicate: true` to explicitly override.
+    // Strict per-vendor invoice number uniqueness — one vendor cannot have two
+    // invoices with the same invoice_no. Match by vendor_id first (canonical),
+    // and fall back to case-insensitive vendor_name to also catch legacy rows
+    // whose vendor_id was never linked. When invoice_no is blank, fall back to
+    // (vendor + amount + date) — the same heuristic the bulk import uses.
+    // No override path: the client cannot force-create a duplicate.
     const duplicate = data.invoice_no
       ? await queryOne<{ id: string; invoice_no: string | null; invoice_date: string; invoice_amount: string }>(
           `SELECT id, invoice_no, invoice_date, invoice_amount FROM invoices
-           WHERE invoice_no = $1 AND LOWER(TRIM(vendor_name)) = LOWER(TRIM($2)) AND deleted_at IS NULL`,
-          [data.invoice_no, data.vendor_name]
+           WHERE LOWER(TRIM(invoice_no)) = LOWER(TRIM($1))
+             AND (vendor_id = $2 OR (vendor_id IS NULL AND LOWER(TRIM(vendor_name)) = LOWER(TRIM($3))))
+             AND deleted_at IS NULL`,
+          [data.invoice_no, data.vendor_id, data.vendor_name]
         )
       : await queryOne<{ id: string; invoice_no: string | null; invoice_date: string; invoice_amount: string }>(
           `SELECT id, invoice_no, invoice_date, invoice_amount FROM invoices
            WHERE invoice_no IS NULL
-             AND LOWER(TRIM(vendor_name)) = LOWER(TRIM($1))
-             AND invoice_amount = $2
-             AND invoice_date = $3
+             AND (vendor_id = $1 OR (vendor_id IS NULL AND LOWER(TRIM(vendor_name)) = LOWER(TRIM($2))))
+             AND invoice_amount = $3
+             AND invoice_date = $4
              AND deleted_at IS NULL`,
-          [data.vendor_name, data.invoice_amount, data.invoice_date]
+          [data.vendor_id, data.vendor_name, data.invoice_amount, data.invoice_date]
         );
-    if (duplicate && !data.confirm_duplicate) {
+    if (duplicate) {
       res.status(409).json({
         error: 'Conflict',
         code: 'duplicate_invoice',
-        message: `Invoice #${data.invoice_no} already exists for vendor "${data.vendor_name}". Retry with confirm_duplicate=true to force.`,
+        message: data.invoice_no
+          ? `Invoice #${data.invoice_no} already exists for vendor "${data.vendor_name}". Each invoice number must be unique per vendor.`
+          : `An invoice for vendor "${data.vendor_name}" with the same date and amount already exists.`,
         existing: {
           id: duplicate.id,
           invoice_no: duplicate.invoice_no,
@@ -184,18 +188,6 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
         },
       });
       return;
-    }
-    if (duplicate && data.confirm_duplicate) {
-      // Still log an alert so HO can review forced duplicates later
-      await queryOne(
-        `INSERT INTO alerts (alert_type, title, message, metadata)
-         VALUES ('duplicate_invoice', $1, $2, $3)`,
-        [
-          `Duplicate invoice #${data.invoice_no} (force-created)`,
-          `Invoice #${data.invoice_no} from "${data.vendor_name}" was created even though a duplicate exists. User confirmed override.`,
-          JSON.stringify({ existingInvoiceId: duplicate.id, invoiceNo: data.invoice_no, vendorName: data.vendor_name, createdBy: userId }),
-        ]
-      );
     }
 
     // Generate internal tracking number
@@ -320,6 +312,39 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
             error: 'Bad Request',
             code: 'category_mismatch',
             message: `Category "${finalPurpose}" does not match vendor "${resolvedVendor.name}" (Vendor Master: "${resolvedVendor.category}")`,
+          });
+          return;
+        }
+      }
+    }
+
+    // Strict uniqueness on update: if invoice_no or vendor is changing, make
+    // sure the resulting (vendor, invoice_no) wouldn't collide with a sibling
+    // invoice. Same matching rules as createInvoice; rejects with 409, no
+    // override path.
+    if (data.invoice_no !== undefined || data.vendor_id !== undefined) {
+      const finalInvoiceNo = data.invoice_no !== undefined
+        ? data.invoice_no
+        : (existing.invoice_no as string | null);
+      const finalVendorId = data.vendor_id !== undefined
+        ? data.vendor_id
+        : (existing.vendor_id as string | null);
+      const finalVendorName = (resolvedVendor?.name ?? (existing.vendor_name as string)) || '';
+      if (finalInvoiceNo && finalInvoiceNo.trim()) {
+        const collision = await queryOne<{ id: string; invoice_no: string | null }>(
+          `SELECT id, invoice_no FROM invoices
+           WHERE id <> $1
+             AND LOWER(TRIM(invoice_no)) = LOWER(TRIM($2))
+             AND (vendor_id = $3 OR (vendor_id IS NULL AND LOWER(TRIM(vendor_name)) = LOWER(TRIM($4))))
+             AND deleted_at IS NULL`,
+          [id, finalInvoiceNo, finalVendorId, finalVendorName]
+        );
+        if (collision) {
+          res.status(409).json({
+            error: 'Conflict',
+            code: 'duplicate_invoice',
+            message: `Invoice #${finalInvoiceNo} already exists for vendor "${finalVendorName}". Each invoice number must be unique per vendor.`,
+            existing: { id: collision.id, invoice_no: collision.invoice_no },
           });
           return;
         }

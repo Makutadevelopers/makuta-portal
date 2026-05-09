@@ -34,7 +34,7 @@ interface CommitResult {
   imported: number;
   total: number;
   batchId: string;
-  forcedDuplicates: Array<{ row: number; invoiceNo: string; vendorName: string }>;
+  skippedDuplicates: Array<{ row: number; invoiceNo: string; vendorName: string }>;
   skipped: SkippedRow[];
   errors: string[];
 }
@@ -58,7 +58,6 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
 
   // Invoice flow state
   const [preview, setPreview] = useState<PreviewResult | null>(null);
-  const [confirmedDupRows, setConfirmedDupRows] = useState<Set<number>>(new Set());
   const [commitResult, setCommitResult] = useState<CommitResult | null>(null);
 
   // Vendor flow state
@@ -78,7 +77,6 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
   function resetState() {
     setFile(null);
     setPreview(null);
-    setConfirmedDupRows(new Set());
     setCommitResult(null);
     setVendorResult(null);
     setErrorMsg(null);
@@ -122,7 +120,6 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
       // No `mode` field → server defaults to preview
       const res = await apiFetch<PreviewResult>('/import/invoices', { method: 'POST', body: fd });
       setPreview(res);
-      setConfirmedDupRows(new Set()); // user must opt-in each duplicate
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Preview failed');
     } finally {
@@ -138,9 +135,6 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
       const fd = new FormData();
       fd.append('file', file);
       fd.append('mode', 'commit');
-      for (const rowNum of confirmedDupRows) {
-        fd.append('confirmedDuplicates', String(rowNum));
-      }
       const res = await apiFetch<CommitResult>('/import/invoices', { method: 'POST', body: fd });
       setCommitResult(res);
       if (res.imported > 0) notify(`Imported ${res.imported} invoices`);
@@ -148,23 +142,6 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
       setErrorMsg(err instanceof Error ? err.message : 'Import failed');
     } finally {
       setUploading(false);
-    }
-  }
-
-  function toggleDupRow(rowNum: number) {
-    setConfirmedDupRows(prev => {
-      const next = new Set(prev);
-      if (next.has(rowNum)) next.delete(rowNum); else next.add(rowNum);
-      return next;
-    });
-  }
-
-  function toggleAllDups() {
-    if (!preview) return;
-    if (confirmedDupRows.size === preview.duplicates.length) {
-      setConfirmedDupRows(new Set());
-    } else {
-      setConfirmedDupRows(new Set(preview.duplicates.map(d => d.row)));
     }
   }
 
@@ -274,56 +251,26 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
 
             {preview.duplicates.length > 0 && (
               <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="font-medium text-amber-900">
-                    {preview.duplicates.length} possible duplicate{preview.duplicates.length > 1 ? 's' : ''} — review each one
-                  </div>
-                  <button onClick={toggleAllDups} className="text-xs text-amber-700 underline">
-                    {confirmedDupRows.size === preview.duplicates.length ? 'Dismiss all' : 'Confirm all'}
-                  </button>
+                <div className="font-medium text-amber-900 mb-2">
+                  {preview.duplicates.length} duplicate{preview.duplicates.length > 1 ? 's' : ''} will be skipped
                 </div>
                 <div className="space-y-2 max-h-72 overflow-y-auto">
-                  {preview.duplicates.map(d => {
-                    const confirmed = confirmedDupRows.has(d.row);
-                    return (
-                      <div key={d.row} className={`rounded border px-3 py-2 ${confirmed ? 'border-green-300 bg-green-50' : 'border-amber-200 bg-white'}`}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0 text-xs">
-                            <div className="font-medium text-gray-900">
-                              Row {d.row}: <span className="font-normal">#{d.invoiceNo}</span> · {d.vendorName}
-                            </div>
-                            <div className="text-gray-500 mt-0.5">
-                              New: {formatINR(d.amount)} on {formatDate(d.invoiceDate)} · Site {d.site || '—'}
-                            </div>
-                            <div className="text-gray-500">
-                              Existing: {formatINR(Number(d.existingAmount))} on {formatDate(d.existingDate)} · #{d.existingInvoiceNo ?? '(no invoice no)'}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <button
-                              onClick={() => toggleDupRow(d.row)}
-                              className={`px-2.5 py-1 text-xs font-medium rounded ${
-                                confirmed
-                                  ? 'bg-green-600 text-white hover:bg-green-700'
-                                  : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                              }`}
-                            >
-                              {confirmed ? '✓ Confirmed' : 'Confirm'}
-                            </button>
-                            <button
-                              onClick={() => { const next = new Set(confirmedDupRows); next.delete(d.row); setConfirmedDupRows(next); }}
-                              className="px-2.5 py-1 text-xs text-gray-500 hover:text-gray-700"
-                            >
-                              Dismiss
-                            </button>
-                          </div>
-                        </div>
+                  {preview.duplicates.map(d => (
+                    <div key={d.row} className="rounded border border-amber-200 bg-white px-3 py-2 text-xs">
+                      <div className="font-medium text-gray-900">
+                        Row {d.row}: <span className="font-normal">#{d.invoiceNo}</span> · {d.vendorName}
                       </div>
-                    );
-                  })}
+                      <div className="text-gray-500 mt-0.5">
+                        CSV: {formatINR(d.amount)} on {formatDate(d.invoiceDate)} · Site {d.site || '—'}
+                      </div>
+                      <div className="text-gray-500">
+                        Existing: {formatINR(Number(d.existingAmount))} on {formatDate(d.existingDate)} · #{d.existingInvoiceNo ?? '(no invoice no)'}
+                      </div>
+                    </div>
+                  ))}
                 </div>
                 <div className="text-xs text-amber-700 mt-2">
-                  Dismissed duplicates will not be imported. Confirmed ones will be created anyway (alerted to HO for audit).
+                  One vendor cannot have two invoices with the same invoice number — these rows will not be imported.
                 </div>
               </div>
             )}
@@ -386,9 +333,9 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
             <>
               <button onClick={handleCommit} disabled={uploading}
                 className="px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
-                {uploading ? 'Importing...' : `Confirm & Import ${preview.toImport + confirmedDupRows.size} Row${(preview.toImport + confirmedDupRows.size) === 1 ? '' : 's'}`}
+                {uploading ? 'Importing...' : `Confirm & Import ${preview.toImport} Row${preview.toImport === 1 ? '' : 's'}`}
               </button>
-              <button onClick={() => { setPreview(null); setConfirmedDupRows(new Set()); }} className="px-5 py-2.5 text-sm text-gray-600 hover:text-gray-800">
+              <button onClick={() => setPreview(null)} className="px-5 py-2.5 text-sm text-gray-600 hover:text-gray-800">
                 Back
               </button>
             </>
