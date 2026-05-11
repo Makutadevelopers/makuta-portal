@@ -27,6 +27,7 @@ const MGMT_TABS = [
   { to: '/mgmt-bank-reconciliation', label: 'Bank Reconciliation' },
   { to: '/credit-notes', label: 'Credit Notes' },
   { to: '/employees', label: 'Employees' },
+  { to: '/audit', label: 'Audit Trail' },
   { to: '/bin', label: 'Bin' },
 ];
 

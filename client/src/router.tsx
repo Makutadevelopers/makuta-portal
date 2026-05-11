@@ -79,7 +79,7 @@ export default function AppRouter() {
         <Route path="/cashflow" element={<ProtectedRoute allowed={['ho']}><CashflowPage /></ProtectedRoute>} />
         <Route path="/vendors" element={<ProtectedRoute allowed={['ho', 'site']}><VendorMaster /></ProtectedRoute>} />
         <Route path="/vendors/:id" element={<ProtectedRoute allowed={['ho', 'mgmt', 'site']}><VendorDetail /></ProtectedRoute>} />
-        <Route path="/audit" element={<ProtectedRoute allowed={['ho']}><AuditTrail /></ProtectedRoute>} />
+        <Route path="/audit" element={<ProtectedRoute allowed={['ho', 'mgmt']}><AuditTrail /></ProtectedRoute>} />
         <Route path="/bin" element={<ProtectedRoute allowed={['ho', 'mgmt']}><Bin /></ProtectedRoute>} />
         <Route path="/bank-reconciliation" element={<ProtectedRoute allowed={['ho']}><BankReconciliation /></ProtectedRoute>} />
         <Route path="/petty-cash" element={<ProtectedRoute allowed={['ho']}><PettyCash /></ProtectedRoute>} />
