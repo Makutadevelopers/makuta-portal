@@ -39,7 +39,7 @@ The application runs **only on AWS** — there is no local dev stack.
 |-----------|-------|
 | Frontend (React + Vite + PWA) | Built into the API container, served via nginx on EC2 |
 | Backend (Node + Express) | Docker container `makuta_portal_api_prod` on EC2 `52.3.199.149` (`/opt/makuta-portal`) |
-| Database | Neon Postgres (us-east-1, SSL required) — see `DATABASE_URL` secret |
+| Database | AWS RDS PostgreSQL 16 (us-east-1, SSL required) — DB_HOST/DB_USER/DB_PASSWORD in `/opt/makuta-portal/infra/prod/.env` |
 | File storage | AWS S3 (`makuta-invoice-attachments`, us-east-1) |
 | HTTPS / domain | Cloudflare DNS → CRM nginx fronts `invoice.makutadevelopers.com` |
 | Daily DB backup | GitHub Actions workflow `daily-db-backup.yml` (artifact retention 90 days) |
@@ -50,7 +50,7 @@ Tech stack:
 |-----------|-----------|
 | Frontend | React 18 + TypeScript + Tailwind CSS + Recharts |
 | Backend | Node.js + Express + TypeScript |
-| Database | PostgreSQL (Neon) |
+| Database | PostgreSQL (AWS RDS) |
 | Build Tool | Vite + PWA plugin |
 | Auth | JWT (8h expiry) + bcrypt |
 | Charts | Recharts |
@@ -74,16 +74,36 @@ git pull
 ./infra/prod/deploy.sh --migrate-only     # just run pending migrations
 ```
 
-The script runs `npx tsx src/db/migrate.ts` inside `makuta_portal_api_prod`, which applies any new SQL files in `server/src/db/migrations/` to Neon.
+The script runs `npx tsx src/db/migrate.ts` inside `makuta_portal_api_prod`, which applies any new SQL files in `server/src/db/migrations/` to the RDS database.
 
-Required environment variables (already set in `/opt/makuta-portal/infra/prod/.env`):
+Required environment variables (already set in `/opt/makuta-portal/infra/prod/.env` — see `infra/prod/.env.prod.example` for the full list):
 
 ```bash
-DATABASE_URL=postgresql://...     # Neon connection string
+# Database — AWS RDS Postgres
+DB_HOST=...rds.amazonaws.com
+DB_USER=makuta_admin
+DB_PASSWORD=<strong>
+DB_NAME=makuta_portal
+DB_SSL=true
+
+# Auth
 JWT_SECRET=<at least 48 chars>
 ALLOWED_ORIGINS=https://invoice.makutadevelopers.com
+
+# Runtime
 NODE_ENV=production
-CRON_SECRET=<any random string>
+CRON_SECRET=<openssl rand -hex 32>
+APP_URL=https://invoice.makutadevelopers.com
+CRM_FRAME_ORIGINS=https://crm.makutadevelopers.com
+
+# Email (optional — leave blank to disable notifications)
+SMTP_HOST=...
+SMTP_USER=...
+SMTP_PASS=...
+SMTP_FROM=noreply@makutadevelopers.com
+HO_NOTIFY_TO=raju@makuta.in     # who gets overdue / push / payment alerts
+
+# S3
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...

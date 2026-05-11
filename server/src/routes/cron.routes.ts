@@ -3,17 +3,26 @@
 // Protected by a shared secret (CRON_SECRET env var) — not JWT.
 
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import { query } from '../db/query';
 import { notifyOverdueAlert } from '../services/email.service';
 import { env } from '../config/env';
 
 const router = Router();
 
-// Simple shared-secret auth for cron endpoints
+// Shared-secret auth for cron endpoints. Uses a timing-safe comparison so a
+// network-adjacent attacker can't byte-by-byte brute-force CRON_SECRET via
+// response-time differences.
 function verifyCronSecret(req: Request, res: Response): boolean {
-  const secret = req.headers['x-cron-secret'] as string | undefined;
-  const expected = (env as Record<string, unknown>)['CRON_SECRET'] as string | undefined;
-  if (!expected || !secret || secret !== expected) {
+  const secret = req.headers['x-cron-secret'];
+  const expected = env.CRON_SECRET;
+  if (!expected || typeof secret !== 'string') {
+    res.status(401).json({ error: 'Unauthorized' });
+    return false;
+  }
+  const a = Buffer.from(secret);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
     res.status(401).json({ error: 'Unauthorized' });
     return false;
   }
@@ -62,7 +71,6 @@ router.post('/overdue-alert', async (req: Request, res: Response) => {
       overdueCount: overdue.length,
       totalOverdue,
       topVendors,
-      hoEmail: 'rajesh@makuta.in',
     });
 
     res.json({

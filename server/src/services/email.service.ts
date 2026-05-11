@@ -3,6 +3,7 @@
 
 import nodemailer from 'nodemailer';
 import { env } from '../config/env';
+import { query } from '../db/query';
 
 const isConfigured = !!env.SMTP_HOST && !!env.SMTP_USER;
 
@@ -42,6 +43,35 @@ async function send(options: EmailOptions): Promise<boolean> {
   }
 }
 
+// ── Recipient resolution ────────────────────────────────────────────────────
+// Prefer the env-driven allowlist (HO_NOTIFY_TO=a@x.com,b@y.com). Fall back
+// to every active HO user in the DB so we don't silently stop notifying when
+// the env is empty (e.g. fresh deploys before the var is set).
+
+let cachedHoEmails: { value: string[]; fetchedAt: number } | null = null;
+const HO_CACHE_TTL_MS = 5 * 60 * 1000;
+
+export async function getHoRecipients(): Promise<string[]> {
+  const fromEnv = env.HO_NOTIFY_TO.split(',').map(s => s.trim()).filter(Boolean);
+  if (fromEnv.length > 0) return fromEnv;
+
+  const now = Date.now();
+  if (cachedHoEmails && now - cachedHoEmails.fetchedAt < HO_CACHE_TTL_MS) {
+    return cachedHoEmails.value;
+  }
+  try {
+    const rows = await query<{ email: string }>(
+      "SELECT email FROM users WHERE role = 'ho' AND is_active = true AND email IS NOT NULL"
+    );
+    const value = rows.map(r => r.email).filter(Boolean);
+    cachedHoEmails = { value, fetchedAt: now };
+    return value;
+  } catch (err) {
+    console.error('[email] failed to resolve HO recipients from DB:', err);
+    return [];
+  }
+}
+
 // ── Notification templates ──────────────────────────────────────────────────
 
 export async function notifyInvoicePushed(params: {
@@ -49,10 +79,14 @@ export async function notifyInvoicePushed(params: {
   invoiceNo: string;
   amount: number;
   site: string;
-  hoEmail: string;
 }): Promise<void> {
+  const recipients = await getHoRecipients();
+  if (recipients.length === 0) {
+    console.log('[email] notifyInvoicePushed — no HO recipients configured, skipping');
+    return;
+  }
   await send({
-    to: params.hoEmail,
+    to: recipients.join(','),
     subject: `Invoice #${params.invoiceNo} pushed to master — ${params.vendorName}`,
     html: `
       <h3>Invoice Approved & Pushed</h3>
@@ -72,11 +106,15 @@ export async function notifyPaymentRecorded(params: {
   paymentAmount: number;
   paymentType: string;
   balance: number;
-  hoEmail: string;
 }): Promise<void> {
+  const recipients = await getHoRecipients();
+  if (recipients.length === 0) {
+    console.log('[email] notifyPaymentRecorded — no HO recipients configured, skipping');
+    return;
+  }
   const isPaid = params.balance <= 0;
   await send({
-    to: params.hoEmail,
+    to: recipients.join(','),
     subject: `${isPaid ? 'Full' : 'Part'} payment recorded — #${params.invoiceNo}`,
     html: `
       <h3>Payment Recorded</h3>
@@ -132,14 +170,18 @@ export async function notifyOverdueAlert(params: {
   overdueCount: number;
   totalOverdue: number;
   topVendors: Array<{ name: string; balance: number; daysPastDue: number }>;
-  hoEmail: string;
 }): Promise<void> {
+  const recipients = await getHoRecipients();
+  if (recipients.length === 0) {
+    console.log('[email] notifyOverdueAlert — no HO recipients configured, skipping');
+    return;
+  }
   const vendorRows = params.topVendors
     .map(v => `<tr><td>${v.name}</td><td style="text-align:right">₹${v.balance.toLocaleString('en-IN')}</td><td style="text-align:right">${v.daysPastDue}d</td></tr>`)
     .join('');
 
   await send({
-    to: params.hoEmail,
+    to: recipients.join(','),
     subject: `Overdue Alert: ${params.overdueCount} invoices · ₹${params.totalOverdue.toLocaleString('en-IN')}`,
     html: `
       <h3>Overdue Payment Alert</h3>
@@ -148,7 +190,7 @@ export async function notifyOverdueAlert(params: {
         <tr style="background:#f3f4f6;"><th>Vendor</th><th>Balance</th><th>Days Overdue</th></tr>
         ${vendorRows}
       </table>
-      <p style="margin-top:12px;"><a href="${env.NODE_ENV === 'production' ? 'https://invoices.makutadevelopers.com' : 'http://localhost:3000'}/payment-aging">View Payment Aging →</a></p>
+      <p style="margin-top:12px;"><a href="${env.APP_URL}/payment-aging">View Payment Aging →</a></p>
       <hr><p style="color:#888;font-size:12px;">Makuta Developers — Invoice & Payment Portal</p>
     `,
   });

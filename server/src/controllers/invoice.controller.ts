@@ -466,7 +466,6 @@ export async function pushInvoice(req: Request, res: Response, next: NextFunctio
       invoiceNo: String(invoice.invoice_no ?? ''),
       amount: Number(invoice.invoice_amount ?? 0),
       site: String(invoice.site ?? ''),
-      hoEmail: 'rajesh@makuta.in',
     }).catch((err) => console.error('[email] notifyInvoicePushed failed:', err));
 
     res.json(invoice);
