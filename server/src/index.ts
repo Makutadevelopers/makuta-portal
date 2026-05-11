@@ -42,9 +42,10 @@ app.use(cors({
 }));
 // Allow the makuta-sales-crm dashboard to embed mgmt-role pages in iframes.
 // Default helmet would set X-Frame-Options: DENY which blocks them entirely.
-// Origins come from CRM_FRAME_ORIGINS env (comma-separated) — fall back to
-// dev-only localhost:3500 so prod is locked down unless explicitly opened.
-const crmFrameOrigins = (process.env.CRM_FRAME_ORIGINS ?? 'http://localhost:3500')
+// Origins come from CRM_FRAME_ORIGINS env (comma-separated, validated in
+// config/env.ts) — fall back is dev-only localhost:3500 so prod is locked
+// down unless explicitly opened.
+const crmFrameOrigins = env.CRM_FRAME_ORIGINS
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);

@@ -162,7 +162,6 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
       paymentAmount: data.amount,
       paymentType: data.payment_type,
       balance: newBalance,
-      hoEmail: 'rajesh@makuta.in',
     }).catch((err) => console.error('[email] notifyPaymentRecorded failed:', err));
 
     res.status(201).json({ ...payment, invoice_payment_status: newStatus });

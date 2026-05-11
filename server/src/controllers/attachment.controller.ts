@@ -9,6 +9,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { query, queryOne } from '../db/query';
 import { s3, S3_BUCKET } from '../config/s3';
 import { env } from '../config/env';
+import { userHasSite } from '../middleware/auth';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -34,6 +35,27 @@ interface AttachmentRow {
   uploaded_at: string;
 }
 
+// Returns the invoice's site if the request is allowed to read/write its
+// attachments, otherwise writes a 404/403 to res and returns null.
+//
+// We deliberately answer 404 (not 403) for cross-site attempts so a site
+// user can't enumerate which invoice IDs exist on other sites.
+async function assertInvoiceAccessible(invoiceId: string, req: Request, res: Response): Promise<string | null> {
+  const inv = await queryOne<{ id: string; site: string }>(
+    'SELECT id, site FROM invoices WHERE id = $1 AND deleted_at IS NULL',
+    [invoiceId]
+  );
+  if (!inv) {
+    res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
+    return null;
+  }
+  if (req.user?.role === 'site' && !userHasSite(req.user, inv.site)) {
+    res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
+    return null;
+  }
+  return inv.site;
+}
+
 export async function uploadAttachment(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const invoiceId = req.params.id as string;
@@ -44,15 +66,7 @@ export async function uploadAttachment(req: Request, res: Response, next: NextFu
       return;
     }
 
-    const invoice = await queryOne<{ id: string }>(
-      'SELECT id FROM invoices WHERE id = $1',
-      [invoiceId]
-    );
-
-    if (!invoice) {
-      res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
-      return;
-    }
+    if ((await assertInvoiceAccessible(invoiceId, req, res)) === null) return;
 
     // Sanitize filename to prevent path traversal
     const sanitizedName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 255);
@@ -92,6 +106,8 @@ export async function uploadAttachment(req: Request, res: Response, next: NextFu
 export async function getAttachments(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const invoiceId = req.params.id as string;
+
+    if ((await assertInvoiceAccessible(invoiceId, req, res)) === null) return;
 
     const attachments = await query<AttachmentRow>(
       'SELECT * FROM attachments WHERE invoice_id = $1 ORDER BY uploaded_at',
@@ -142,6 +158,8 @@ export async function deleteAttachment(req: Request, res: Response, next: NextFu
     const invoiceId = req.params.id as string;
     const attachmentId = req.params.attachmentId as string;
 
+    if ((await assertInvoiceAccessible(invoiceId, req, res)) === null) return;
+
     const att = await queryOne<AttachmentRow>(
       'SELECT * FROM attachments WHERE id = $1 AND invoice_id = $2',
       [attachmentId, invoiceId]
@@ -169,6 +187,8 @@ export async function downloadAttachment(req: Request, res: Response, next: Next
   try {
     const invoiceId = req.params.id as string;
     const attachmentId = req.params.attachmentId as string;
+
+    if ((await assertInvoiceAccessible(invoiceId, req, res)) === null) return;
 
     const att = await queryOne<AttachmentRow>(
       'SELECT * FROM attachments WHERE id = $1 AND invoice_id = $2',

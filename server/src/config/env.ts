@@ -38,6 +38,19 @@ const envSchema = z.object({
   SMTP_PASS: z.string().default(''),
   SMTP_FROM: z.string().default('noreply@makutadevelopers.com'),
 
+  // Comma-separated list of email addresses that receive HO/admin notifications
+  // (overdue alerts, invoice push, payment recorded). If empty, the email
+  // service falls back to every active user with role='ho' in the DB.
+  HO_NOTIFY_TO: z.string().default(''),
+
+  // Public URL of the portal, embedded into outbound emails (e.g. the
+  // "View Payment Aging →" link). Defaults to the production host.
+  APP_URL: z.string().default('https://invoice.makutadevelopers.com'),
+
+  // CRM origins allowed to embed mgmt pages in an iframe (CSP frame-ancestors).
+  // Comma-separated. Falls back to a dev-only default.
+  CRM_FRAME_ORIGINS: z.string().default('http://localhost:3500'),
+
   // CORS
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
 
