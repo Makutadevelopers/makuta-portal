@@ -12,7 +12,8 @@ import { getInvoiceCreditSuggestions, addAllocation } from '../../api/creditNote
 import { InvoiceCreditSuggestions } from '../../types/creditNote';
 import { createVendor } from '../../api/vendors';
 import { formatINR, formatDate } from '../../utils/formatters';
-import { SITES, PURPOSES, PAYMENT_TYPES, BANKS } from '../../utils/constants';
+import { SITES, PAYMENT_TYPES, BANKS } from '../../utils/constants';
+import CategorySelect from '../../components/shared/CategorySelect';
 import { Invoice } from '../../types/invoice';
 import { Payment } from '../../types/payment';
 import AppShell from '../../components/layout/AppShell';
@@ -353,10 +354,12 @@ export default function InvoiceList() {
           <option value="All">All Statuses</option>
           <option>Paid</option><option>Partial</option><option>Not Paid</option>
         </select>
-        <select value={fPurpose} onChange={e => setFPurpose(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-          <option value="All">All Categories</option>
-          {PURPOSES.map(p => <option key={p}>{p}</option>)}
-        </select>
+        <CategorySelect
+          value={fPurpose}
+          onChange={setFPurpose}
+          includeAll
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
+        />
         <input type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
         <select value={sortBy} onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at')}
@@ -1344,12 +1347,22 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
             {(() => {
               const v = localVendors.find(v => v.id === vendorId);
               const locked = !!v?.category;
+              if (locked) {
+                // Vendor master pins the category — show it as a disabled
+                // dropdown with the single locked value.
+                return (
+                  <select value={purpose} disabled
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-600 cursor-not-allowed">
+                    <option>{v!.category}</option>
+                  </select>
+                );
+              }
               return (
-                <select value={purpose} onChange={e => setPurpose(e.target.value)} disabled={locked}
-                  className={`w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 ${locked ? 'bg-gray-50 text-gray-600 cursor-not-allowed' : ''}`}>
-                  {PURPOSES.map(p => <option key={p}>{p}</option>)}
-                  {locked && v?.category && !PURPOSES.includes(v.category) && <option key={v.category}>{v.category}</option>}
-                </select>
+                <CategorySelect
+                  value={purpose}
+                  onChange={setPurpose}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
               );
             })()}
           </div>

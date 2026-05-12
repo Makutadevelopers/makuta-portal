@@ -9,7 +9,7 @@ import {
   getVendorMerges, revertVendorMerge, VendorMerge,
 } from '../../api/vendors';
 import { formatINR, formatDate } from '../../utils/formatters';
-import { PURPOSES } from '../../utils/constants';
+import CategorySelect from '../../components/shared/CategorySelect';
 import { Vendor } from '../../types/vendor';
 import AppShell from '../../components/layout/AppShell';
 import BulkImportModal from '../../components/shared/BulkImportModal';
@@ -228,11 +228,12 @@ export default function VendorMaster() {
       <div className="flex items-center gap-3 mb-4">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendors..."
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200">
-          <option value="">All Categories</option>
-          {[...PURPOSES].sort((a, b) => a.localeCompare(b)).map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
+        <CategorySelect
+          value={categoryFilter || 'All'}
+          onChange={v => setCategoryFilter(v === 'All' ? '' : v)}
+          includeAll
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+        />
         <span className="text-xs text-gray-400 ml-auto">{filtered.length} vendors in master</span>
       </div>
 
@@ -491,11 +492,12 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Category</label>
-            <select value={category} onChange={e => setCategory(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white">
-              <option value="">Select category</option>
-              {PURPOSES.map(p => <option key={p}>{p}</option>)}
-            </select>
+            <CategorySelect
+              value={category}
+              onChange={setCategory}
+              placeholder="Select category"
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white"
+            />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">GSTIN</label>
