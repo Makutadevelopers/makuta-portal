@@ -7,7 +7,7 @@ import { createVendor } from '../../api/vendors';
 import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
 import { Invoice } from '../../types/invoice';
 import { formatINR, formatDate } from '../../utils/formatters';
-import { PURPOSES } from '../../utils/constants';
+import CategorySelect from '../../components/shared/CategorySelect';
 import AppShell from '../../components/layout/AppShell';
 import BulkImportModal from '../../components/shared/BulkImportModal';
 import DisputeModal from '../../components/shared/DisputeModal';
@@ -254,10 +254,12 @@ export default function MyInvoices() {
           placeholder="Search vendor, invoice no, PO..."
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-blue-200"
         />
-        <select value={fPurpose} onChange={e => setFPurpose(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-          <option value="All">All Categories</option>
-          {PURPOSES.map(p => <option key={p}>{p}</option>)}
-        </select>
+        <CategorySelect
+          value={fPurpose}
+          onChange={setFPurpose}
+          includeAll
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
+        />
         <input
           type="month"
           value={fMonth}
@@ -838,16 +840,20 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
             {(() => {
               const v = localVendors.find(v => v.id === vendorId);
               const locked = !!v?.category;
+              if (locked) {
+                return (
+                  <select value={purpose} disabled
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-600 cursor-not-allowed">
+                    <option>{v!.category}</option>
+                  </select>
+                );
+              }
               return (
-                <select
+                <CategorySelect
                   value={purpose}
-                  onChange={e => setPurpose(e.target.value)}
-                  disabled={locked}
-                  className={`w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 ${locked ? 'bg-gray-50 text-gray-600 cursor-not-allowed' : ''}`}
-                >
-                  {PURPOSES.map(p => <option key={p}>{p}</option>)}
-                  {locked && v?.category && !PURPOSES.includes(v.category) && <option key={v.category}>{v.category}</option>}
-                </select>
+                  onChange={setPurpose}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
               );
             })()}
           </div>
