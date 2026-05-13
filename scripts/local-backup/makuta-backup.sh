@@ -108,8 +108,14 @@ if [ -n "$LATEST_FILES" ]; then
 fi
 
 # ── Retention — trim local copies older than $RETENTION_DAYS days ────────
+# Best-effort: macOS TCC may block traversal of /Volumes/* from a
+# LaunchAgent context (Removable Volumes privacy). The sync itself is
+# unaffected; only this cleanup step. Old folders prune the next time
+# the script runs from Terminal (which has full user permissions).
 echo "[trim] removing local backups older than $RETENTION_DAYS days"
-find "$DEST_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime "+$RETENTION_DAYS" -print -exec rm -rf {} \;
+if ! find "$DEST_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime "+$RETENTION_DAYS" -print -exec rm -rf {} \; 2>/dev/null; then
+  echo "[trim] skipped (likely macOS Removable-Volumes TCC restriction in LaunchAgent context)"
+fi
 
 # ── Summary ───────────────────────────────────────────────────────────────
 SIZE=$(du -sh "$TARGET" 2>/dev/null | awk '{print $1}')
