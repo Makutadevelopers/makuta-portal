@@ -19,15 +19,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Load environment variables
+# Load environment variables. Either a local .env file (laptop / standalone
+# use) or pre-exported env (production cron wrapper) is acceptable.
 if [ -f "$PROJECT_DIR/.env" ]; then
   set -a
   source "$PROJECT_DIR/.env"
   set +a
-else
-  echo "ERROR: .env file not found at $PROJECT_DIR/.env"
-  exit 1
 fi
+
+for var in DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD; do
+  if [ -z "${!var:-}" ]; then
+    echo "ERROR: $var is not set (provide via $PROJECT_DIR/.env or exported env)"
+    exit 1
+  fi
+done
 
 # Overlay dedicated backup-pipeline AWS creds when present so the off-site
 # upload runs as a separate IAM identity from the live app.
