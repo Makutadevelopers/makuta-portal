@@ -72,6 +72,29 @@ export async function getHoRecipients(): Promise<string[]> {
   }
 }
 
+// Map of site_name → list of active site-accountant emails assigned to that
+// site. Used for the per-site overdue digest.
+export async function getSiteAccountantRecipients(): Promise<Map<string, string[]>> {
+  try {
+    const rows = await query<{ email: string; sites: string[] | null }>(
+      "SELECT email, sites FROM users WHERE role = 'site' AND is_active = true AND email IS NOT NULL"
+    );
+    const map = new Map<string, string[]>();
+    for (const r of rows) {
+      const sites = Array.isArray(r.sites) ? r.sites : [];
+      for (const site of sites) {
+        const list = map.get(site) ?? [];
+        list.push(r.email);
+        map.set(site, list);
+      }
+    }
+    return map;
+  } catch (err) {
+    console.error('[email] failed to resolve site recipients from DB:', err);
+    return new Map();
+  }
+}
+
 // ── Notification templates ──────────────────────────────────────────────────
 
 export async function notifyInvoicePushed(params: {
@@ -166,32 +189,47 @@ export async function notifyPasswordReset(params: {
   });
 }
 
-export async function notifyOverdueAlert(params: {
+// Sends a weekly overdue digest to a single audience (one site's accountants,
+// or HO with all-sites rollup). `scopeLabel` shows in the subject + heading;
+// pass the site name for per-site mails, or "All Sites" for the HO rollup.
+export async function notifyOverdueDigest(params: {
+  scopeLabel: string;
+  recipients: string[];
   overdueCount: number;
   totalOverdue: number;
-  topVendors: Array<{ name: string; balance: number; daysPastDue: number }>;
+  topVendors: Array<{ name: string; balance: number; daysPastDue: number; site?: string }>;
 }): Promise<void> {
-  const recipients = await getHoRecipients();
-  if (recipients.length === 0) {
-    console.log('[email] notifyOverdueAlert — no HO recipients configured, skipping');
+  if (params.recipients.length === 0) {
+    console.log(`[email] notifyOverdueDigest (${params.scopeLabel}) — no recipients, skipping`);
     return;
   }
+  if (params.overdueCount === 0) {
+    console.log(`[email] notifyOverdueDigest (${params.scopeLabel}) — no overdue invoices, skipping`);
+    return;
+  }
+  const showSiteCol = params.topVendors.some(v => v.site);
+  const headerCells = showSiteCol
+    ? '<th>Vendor</th><th>Site</th><th>Balance</th><th>Days Overdue</th>'
+    : '<th>Vendor</th><th>Balance</th><th>Days Overdue</th>';
   const vendorRows = params.topVendors
-    .map(v => `<tr><td>${v.name}</td><td style="text-align:right">₹${v.balance.toLocaleString('en-IN')}</td><td style="text-align:right">${v.daysPastDue}d</td></tr>`)
+    .map(v => {
+      const siteCell = showSiteCol ? `<td>${v.site ?? ''}</td>` : '';
+      return `<tr><td>${v.name}</td>${siteCell}<td style="text-align:right">₹${v.balance.toLocaleString('en-IN')}</td><td style="text-align:right">${v.daysPastDue}d</td></tr>`;
+    })
     .join('');
 
   await send({
-    to: recipients.join(','),
-    subject: `Overdue Alert: ${params.overdueCount} invoices · ₹${params.totalOverdue.toLocaleString('en-IN')}`,
+    to: params.recipients.join(','),
+    subject: `Weekly Overdue Digest — ${params.scopeLabel}: ${params.overdueCount} invoices · ₹${params.totalOverdue.toLocaleString('en-IN')}`,
     html: `
-      <h3>Overdue Payment Alert</h3>
-      <p><strong>${params.overdueCount}</strong> invoices are past their vendor due date, totalling <strong>₹${params.totalOverdue.toLocaleString('en-IN')}</strong>.</p>
+      <h3>Weekly Overdue Digest — ${params.scopeLabel}</h3>
+      <p><strong>${params.overdueCount}</strong> invoices are past their vendor due date, totalling <strong>₹${params.totalOverdue.toLocaleString('en-IN')}</strong>. Showing the top ${params.topVendors.length} by days overdue.</p>
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-size:13px;">
-        <tr style="background:#f3f4f6;"><th>Vendor</th><th>Balance</th><th>Days Overdue</th></tr>
+        <tr style="background:#f3f4f6;">${headerCells}</tr>
         ${vendorRows}
       </table>
       <p style="margin-top:12px;"><a href="${env.APP_URL}/payment-aging">View Payment Aging →</a></p>
-      <hr><p style="color:#888;font-size:12px;">Makuta Developers — Invoice & Payment Portal</p>
+      <hr><p style="color:#888;font-size:12px;">Makuta Developers — Invoice & Payment Portal · Weekly digest, every Monday 9 AM IST</p>
     `,
   });
 }
