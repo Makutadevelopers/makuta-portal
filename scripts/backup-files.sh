@@ -21,13 +21,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Load environment. Either a local .env file or pre-exported env is OK.
 if [ -f "$PROJECT_DIR/.env" ]; then
   set -a
   source "$PROJECT_DIR/.env"
   set +a
-else
-  echo "ERROR: .env file not found at $PROJECT_DIR/.env"
-  exit 1
 fi
 
 # Overlay dedicated backup-pipeline AWS creds when present so the off-site
@@ -39,7 +37,7 @@ if [ -f /etc/makuta/backup-creds.env ]; then
 fi
 
 if [ -z "${S3_BUCKET_NAME:-}" ]; then
-  echo "ERROR: S3_BUCKET_NAME is not set in .env"
+  echo "ERROR: S3_BUCKET_NAME is not set (provide via $PROJECT_DIR/.env or exported env)"
   exit 1
 fi
 
