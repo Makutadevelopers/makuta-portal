@@ -1,0 +1,77 @@
+name: Daily files backup mirror
+
+# Mirrors the latest daily invoice-files snapshot from S3 into a GitHub
+# Actions artifact, so the attachments are recoverable even if AWS is
+# unreachable (account compromised, region down, etc.).
+#
+# Pairs with daily-db-backup.yml — together they give an off-AWS copy of
+# the complete dataset (database + files) for 90 days.
+#
+# The EC2 cron at 02:00 UTC writes:
+#   s3://<S3_BACKUP_BUCKET>/file-backups/YYYY-MM-DD/...
+# This workflow runs at 06:00 UTC (after the DB mirror), picks the
+# freshest date-prefixed snapshot, zips it, and uploads as an artifact.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Find latest files snapshot in S3
+        id: find
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          DST: ${{ secrets.S3_BACKUP_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${DST:-}" ]; then
+            echo "::error::Missing AWS_ACCESS_KEY_ID or S3_BACKUP_BUCKET secret."
+            exit 1
+          fi
+          LATEST=$(aws s3api list-objects-v2 \
+            --bucket "$DST" \
+            --prefix file-backups/ \
+            --delimiter / \
+            --query 'reverse(sort_by(CommonPrefixes, &Prefix))[0].Prefix' \
+            --output text)
+          if [ -z "$LATEST" ] || [ "$LATEST" = "None" ]; then
+            echo "::error::No date-prefixed snapshots under s3://$DST/file-backups/"
+            exit 1
+          fi
+          DATE=$(echo "$LATEST" | sed -E 's|file-backups/||; s|/$||')
+          echo "prefix=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "date=$DATE"     >> "$GITHUB_OUTPUT"
+          echo "Latest files snapshot: $LATEST"
+
+      - name: Download snapshot
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          DST: ${{ secrets.S3_BACKUP_BUCKET }}
+          PREFIX: ${{ steps.find.outputs.prefix }}
+          DATE: ${{ steps.find.outputs.date }}
+        run: |
+          set -euo pipefail
+          mkdir -p "snapshot/$DATE"
+          aws s3 cp "s3://$DST/$PREFIX" "snapshot/$DATE" --recursive --quiet
+          du -sh "snapshot/$DATE"
+          find "snapshot/$DATE" -type f | wc -l | xargs -I{} echo "Files in snapshot: {}"
+
+      - name: Upload files-backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-backup-${{ steps.find.outputs.date }}-${{ github.run_number }}
+          path: snapshot/
+          retention-days: 90
+          if-no-files-found: error
