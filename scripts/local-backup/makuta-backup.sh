@@ -59,7 +59,10 @@ export AWS_DEFAULT_REGION="$S3_REGION"
 
 mkdir -p "$DEST_ROOT"
 
-# ── Discover latest backup folders on S3 ──────────────────────────────────
+# ── Discover latest backup folders / files on S3 ──────────────────────────
+# file-backups/ holds date-stamped sub-prefixes (file-backups/YYYY-MM-DD/...).
+# db-backups/   holds dump files directly (makuta_*.sql.gz), no sub-prefix.
+
 latest_prefix() {
   aws s3 ls "s3://$S3_BUCKET/$1/" \
     | awk '$1=="PRE"{sub("/","",$2); print $2}' \
@@ -67,11 +70,20 @@ latest_prefix() {
     | tail -1
 }
 
-LATEST_DB=$(latest_prefix db-backups || true)
+latest_file() {
+  aws s3api list-objects-v2 \
+    --bucket "$S3_BUCKET" \
+    --prefix "$1/" \
+    --query 'reverse(sort_by(Contents[?ends_with(Key, `.sql.gz`)], &LastModified))[0].Key' \
+    --output text 2>/dev/null
+}
+
+LATEST_DB_KEY=$(latest_file db-backups || true)
 LATEST_FILES=$(latest_prefix file-backups || true)
 
-if [ -z "$LATEST_DB" ]; then
+if [ -z "$LATEST_DB_KEY" ] || [ "$LATEST_DB_KEY" = "None" ]; then
   echo "[warn] No db-backups found on s3://$S3_BUCKET — skipping DB sync."
+  LATEST_DB_KEY=""
 fi
 if [ -z "$LATEST_FILES" ]; then
   echo "[warn] No file-backups found on s3://$S3_BUCKET — skipping file sync."
@@ -82,9 +94,11 @@ TODAY=$(date '+%Y-%m-%d')
 TARGET="$DEST_ROOT/$TODAY"
 mkdir -p "$TARGET"
 
-if [ -n "$LATEST_DB" ]; then
-  echo "[sync] db-backups/$LATEST_DB  →  $TARGET/db"
-  aws s3 sync "s3://$S3_BUCKET/db-backups/$LATEST_DB/" "$TARGET/db/" \
+if [ -n "$LATEST_DB_KEY" ]; then
+  mkdir -p "$TARGET/db"
+  DB_FILE=$(basename "$LATEST_DB_KEY")
+  echo "[sync] $LATEST_DB_KEY  →  $TARGET/db/$DB_FILE"
+  aws s3 cp "s3://$S3_BUCKET/$LATEST_DB_KEY" "$TARGET/db/$DB_FILE" \
     --no-progress --only-show-errors
 fi
 if [ -n "$LATEST_FILES" ]; then
