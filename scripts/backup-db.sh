@@ -29,6 +29,14 @@ else
   exit 1
 fi
 
+# Overlay dedicated backup-pipeline AWS creds when present so the off-site
+# upload runs as a separate IAM identity from the live app.
+if [ -f /etc/makuta/backup-creds.env ]; then
+  set -a
+  source /etc/makuta/backup-creds.env
+  set +a
+fi
+
 # Configuration
 BACKUP_DIR="${BACKUP_DIR:-$PROJECT_DIR/backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
