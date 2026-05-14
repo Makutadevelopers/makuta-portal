@@ -11,7 +11,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { query, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
-import { notifyPaymentRecorded } from '../services/email.service';
+import { notifyPaymentRecorded, notifyPaymentEdited } from '../services/email.service';
 import { userHasSite } from '../middleware/auth';
 import { paymentStatusCase } from '../services/payment.service';
 
@@ -316,7 +316,13 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
 
       return {
         status: 200,
-        body: { payment: updated, before: existing, newStatus: statusRow?.payment_status ?? 'Not Paid' },
+        body: {
+          payment: updated,
+          before: existing,
+          newStatus: statusRow?.payment_status ?? 'Not Paid',
+          vendorName: invoice.vendor_name,
+          invoiceNo: invoice.invoice_no,
+        },
       };
     });
 
@@ -325,10 +331,12 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
       return;
     }
 
-    const { payment, before, newStatus } = result.body as {
+    const { payment, before, newStatus, vendorName, invoiceNo } = result.body as {
       payment: PaymentRow;
       before: PaymentRow;
       newStatus: string;
+      vendorName: string;
+      invoiceNo: string | null;
     };
 
     try {
@@ -363,6 +371,26 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
     } catch (auditErr) {
       console.error('[audit] updatePayment audit log failed:', auditErr);
     }
+
+    notifyPaymentEdited({
+      vendorName: vendorName || '(vendor not set)',
+      invoiceNo: invoiceNo ?? '(no invoice no)',
+      before: {
+        amount: Number(before.amount),
+        type: before.payment_type,
+        ref: before.payment_ref,
+        date: String(before.payment_date).slice(0, 10),
+        bank: before.bank,
+      },
+      after: {
+        amount: Number(payment.amount),
+        type: payment.payment_type,
+        ref: payment.payment_ref,
+        date: String(payment.payment_date).slice(0, 10),
+        bank: payment.bank,
+      },
+      editedBy: req.user!.name,
+    }).catch((err) => console.error('[email] notifyPaymentEdited failed:', err));
 
     res.json({ ...payment, invoice_payment_status: newStatus });
   } catch (err) {

@@ -14,6 +14,7 @@ import { userHasSite } from '../middleware/auth';
 import { z } from 'zod';
 import { query, queryOne, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
+import { notifyCreditNoteAllocated } from '../services/email.service';
 import { recomputeInvoiceStatus } from '../services/payment.service';
 
 const isoDate = z
@@ -449,6 +450,14 @@ export async function addAllocation(req: Request, res: Response, next: NextFunct
       creditNoteId: cnId,
       invoiceId: data.invoice_id,
     });
+
+    notifyCreditNoteAllocated({
+      cnNo: cn.cn_no,
+      vendorName: cn.vendor_name ?? '(vendor not set)',
+      invoiceNo: inv.invoice_no ?? inv.id.slice(0, 8),
+      amount: data.allocated_amount,
+      allocatedBy: req.user!.name,
+    }).catch((err) => console.error('[email] notifyCreditNoteAllocated failed:', err));
 
     res.status(201).json({ message: 'Allocation created' });
   } catch (err) {

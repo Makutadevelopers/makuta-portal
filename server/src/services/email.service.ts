@@ -173,21 +173,97 @@ export async function notifyTempPassword(params: {
   });
 }
 
-export async function notifyPasswordReset(params: {
-  name: string;
-  email: string;
-  resetUrl: string;
+export async function notifyPaymentEdited(params: {
+  vendorName: string;
+  invoiceNo: string;
+  before: { amount: number; type: string; ref: string | null; date: string; bank: string | null };
+  after:  { amount: number; type: string; ref: string | null; date: string; bank: string | null };
+  editedBy: string;
 }): Promise<void> {
+  const recipients = await getHoRecipients();
+  if (recipients.length === 0) {
+    console.log('[email] notifyPaymentEdited — no HO recipients configured, skipping');
+    return;
+  }
+  const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
+  const dash = (v: string | null | undefined) => v ?? '—';
+  const row = (label: string, beforeV: string, afterV: string) => {
+    const changed = beforeV !== afterV;
+    return `<tr><td style="padding:4px 10px;color:#666;">${label}</td>
+      <td style="padding:4px 10px;${changed ? 'color:#b45309;' : ''}">${beforeV}</td>
+      <td style="padding:4px 10px;${changed ? 'color:#15803d;font-weight:600;' : ''}">${afterV}</td></tr>`;
+  };
   await send({
-    to: params.email,
-    subject: 'Reset your Makuta Portal password',
+    to: recipients.join(','),
+    subject: `Payment edited — ${params.vendorName} #${params.invoiceNo}`,
     html: `
-      <h3>Password reset request</h3>
-      <p>Hi ${params.name},</p>
-      <p>Click the link below to set a new password for the Makuta Accounting Module. This link expires in 30 minutes.</p>
-      <p><a href="${params.resetUrl}" style="background:#1a3c5e;color:white;padding:8px 16px;border-radius:6px;text-decoration:none;display:inline-block;">Reset password</a></p>
-      <p style="color:#666;font-size:12px;">If the button doesn't work, copy and paste this URL into your browser:<br>${params.resetUrl}</p>
-      <p style="color:#666;font-size:12px;">If you didn't request this, you can safely ignore this email.</p>
+      <h3>Payment edited</h3>
+      <p>${params.editedBy} edited a payment on invoice <strong>${params.vendorName} #${params.invoiceNo}</strong>.</p>
+      <table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13px;margin-top:8px;">
+        <tr style="background:#f3f4f6;"><th style="padding:6px 10px;text-align:left;">Field</th><th style="padding:6px 10px;text-align:left;">Before</th><th style="padding:6px 10px;text-align:left;">After</th></tr>
+        ${row('Amount', inr(params.before.amount), inr(params.after.amount))}
+        ${row('Type',   params.before.type,        params.after.type)}
+        ${row('Ref',    dash(params.before.ref),   dash(params.after.ref))}
+        ${row('Date',   params.before.date,        params.after.date)}
+        ${row('Bank',   dash(params.before.bank),  dash(params.after.bank))}
+      </table>
+      <hr><p style="color:#888;font-size:12px;">Makuta Developers — Invoice & Payment Portal</p>
+    `,
+  });
+}
+
+export async function notifyInvoiceDeleted(params: {
+  vendorName: string;
+  invoiceNo: string;
+  amount: number;
+  site: string;
+  deletedBy: string;
+  mode: 'bin' | 'permanent';
+}): Promise<void> {
+  const recipients = await getHoRecipients();
+  if (recipients.length === 0) {
+    console.log('[email] notifyInvoiceDeleted — no HO recipients configured, skipping');
+    return;
+  }
+  const verb = params.mode === 'permanent' ? 'Permanently deleted' : 'Moved to bin';
+  const note = params.mode === 'permanent'
+    ? 'This action is irreversible. All linked payments and attachments were also removed.'
+    : 'The invoice can still be restored from Bin for 30 days.';
+  await send({
+    to: recipients.join(','),
+    subject: `Invoice ${params.mode === 'permanent' ? 'permanently deleted' : 'moved to bin'} — ${params.vendorName} #${params.invoiceNo}`,
+    html: `
+      <h3>${verb}: ${params.vendorName} #${params.invoiceNo}</h3>
+      <p><strong>${params.deletedBy}</strong> ${verb.toLowerCase()} invoice <strong>${params.vendorName} #${params.invoiceNo}</strong>.</p>
+      <ul style="font-size:13px;">
+        <li>Amount: ₹${params.amount.toLocaleString('en-IN')}</li>
+        <li>Site: ${params.site}</li>
+      </ul>
+      <p style="color:#666;font-size:12px;">${note}</p>
+      <hr><p style="color:#888;font-size:12px;">Makuta Developers — Invoice & Payment Portal</p>
+    `,
+  });
+}
+
+export async function notifyCreditNoteAllocated(params: {
+  cnNo: string;
+  vendorName: string;
+  invoiceNo: string;
+  amount: number;
+  allocatedBy: string;
+}): Promise<void> {
+  const recipients = await getHoRecipients();
+  if (recipients.length === 0) {
+    console.log('[email] notifyCreditNoteAllocated — no HO recipients configured, skipping');
+    return;
+  }
+  await send({
+    to: recipients.join(','),
+    subject: `Credit note allocated — CN #${params.cnNo} → ${params.vendorName} #${params.invoiceNo}`,
+    html: `
+      <h3>Credit note allocated</h3>
+      <p><strong>${params.allocatedBy}</strong> allocated <strong>₹${params.amount.toLocaleString('en-IN')}</strong> of credit note <strong>#${params.cnNo}</strong> against invoice <strong>${params.vendorName} #${params.invoiceNo}</strong>.</p>
+      <p style="color:#666;font-size:12px;">The invoice's outstanding balance and Paid / Partial badge have been updated accordingly.</p>
       <hr><p style="color:#888;font-size:12px;">Makuta Developers — Invoice & Payment Portal</p>
     `,
   });

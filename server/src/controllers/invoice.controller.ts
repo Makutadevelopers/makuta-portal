@@ -11,7 +11,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { query, queryOne, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
-import { notifyInvoicePushed } from '../services/email.service';
+import { notifyInvoicePushed, notifyInvoiceDeleted } from '../services/email.service';
 import { deleteInvoiceFilesFromDisk } from './attachment.controller';
 import { userHasSite } from '../middleware/auth';
 import { normaliseSiteName } from '../utils/sites';
@@ -573,8 +573,15 @@ export async function deleteInvoice(req: Request, res: Response, next: NextFunct
     const id = req.params.id as string;
     const userId = req.user!.id;
 
-    const existing = await queryOne<InvoiceRow>(
-      'SELECT id, invoice_no, pushed FROM invoices WHERE id = $1 AND deleted_at IS NULL',
+    const existing = await queryOne<{
+      id: string;
+      invoice_no: string | null;
+      pushed: boolean | null;
+      vendor_name: string | null;
+      invoice_amount: string | number;
+      site: string | null;
+    }>(
+      'SELECT id, invoice_no, pushed, vendor_name, invoice_amount, site FROM invoices WHERE id = $1 AND deleted_at IS NULL',
       [id]
     );
 
@@ -599,6 +606,15 @@ export async function deleteInvoice(req: Request, res: Response, next: NextFunct
       action: `Moved invoice #${existing.invoice_no ?? id} to bin`,
       invoiceId: id,
     });
+
+    notifyInvoiceDeleted({
+      vendorName: existing.vendor_name ?? '(vendor not set)',
+      invoiceNo: existing.invoice_no ?? id.slice(0, 8),
+      amount: Number(existing.invoice_amount ?? 0),
+      site: existing.site ?? '—',
+      deletedBy: req.user!.name,
+      mode: 'bin',
+    }).catch((err) => console.error('[email] notifyInvoiceDeleted (bin) failed:', err));
 
     res.json({ message: 'Invoice moved to bin' });
   } catch (err) {
@@ -653,8 +669,14 @@ export async function permanentDeleteInvoice(req: Request, res: Response, next: 
     const id = req.params.id as string;
     const userId = req.user!.id;
 
-    const existing = await queryOne<InvoiceRow>(
-      'SELECT id, invoice_no FROM invoices WHERE id = $1 AND deleted_at IS NOT NULL',
+    const existing = await queryOne<{
+      id: string;
+      invoice_no: string | null;
+      vendor_name: string | null;
+      invoice_amount: string | number;
+      site: string | null;
+    }>(
+      'SELECT id, invoice_no, vendor_name, invoice_amount, site FROM invoices WHERE id = $1 AND deleted_at IS NOT NULL',
       [id]
     );
 
@@ -696,6 +718,15 @@ export async function permanentDeleteInvoice(req: Request, res: Response, next: 
       userId,
       action: `Permanently deleted invoice #${existing.invoice_no ?? id}`,
     });
+
+    notifyInvoiceDeleted({
+      vendorName: existing.vendor_name ?? '(vendor not set)',
+      invoiceNo: existing.invoice_no ?? id.slice(0, 8),
+      amount: Number(existing.invoice_amount ?? 0),
+      site: existing.site ?? '—',
+      deletedBy: req.user!.name,
+      mode: 'permanent',
+    }).catch((err) => console.error('[email] notifyInvoiceDeleted (permanent) failed:', err));
 
     res.json({ message: 'Invoice permanently deleted' });
   } catch (err) {
