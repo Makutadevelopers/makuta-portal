@@ -557,13 +557,15 @@ export default function InvoiceList() {
       {loading ? (
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+        <div
+          className="bg-white rounded-xl border border-gray-100 overflow-auto"
+          style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
+        >
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
                 <th
-                  className="px-4 py-2.5 w-8 bg-gray-50 sticky z-20 border-b border-gray-100"
-                  style={{ top: stickyHeaderHeight }}
+                  className="px-4 py-2.5 w-8 bg-gray-50 sticky top-0 z-20 border-b border-gray-100"
                 >
                   <input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
                     className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
@@ -572,8 +574,7 @@ export default function InvoiceList() {
                 {['Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Site', 'Amount', 'Balance', 'Days', 'Status', 'Docs', 'Actions'].map(h => (
                   <th
                     key={h}
-                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky z-20 border-b border-gray-100 ${h === 'Amount' || h === 'Balance' ? 'text-right' : 'text-left'}`}
-                    style={{ top: stickyHeaderHeight }}
+                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' || h === 'Balance' ? 'text-right' : 'text-left'}`}
                   >
                     {h}
                   </th>
@@ -1312,12 +1313,17 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   const [vendorId, setVendorId] = useState(editInvoice?.vendor_id ?? '');
   const [vendorName, setVendorName] = useState(editInvoice?.vendor_name ?? '');
   const [vendorSearch, setVendorSearch] = useState('');
-  const [creatingVendor, setCreatingVendor] = useState(false);
+  // Name typed in the search box and confirmed via "+ Add as new vendor" but
+  // not yet POSTed. The vendor row is created at invoice-save time so its
+  // category column reflects the category the HO actually picked for this
+  // invoice, instead of whatever default was selected when the button was
+  // clicked.
+  const [pendingNewVendorName, setPendingNewVendorName] = useState<string | null>(null);
   const [localVendors, setLocalVendors] = useState<Vendor[]>(vendors);
   useEffect(() => { setLocalVendors(vendors); }, [vendors]);
   const [invoiceNo, setInvoiceNo] = useState(editInvoice?.invoice_no ?? '');
   const [poNumber, setPoNumber] = useState(editInvoice?.po_number ?? '');
-  const [purpose, setPurpose] = useState(editInvoice?.purpose ?? 'Steel');
+  const [purpose, setPurpose] = useState(editInvoice?.purpose ?? '');
   const [site, setSite] = useState(editInvoice?.site ?? 'Nirvana');
   const [invoiceDate, setInvoiceDate] = useState(editInvoice?.invoice_date?.split('T')[0] ?? today);
   const [month, setMonth] = useState(editInvoice?.month?.split('T')[0] ?? `${currentMonth}-01`);

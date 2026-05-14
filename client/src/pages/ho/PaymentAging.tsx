@@ -122,6 +122,9 @@ interface AgingRow {
 }
 
 function AgingTable({ title, subtitle, rows, isOverdue, stickyTop }: {
+  // stickyTop = height of the page-level toolbar; used to size the table's
+  // own scroll area so its inner sticky <th> pins below the toolbar without
+  // overlapping it. The <th> itself uses top:0 inside the scroll context.
   title: string; subtitle: string; rows: AgingRow[]; isOverdue: boolean; stickyTop: number;
 }) {
   const [sortCol, setSortCol] = useState<string>('due_date');
@@ -146,8 +149,7 @@ function AgingTable({ title, subtitle, rows, isOverdue, stickyTop }: {
   const SortTh = ({ col, label, right }: { col: string; label: string; right?: boolean }) => (
     <th
       onClick={() => handleSort(col)}
-      className={`px-4 py-2.5 font-medium whitespace-nowrap cursor-pointer select-none bg-gray-50 sticky z-20 border-b border-gray-100 ${right ? 'text-right' : 'text-left'} ${sortCol === col ? 'text-gray-900' : 'text-gray-500'}`}
-      style={{ top: stickyTop }}
+      className={`px-4 py-2.5 font-medium whitespace-nowrap cursor-pointer select-none bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${right ? 'text-right' : 'text-left'} ${sortCol === col ? 'text-gray-900' : 'text-gray-500'}`}
     >
       {label} <span className="text-[10px] opacity-50">{sortCol === col ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}</span>
     </th>
@@ -162,16 +164,19 @@ function AgingTable({ title, subtitle, rows, isOverdue, stickyTop }: {
         </div>
         <span className="text-[11px] text-gray-400">Click column headers to sort</span>
       </div>
-      <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+      <div
+        className="bg-white rounded-xl border border-gray-100 overflow-auto"
+        style={{ maxHeight: `calc(100vh - ${stickyTop + 200}px)` }}
+      >
         <table className="w-full text-[13px]">
           <thead className="bg-gray-50">
             <tr>
               <SortTh col="vendor_name" label="Vendor" />
-              <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyTop }}>Site</th>
-              <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyTop }}>Category</th>
-              <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyTop }}>Invoice No</th>
+              <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Site</th>
+              <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Category</th>
+              <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Invoice No</th>
               <SortTh col="invoice_date" label="Invoice Date" />
-              <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyTop }}>Terms</th>
+              <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Terms</th>
               <SortTh col="due_date" label="Due Date" />
               <SortTh col={isOverdue ? 'days_past_due' : 'days_left'} label={isOverdue ? 'Days Past Due' : 'Days Left'} right />
               <SortTh col="invoice_amount" label="Invoice Amt" right />

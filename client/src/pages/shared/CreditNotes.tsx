@@ -113,17 +113,19 @@ export default function CreditNotes() {
           <div className="text-gray-500 text-sm">No credit notes yet</div>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+        <div
+          className="bg-white rounded-xl border border-gray-100 overflow-auto"
+          style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
+        >
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
                 {['CN Date', 'CN No', 'Vendor', 'Site', 'Total', 'Allocated', 'Unallocated', 'Remarks', 'Actions'].map((h) => (
                   <th
                     key={h}
-                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky z-20 border-b border-gray-100 ${
+                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${
                       ['Total', 'Allocated', 'Unallocated'].includes(h) ? 'text-right' : 'text-left'
                     }`}
-                    style={{ top: stickyHeaderHeight }}
                   >
                     {h}
                   </th>

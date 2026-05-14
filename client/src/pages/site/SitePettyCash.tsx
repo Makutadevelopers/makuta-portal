@@ -293,15 +293,17 @@ export default function SitePettyCash() {
       {loading ? (
         <div className="text-gray-500 text-sm py-12 text-center">Loading…</div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+        <div
+          className="bg-white rounded-xl border border-gray-100 overflow-auto"
+          style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
+        >
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
                 {['Date','Type','Description','By','Amount'].map(h => (
                   <th
                     key={h}
-                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}
-                    style={{ top: stickyHeaderHeight }}
+                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}
                   >
                     {h}
                   </th>

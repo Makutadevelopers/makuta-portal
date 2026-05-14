@@ -271,16 +271,19 @@ export default function EmployeeManagement() {
         {loading ? (
           <div className="text-gray-400 text-sm py-12 text-center">Loading...</div>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+          <div
+            className="bg-white rounded-xl border border-gray-100 overflow-auto"
+            style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
+          >
             <table className="w-full text-sm">
               <thead className="bg-gray-50/60 text-xs text-gray-500 uppercase tracking-wider">
                 <tr>
-                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Name</th>
-                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Email</th>
-                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Role</th>
-                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Site</th>
-                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Status</th>
-                  <th className="px-4 py-3 text-right font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Actions</th>
+                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Name</th>
+                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Email</th>
+                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Role</th>
+                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Site</th>
+                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Status</th>
+                  <th className="px-4 py-3 text-right font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">

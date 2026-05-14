@@ -73,21 +73,24 @@ export default function BankReconciliation() {
       </div>
 
       {/* Table */}
-      <div className="bg-white border border-gray-100 rounded-xl overflow-x-auto">
+      <div
+        className="bg-white border border-gray-100 rounded-xl overflow-auto"
+        style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
+      >
         <div>
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
-                <th className="text-left px-4 py-2.5 font-medium w-12 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>S.No</th>
-                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Date</th>
-                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Payment Type</th>
-                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Cheque / Txn ID</th>
-                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Bank</th>
-                <th className="text-right px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Cheque Amount</th>
-                <th className="text-right px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Allocated</th>
-                <th className="text-right px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Balance</th>
-                <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Invoices</th>
-                <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Tally</th>
+                <th className="text-left px-4 py-2.5 font-medium w-12 bg-gray-50 sticky top-0 z-20 border-b border-gray-100">S.No</th>
+                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Date</th>
+                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Payment Type</th>
+                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Cheque / Txn ID</th>
+                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Bank</th>
+                <th className="text-right px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Cheque Amount</th>
+                <th className="text-right px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Allocated</th>
+                <th className="text-right px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Balance</th>
+                <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Invoices</th>
+                <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Tally</th>
               </tr>
             </thead>
             <tbody>

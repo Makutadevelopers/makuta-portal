@@ -76,8 +76,7 @@ export default function VendorAging() {
   const SortTh = ({ col, label, right }: { col: string; label: string; right?: boolean }) => (
     <th
       onClick={() => handleSort(col)}
-      className={`px-4 py-2.5 font-medium whitespace-nowrap cursor-pointer select-none bg-gray-50 sticky z-20 border-b border-gray-100 ${right ? 'text-right' : 'text-left'} ${sortBy === col ? 'text-gray-900' : 'text-gray-500'}`}
-      style={{ top: stickyHeaderHeight }}
+      className={`px-4 py-2.5 font-medium whitespace-nowrap cursor-pointer select-none bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${right ? 'text-right' : 'text-left'} ${sortBy === col ? 'text-gray-900' : 'text-gray-500'}`}
     >
       {label} <span className="text-[10px] opacity-50">{sortBy === col ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}</span>
     </th>
@@ -126,19 +125,22 @@ export default function VendorAging() {
           </div>
 
           {/* Vendor table */}
-          <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+          <div
+            className="bg-white rounded-xl border border-gray-100 overflow-auto"
+            style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
+          >
             <table className="w-full text-[13px]">
               <thead>
                 <tr>
                   <SortTh col="vendor" label="Vendor" />
-                  <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Terms</th>
-                  <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Invoices</th>
+                  <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Terms</th>
+                  <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Invoices</th>
                   <SortTh col="totalBalance" label="Total Balance" right />
                   <SortTh col="withinBalance" label="Within Terms" right />
                   <SortTh col="overdueBalance" label="Overdue Balance" right />
                   <SortTh col="maxDaysPast" label="Max Days Past Due" right />
-                  <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Next Due</th>
-                  <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Status</th>
+                  <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Next Due</th>
+                  <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Status</th>
                 </tr>
               </thead>
               <tbody>
