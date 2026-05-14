@@ -6,7 +6,7 @@ import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { useVendors } from '../../hooks/useVendors';
 import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, bulkDeleteInvoices, getInvoiceHistory, AuditLogEntry, createInvoice, updateInvoice, deleteInvoice as deleteInvoiceApi, recomputeInvoiceStatuses } from '../../api/invoices';
 import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
-import { createPayment, getPayments } from '../../api/payments';
+import { createPayment, getPayments, updatePayment } from '../../api/payments';
 import { bulkPayInvoices } from '../../api/reconciliation';
 import { getInvoiceCreditSuggestions, addAllocation } from '../../api/creditNotes';
 import { InvoiceCreditSuggestions } from '../../types/creditNote';
@@ -542,6 +542,15 @@ export default function InvoiceList() {
           loading={historyLoading}
           onClose={() => setHistoryInvoice(null)}
           onAddPayment={() => { setHistoryInvoice(null); setPayInvoice(historyInvoice); }}
+          onPaymentChanged={async () => {
+            const inv = historyInvoice;
+            if (!inv) return;
+            try {
+              const fresh = await getPayments(inv.id);
+              setHistoryPayments(fresh);
+            } catch { /* leave stale */ }
+            refresh();
+          }}
         />
       )}
 
@@ -1074,15 +1083,21 @@ function InvoiceInfoPanel({ invoice, history, loading, onClose }: {
 }
 
 // ── Payment History Panel ───────────────────────────────────────────────────
-function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment }: {
-  invoice: Invoice; payments: Payment[]; loading: boolean; onClose: () => void; onAddPayment: () => void;
+function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment, onPaymentChanged }: {
+  invoice: Invoice;
+  payments: Payment[];
+  loading: boolean;
+  onClose: () => void;
+  onAddPayment: () => void;
+  onPaymentChanged: () => void | Promise<void>;
 }) {
+  const [editing, setEditing] = useState<Payment | null>(null);
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0);
   const balance = Number(invoice.invoice_amount) - totalPaid;
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl mx-4 p-4 sm:p-6 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-3xl mx-4 p-4 sm:p-6 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <div>
             <div className="text-base font-medium text-gray-900">Payment History</div>
@@ -1101,8 +1116,8 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
           <table className="w-full text-[13px] mb-4">
             <thead className="bg-gray-50">
               <tr>
-                {['Date', 'Amount', 'Type', 'Reference', 'Bank'].map(h => (
-                  <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 ${h === 'Amount' ? 'text-right' : 'text-left'}`}>{h}</th>
+                {['Date', 'Amount', 'Type', 'Reference', 'Bank', ''].map((h, i) => (
+                  <th key={i} className={`px-4 py-2.5 font-medium text-gray-500 ${h === 'Amount' ? 'text-right' : 'text-left'}`}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -1114,6 +1129,14 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
                   <td className="px-4 py-3">{p.payment_type}</td>
                   <td className="px-4 py-3 text-gray-500">{p.payment_ref || '—'}</td>
                   <td className="px-4 py-3 text-gray-500">{p.bank || '—'}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => setEditing(p)}
+                      className="text-xs text-blue-600 hover:text-blue-700 hover:underline"
+                    >
+                      Edit
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1121,7 +1144,7 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
               <tr>
                 <td className="px-4 py-2.5 font-medium text-gray-900">Total Paid</td>
                 <td className="px-4 py-2.5 text-right font-semibold text-green-700">{formatINR(totalPaid)}</td>
-                <td colSpan={3} className="px-4 py-2.5 text-right text-sm">
+                <td colSpan={4} className="px-4 py-2.5 text-right text-sm">
                   {balance > 0
                     ? <span className="text-red-600 font-medium">Balance remaining: {formatINR(balance)}</span>
                     : <span className="text-green-600 font-medium">Fully paid</span>}
@@ -1138,6 +1161,134 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
             </button>
           )}
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Close</button>
+        </div>
+
+        {editing && (
+          <EditPaymentModal
+            invoice={invoice}
+            payment={editing}
+            otherPaid={payments.filter(x => x.id !== editing.id).reduce((s, p) => s + Number(p.amount), 0)}
+            onClose={() => setEditing(null)}
+            onSaved={async () => { setEditing(null); await onPaymentChanged(); }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Edit Payment Modal ──────────────────────────────────────────────────────
+function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
+  invoice: Invoice;
+  payment: Payment;
+  otherPaid: number;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+}) {
+  const { notify } = useToast();
+  const headroom = Number(invoice.invoice_amount) - otherPaid;
+
+  const [amount, setAmount] = useState(String(payment.amount));
+  const [paymentType, setPaymentType] = useState(payment.payment_type);
+  const [paymentRef, setPaymentRef] = useState(payment.payment_ref ?? '');
+  const [paymentDate, setPaymentDate] = useState(String(payment.payment_date).slice(0, 10));
+  const [bank, setBank] = useState(payment.bank ?? '');
+  const [saving, setSaving] = useState(false);
+
+  const numAmount = Number(amount) || 0;
+  const overHeadroom = numAmount > headroom + 0.001;
+
+  async function handleSubmit() {
+    if (numAmount <= 0) { notify('Amount must be greater than 0'); return; }
+    if (overHeadroom) {
+      notify(`Amount exceeds invoice headroom of ${formatINR(headroom)}`);
+      return;
+    }
+    if (paymentType !== 'Cash' && !paymentRef.trim()) {
+      notify('Reference / TXN no is required for non-cash payments');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updatePayment(invoice.id, payment.id, {
+        amount: numAmount,
+        payment_type: paymentType,
+        payment_ref: paymentType === 'Cash' ? null : paymentRef.trim(),
+        payment_date: paymentDate,
+        bank: paymentType === 'Cash' ? null : (bank.trim() || null),
+      });
+      notify('Payment updated');
+      await onSaved();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to update payment');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-lg w-full max-w-lg mx-4 p-4 sm:p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <div className="text-base font-medium text-gray-900">Edit Payment</div>
+            <div className="text-xs text-gray-500 mt-0.5">
+              Headroom available: <span className="font-medium">{formatINR(headroom)}</span>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">&#10005;</button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Amount *</label>
+            <input
+              type="number" step="0.01" value={amount}
+              onChange={e => setAmount(e.target.value)}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
+            {overHeadroom && <div className="text-xs text-red-600 mt-1">Exceeds invoice headroom</div>}
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Payment Date</label>
+            <input
+              type="date" value={paymentDate}
+              onChange={e => setPaymentDate(e.target.value)}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Payment Type</label>
+            <select value={paymentType} onChange={e => setPaymentType(e.target.value)}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white">
+              {PAYMENT_TYPES.map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+          {paymentType !== 'Cash' && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Reference / TXN No *</label>
+              <input value={paymentRef} onChange={e => setPaymentRef(e.target.value)} placeholder="Cheque / TXN number"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            </div>
+          )}
+          {paymentType !== 'Cash' && (
+            <div className="sm:col-span-2">
+              <label className="block text-xs text-gray-500 mb-1">Bank</label>
+              <BankSelect
+                value={bank}
+                onChange={setBank}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button onClick={handleSubmit} disabled={saving || numAmount <= 0 || overHeadroom}
+            className="px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50">
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+          <button onClick={onClose} className="px-5 py-2.5 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
         </div>
       </div>
     </div>

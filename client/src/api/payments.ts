@@ -11,3 +11,10 @@ export function createPayment(invoiceId: string, data: CreatePaymentData): Promi
     body: JSON.stringify(data),
   });
 }
+
+export function updatePayment(invoiceId: string, paymentId: string, data: CreatePaymentData): Promise<Payment & { invoice_payment_status?: string }> {
+  return apiFetch<Payment & { invoice_payment_status?: string }>(`/invoices/${invoiceId}/payments/${paymentId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
