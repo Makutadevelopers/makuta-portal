@@ -1392,6 +1392,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
 
   function handleVendorChange(id: string) {
     setVendorId(id);
+    setPendingNewVendorName(null);
     const v = localVendors.find(v => v.id === id);
     if (v) {
       setVendorName(v.name);
@@ -1399,24 +1400,21 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
     }
   }
 
-  async function handleCreateVendor(name: string) {
+  // Stage a new vendor name. The POST /vendors call is deferred to
+  // handleSubmit so the new vendor's category column is set from the
+  // category picked further down the form.
+  function handleStageNewVendor(name: string) {
     const trimmed = name.trim();
     if (!trimmed) return;
-    setCreatingVendor(true);
-    try {
-      const created = await createVendor({ name: trimmed, payment_terms: 30, category: purpose || undefined });
-      setLocalVendors(prev => [...prev, created]);
-      setVendorId(created.id);
-      setVendorName(created.name);
-      setVendorSearch('');
-      notify(`Vendor "${created.name}" created (30-day terms)`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to create vendor';
-      setError(msg);
-      notify(msg);
-    } finally {
-      setCreatingVendor(false);
-    }
+    setPendingNewVendorName(trimmed);
+    setVendorName(trimmed);
+    setVendorId('');
+    setVendorSearch('');
+  }
+
+  function clearPendingVendor() {
+    setPendingNewVendorName(null);
+    setVendorName('');
   }
 
   function handleDateChange(d: string) {
