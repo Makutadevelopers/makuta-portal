@@ -44,32 +44,36 @@ async function send(options: EmailOptions): Promise<boolean> {
 }
 
 // ── Recipient resolution ────────────────────────────────────────────────────
-// Prefer the env-driven allowlist (HO_NOTIFY_TO=a@x.com,b@y.com). Fall back
-// to every active HO user in the DB so we don't silently stop notifying when
-// the env is empty (e.g. fresh deploys before the var is set).
-
-let cachedHoEmails: { value: string[]; fetchedAt: number } | null = null;
-const HO_CACHE_TTL_MS = 5 * 60 * 1000;
+// The users table is the source of truth: any active HO user with an email is
+// a recipient. HO_NOTIFY_TO is an *additive* env-driven CC list for addresses
+// that aren't in users (e.g. an external accountant). Results are not cached
+// so an email change in Employee Management takes effect on the next
+// notification, not after a 5-minute TTL.
 
 export async function getHoRecipients(): Promise<string[]> {
-  const fromEnv = env.HO_NOTIFY_TO.split(',').map(s => s.trim()).filter(Boolean);
-  if (fromEnv.length > 0) return fromEnv;
-
-  const now = Date.now();
-  if (cachedHoEmails && now - cachedHoEmails.fetchedAt < HO_CACHE_TTL_MS) {
-    return cachedHoEmails.value;
-  }
+  let fromDb: string[] = [];
   try {
     const rows = await query<{ email: string }>(
       "SELECT email FROM users WHERE role = 'ho' AND is_active = true AND email IS NOT NULL"
     );
-    const value = rows.map(r => r.email).filter(Boolean);
-    cachedHoEmails = { value, fetchedAt: now };
-    return value;
+    fromDb = rows.map(r => r.email).filter(Boolean);
   } catch (err) {
     console.error('[email] failed to resolve HO recipients from DB:', err);
-    return [];
   }
+
+  const fromEnv = env.HO_NOTIFY_TO.split(',').map(s => s.trim()).filter(Boolean);
+
+  // Merge + case-insensitive dedupe; preserve insertion order (DB first).
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const e of [...fromDb, ...fromEnv]) {
+    const key = e.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(e);
+    }
+  }
+  return merged;
 }
 
 // Map of site_name → list of active site-accountant emails assigned to that
