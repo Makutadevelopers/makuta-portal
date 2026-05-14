@@ -662,11 +662,28 @@ export async function permanentDeleteInvoice(req: Request, res: Response, next: 
 
     // Atomic purge — all dependents plus invoice in one transaction
     await withTransaction(async (tx) => {
+      // Capture bank_txn_ids before deleting payments so we can prune
+      // bank_transactions that no longer have any linked payments.
+      const linked = await tx.query<{ bank_txn_id: string }>(
+        'SELECT DISTINCT bank_txn_id FROM payments WHERE invoice_id = $1 AND bank_txn_id IS NOT NULL',
+        [id]
+      );
+      const linkedTxnIds = linked.map(r => r.bank_txn_id);
+
       await tx.query('DELETE FROM payments WHERE invoice_id = $1', [id]);
       await tx.query('DELETE FROM attachments WHERE invoice_id = $1', [id]);
       // Null out audit FK instead of deleting — preserves history
       await tx.query('UPDATE audit_logs SET invoice_id = NULL WHERE invoice_id = $1', [id]);
       await tx.query('DELETE FROM invoices WHERE id = $1', [id]);
+
+      if (linkedTxnIds.length > 0) {
+        await tx.query(
+          `DELETE FROM bank_transactions
+           WHERE id = ANY($1)
+             AND NOT EXISTS (SELECT 1 FROM payments WHERE bank_txn_id = bank_transactions.id)`,
+          [linkedTxnIds]
+        );
+      }
     });
 
     // Clean up physical files from disk (local dev) after the DB rows are gone
@@ -695,10 +712,28 @@ export async function purgeOldBinInvoices(_req: Request, res: Response, next: Ne
 
       const ids = old.map(r => r.id);
       purgedIds.push(...ids);
+
+      // Same prune-orphans pattern as permanentDeleteInvoice — capture
+      // the linked bank_transactions before payments are gone.
+      const linked = await tx.query<{ bank_txn_id: string }>(
+        'SELECT DISTINCT bank_txn_id FROM payments WHERE invoice_id = ANY($1) AND bank_txn_id IS NOT NULL',
+        [ids]
+      );
+      const linkedTxnIds = linked.map(r => r.bank_txn_id);
+
       await tx.query('DELETE FROM payments WHERE invoice_id = ANY($1)', [ids]);
       await tx.query('DELETE FROM attachments WHERE invoice_id = ANY($1)', [ids]);
       await tx.query('UPDATE audit_logs SET invoice_id = NULL WHERE invoice_id = ANY($1)', [ids]);
       await tx.query('DELETE FROM invoices WHERE id = ANY($1)', [ids]);
+
+      if (linkedTxnIds.length > 0) {
+        await tx.query(
+          `DELETE FROM bank_transactions
+           WHERE id = ANY($1)
+             AND NOT EXISTS (SELECT 1 FROM payments WHERE bank_txn_id = bank_transactions.id)`,
+          [linkedTxnIds]
+        );
+      }
       return old.length;
     });
 

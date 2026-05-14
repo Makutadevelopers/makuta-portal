@@ -865,10 +865,16 @@ export async function clearImportedData(req: Request, res: Response, next: NextF
       const result = await query<{ count: string }>('SELECT COUNT(*)::TEXT AS count FROM payments');
       const count = parseInt(result[0].count, 10);
       await query('DELETE FROM payments');
-      // Reset all invoice statuses to Not Paid
-      await query("UPDATE invoices SET payment_status = 'Not Paid', updated_at = NOW()");
+      // Reset all invoice statuses — credit-note allocations may still be
+      // outstanding, so recompute properly rather than blanket 'Not Paid'.
+      await query(
+        `UPDATE invoices SET payment_status = ${paymentStatusCase('invoices')}, updated_at = NOW()
+         WHERE deleted_at IS NULL`
+      );
+      // All payments are gone — every bank_transactions row is now orphaned.
+      await query('DELETE FROM bank_transactions');
       await logAudit({ userId: req.user!.id, action: `Cleared all ${count} payments` });
-      res.json({ message: `Deleted ${count} payments. All invoices reset to Not Paid.`, deleted: count });
+      res.json({ message: `Deleted ${count} payments and reset invoice statuses.`, deleted: count });
     } else if (type === 'invoices') {
       // Delete dependents first (FK constraints)
       await query('DELETE FROM payments');
@@ -972,19 +978,45 @@ export async function undoBatchImport(req: Request, res: Response, next: NextFun
       return;
     }
 
+    // Capture the invoice/bank-txn IDs that the to-be-deleted payments touch.
+    // We need these BEFORE the DELETE so we can recompute their cached
+    // payment_status (and prune orphaned bank_transactions) afterwards —
+    // most importantly when payments from this batch were linked to
+    // invoices from a DIFFERENT batch (e.g. a payments-only import targeting
+    // existing invoices), which would otherwise stay stuck on a stale status.
+    const affectedRows = await query<{ invoice_id: string; bank_txn_id: string | null }>(
+      'SELECT DISTINCT invoice_id, bank_txn_id FROM payments WHERE batch_id = $1',
+      [batchId]
+    );
+    const affectedInvoiceIds = Array.from(new Set(affectedRows.map(r => r.invoice_id)));
+    const affectedBankTxnIds = Array.from(new Set(affectedRows.map(r => r.bank_txn_id).filter((v): v is string => v !== null)));
+
     // Delete in order: payments → attachments → invoices → vendors
     await query('DELETE FROM payments WHERE batch_id = $1', [batchId]);
     await query('DELETE FROM attachments WHERE invoice_id IN (SELECT id FROM invoices WHERE batch_id = $1)', [batchId]);
     await query('DELETE FROM invoices WHERE batch_id = $1', [batchId]);
     await query('DELETE FROM vendors WHERE batch_id = $1', [batchId]);
 
-    // Recompute payment status for invoices that had payments removed
-    // (in case payments from this batch were linked to invoices from another batch)
-    await query(
-      `UPDATE invoices SET payment_status = ${paymentStatusCase('invoices')}, updated_at = NOW()
-       WHERE id IN (SELECT DISTINCT invoice_id FROM payments WHERE batch_id IS NULL OR batch_id != $1)`,
-      [batchId]
-    );
+    // Recompute payment_status only on invoices that (a) had a payment from
+    // this batch and (b) still exist (weren't deleted with the batch).
+    if (affectedInvoiceIds.length > 0) {
+      await query(
+        `UPDATE invoices SET payment_status = ${paymentStatusCase('invoices')}, updated_at = NOW()
+         WHERE id = ANY($1) AND deleted_at IS NULL`,
+        [affectedInvoiceIds]
+      );
+    }
+
+    // Prune bank_transactions that now have zero linked payments — they were
+    // created by the import path and no longer reflect a real cheque/NEFT.
+    if (affectedBankTxnIds.length > 0) {
+      await query(
+        `DELETE FROM bank_transactions
+         WHERE id = ANY($1)
+           AND NOT EXISTS (SELECT 1 FROM payments WHERE bank_txn_id = bank_transactions.id)`,
+        [affectedBankTxnIds]
+      );
+    }
 
     await logAudit({
       userId: req.user!.id,
