@@ -14,6 +14,7 @@ import PaymentAging from './pages/ho/PaymentAging';
 import CashflowPage from './pages/ho/CashflowPage';
 import VendorMaster from './pages/ho/VendorMaster';
 import VendorDetail from './pages/ho/VendorDetail';
+import BankMaster from './pages/ho/BankMaster';
 import AuditTrail from './pages/ho/AuditTrail';
 import Bin from './pages/ho/Bin';
 import BankReconciliation from './pages/ho/BankReconciliation';
@@ -82,6 +83,7 @@ export default function AppRouter() {
         <Route path="/audit" element={<ProtectedRoute allowed={['ho', 'mgmt']}><AuditTrail /></ProtectedRoute>} />
         <Route path="/bin" element={<ProtectedRoute allowed={['ho', 'mgmt']}><Bin /></ProtectedRoute>} />
         <Route path="/bank-reconciliation" element={<ProtectedRoute allowed={['ho']}><BankReconciliation /></ProtectedRoute>} />
+        <Route path="/banks" element={<ProtectedRoute allowed={['ho']}><BankMaster /></ProtectedRoute>} />
         <Route path="/petty-cash" element={<ProtectedRoute allowed={['ho']}><PettyCash /></ProtectedRoute>} />
 
         {/* Mgmt routes */}

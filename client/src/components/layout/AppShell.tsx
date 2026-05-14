@@ -14,6 +14,7 @@ const HO_TABS = [
   { to: '/payment-aging', label: 'Payment Aging' },
   { to: '/cashflow', label: 'Cashflow' },
   { to: '/vendors', label: 'Vendor Master' },
+  { to: '/banks', label: 'Bank Master' },
   { to: '/bank-reconciliation', label: 'Bank Reconciliation' },
   { to: '/petty-cash', label: 'Petty Cash' },
   { to: '/audit', label: 'Audit Trail' },
