@@ -1425,7 +1425,11 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
-    if (!vendorId) { setError('Pick a vendor from the dropdown, or click "+ Create vendor" if it isn\'t in Vendor Master yet.'); return; }
+    if (!vendorId && !pendingNewVendorName) {
+      setError('Pick a vendor from the dropdown, or click "+ Add as new vendor" if it isn\'t in Vendor Master yet.');
+      return;
+    }
+    if (!purpose) { setError('Pick a category'); return; }
     if (!invoiceNo.trim()) { setError('Invoice number is required'); return; }
     if (baseNum <= 0) { setError('Enter a valid base amount'); return; }
     if (totalAmount <= 0) { setError('Total amount must be greater than zero'); return; }
@@ -1436,8 +1440,35 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
 
     setSaving(true);
     try {
+      // Deferred vendor create: persist the staged name now, using the
+      // category the HO picked just above.
+      let finalVendorId = vendorId;
+      let finalVendorName = vendorName;
+      if (pendingNewVendorName) {
+        try {
+          const created = await createVendor({
+            name: pendingNewVendorName,
+            payment_terms: 30,
+            category: purpose || undefined,
+          });
+          setLocalVendors(prev => [...prev, created]);
+          finalVendorId = created.id;
+          finalVendorName = created.name;
+          setVendorId(created.id);
+          setVendorName(created.name);
+          setPendingNewVendorName(null);
+          notify(`Vendor "${created.name}" created (30-day terms)`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to create vendor';
+          setError(msg);
+          notify(msg);
+          setSaving(false);
+          return;
+        }
+      }
+
       const data = {
-        month, invoice_date: invoiceDate, vendor_id: vendorId, vendor_name: vendorName,
+        month, invoice_date: invoiceDate, vendor_id: finalVendorId, vendor_name: finalVendorName,
         invoice_no: invoiceNo.trim(), po_number: poNumber.trim() || null,
         purpose, site, invoice_amount: totalAmount,
         base_amount: baseNum, cgst_pct: cgstNum, sgst_pct: sgstNum, igst_pct: igstNum,
@@ -1500,6 +1531,13 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
               const v = localVendors.find(v => v.id === vendorId);
               return v ? <span className="text-green-600 ml-2">&#10003; {v.name} · {v.payment_terms}-day terms</span> : null;
             })()}
+            {pendingNewVendorName && (
+              <span className="text-amber-600 ml-2">
+                New vendor &ldquo;{pendingNewVendorName}&rdquo; — will be created on Save
+                <button type="button" onClick={clearPendingVendor}
+                  className="ml-2 text-gray-400 hover:text-gray-600 underline">clear</button>
+              </span>
+            )}
           </label>
           <div className="relative">
             <input value={vendorSearch}
@@ -1524,12 +1562,11 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
                     <div className="text-xs text-gray-400 mb-1">No matching vendor found</div>
                     <button
                       type="button"
-                      disabled={creatingVendor}
                       onMouseDown={e => e.preventDefault()}
-                      onClick={() => handleCreateVendor(vendorSearch)}
-                      className="text-xs text-blue-600 hover:underline disabled:opacity-50"
+                      onClick={() => handleStageNewVendor(vendorSearch)}
+                      className="text-xs text-blue-600 hover:underline"
                     >
-                      {creatingVendor ? 'Creating...' : `+ Create vendor "${vendorSearch.trim()}" (30-day terms)`}
+                      + Add &ldquo;{vendorSearch.trim()}&rdquo; as new vendor (saved with this invoice)
                     </button>
                   </div>
                 )}
@@ -1574,6 +1611,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
                 <CategorySelect
                   value={purpose}
                   onChange={setPurpose}
+                  placeholder="Select category"
                   className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
                 />
               );
