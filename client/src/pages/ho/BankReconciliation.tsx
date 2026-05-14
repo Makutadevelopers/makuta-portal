@@ -73,7 +73,7 @@ export default function BankReconciliation() {
       </div>
 
       {/* Table */}
-      <div className="bg-white border border-gray-100 rounded-xl">
+      <div className="bg-white border border-gray-100 rounded-xl overflow-x-auto">
         <div>
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">

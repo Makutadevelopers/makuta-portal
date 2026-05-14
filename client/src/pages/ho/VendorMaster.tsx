@@ -248,7 +248,7 @@ export default function VendorMaster() {
       {loading ? (
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100">
+        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>

@@ -271,7 +271,7 @@ export default function EmployeeManagement() {
         {loading ? (
           <div className="text-gray-400 text-sm py-12 text-center">Loading...</div>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-100">
+          <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50/60 text-xs text-gray-500 uppercase tracking-wider">
                 <tr>

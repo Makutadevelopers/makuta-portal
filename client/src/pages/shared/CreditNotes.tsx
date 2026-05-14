@@ -113,7 +113,7 @@ export default function CreditNotes() {
           <div className="text-gray-500 text-sm">No credit notes yet</div>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100">
+        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>

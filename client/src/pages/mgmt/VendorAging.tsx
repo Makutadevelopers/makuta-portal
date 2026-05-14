@@ -126,7 +126,7 @@ export default function VendorAging() {
           </div>
 
           {/* Vendor table */}
-          <div className="bg-white rounded-xl border border-gray-100">
+          <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
             <table className="w-full text-[13px]">
               <thead>
                 <tr>

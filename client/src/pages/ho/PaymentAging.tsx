@@ -162,7 +162,7 @@ function AgingTable({ title, subtitle, rows, isOverdue, stickyTop }: {
         </div>
         <span className="text-[11px] text-gray-400">Click column headers to sort</span>
       </div>
-      <div className="bg-white rounded-xl border border-gray-100">
+      <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead className="bg-gray-50">
             <tr>
