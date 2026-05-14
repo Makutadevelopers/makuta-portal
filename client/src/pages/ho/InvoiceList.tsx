@@ -756,9 +756,9 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
       await createPayment(invoice.id, {
         amount: numAmount,
         payment_type: paymentType,
-        payment_ref: paymentRef.trim(),
+        payment_ref: paymentType === 'Cash' ? null : paymentRef.trim(),
         payment_date: paymentDate,
-        bank: bank || null,
+        bank: paymentType === 'Cash' ? null : (bank.trim() || null),
       });
       onSaved();
     } catch (err) {

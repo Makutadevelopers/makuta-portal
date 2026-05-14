@@ -23,7 +23,9 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM
 const createPaymentSchema = z.object({
   amount: z.number().positive('Amount must be positive').max(1e12, 'Amount too large'),
   payment_type: z.string().min(1, 'Payment type is required').max(50),
-  payment_ref: z.string().min(1, 'Reference / TXN number is required').max(100),
+  // payment_ref is optional/nullable at the API layer — Cash payments don't carry a
+  // cheque/TXN reference. The client enforces "ref required for non-Cash".
+  payment_ref: z.string().max(100).nullable().optional(),
   payment_date: isoDate,
   bank: z.string().max(100).nullable().optional(),
 });
