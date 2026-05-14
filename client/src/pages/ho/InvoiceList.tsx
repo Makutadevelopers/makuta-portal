@@ -705,7 +705,7 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
 }) {
   const [mode, setMode] = useState<'full' | 'part'>('full');
   const [amount, setAmount] = useState(String(balance));
-  const [paymentType, setPaymentType] = useState('NEFT');
+  const [paymentType, setPaymentType] = useState('Cheque');
   const [paymentRef, setPaymentRef] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [bank, setBank] = useState('HDFC');
