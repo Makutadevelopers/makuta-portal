@@ -3,6 +3,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useInvoices } from '../../hooks/useInvoices';
 import { formatINR } from '../../utils/formatters';
 import AppShell from '../../components/layout/AppShell';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 type ViewMode = 'category' | 'vendor';
 
@@ -11,6 +12,7 @@ export default function SiteExpenditure() {
   const { invoices, loading } = useInvoices();
   const [view, setView] = useState<ViewMode>('category');
   const [fMonth, setFMonth] = useState('All');
+  const { ref: stickyHeaderRef } = useStickyHeaderHeight();
 
   const months = useMemo(() => {
     const set = new Set(invoices.map(i => i.month?.slice(0, 7)));
@@ -51,23 +53,28 @@ export default function SiteExpenditure() {
 
   return (
     <AppShell>
-      <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
-        <div>
-          <div className="text-lg font-medium text-gray-900">
-            Expenditure — {(user?.sites && user.sites.length > 1)
-              ? `${user.sites.length} sites`
-              : (user?.sites?.[0] ?? user?.site ?? '')}
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-2 mb-4"
+      >
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <div className="text-lg font-medium text-gray-900">
+              Expenditure — {(user?.sites && user.sites.length > 1)
+                ? `${user.sites.length} sites`
+                : (user?.sites?.[0] ?? user?.site ?? '')}
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              {(user?.sites && user.sites.length > 1)
+                ? `Aggregated for: ${user.sites.join(', ')} · cashflow and aging managed by Head Office`
+                : 'Invoice amounts for your site · cashflow and aging managed by Head Office'}
+            </div>
           </div>
-          <div className="text-xs text-gray-500 mt-1">
-            {(user?.sites && user.sites.length > 1)
-              ? `Aggregated for: ${user.sites.join(', ')} · cashflow and aging managed by Head Office`
-              : 'Invoice amounts for your site · cashflow and aging managed by Head Office'}
-          </div>
+          <select value={fMonth} onChange={e => setFMonth(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+            <option value="All">All Months</option>
+            {months.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          </select>
         </div>
-        <select value={fMonth} onChange={e => setFMonth(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-          <option value="All">All Months</option>
-          {months.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
-        </select>
       </div>
 
       {loading ? (

@@ -34,6 +34,8 @@ interface InvoiceRow {
   site: string;
   pushed?: boolean;
   deleted_at?: string | null;
+  vendor_name: string;
+  invoice_no: string | null;
 }
 
 interface PaymentRow {
@@ -68,7 +70,7 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
     const result = await withTransaction(async (tx) => {
       // Lock the invoice row so no other payment can pass the balance check simultaneously
       const invoice = await tx.queryOne<InvoiceRow>(
-        `SELECT id, invoice_amount, site, pushed, deleted_at
+        `SELECT id, invoice_amount, site, pushed, deleted_at, vendor_name, invoice_no
          FROM invoices WHERE id = $1 FOR UPDATE`,
         [invoiceId]
       );
@@ -134,7 +136,16 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
 
       const newStatus = statusRow?.payment_status ?? 'Not Paid';
       const newBalance = balance - data.amount;
-      return { status: 201, body: { payment, newStatus, newBalance } };
+      return {
+        status: 201,
+        body: {
+          payment,
+          newStatus,
+          newBalance,
+          vendorName: invoice.vendor_name,
+          invoiceNo: invoice.invoice_no,
+        },
+      };
     });
 
     if (result.status !== 201) {
@@ -143,7 +154,13 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
     }
 
     // Non-blocking audit + email outside the transaction
-    const { payment, newStatus, newBalance } = result.body as { payment: PaymentRow; newStatus: string; newBalance: number };
+    const { payment, newStatus, newBalance, vendorName, invoiceNo } = result.body as {
+      payment: PaymentRow;
+      newStatus: string;
+      newBalance: number;
+      vendorName: string;
+      invoiceNo: string | null;
+    };
     const isPartial = newStatus === 'Partial';
     try {
       await logAudit({
@@ -157,8 +174,8 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
     }
 
     notifyPaymentRecorded({
-      vendorName: '',
-      invoiceNo: invoiceId,
+      vendorName: vendorName || '(vendor not set)',
+      invoiceNo: invoiceNo ?? '(no invoice no)',
       paymentAmount: data.amount,
       paymentType: data.payment_type,
       balance: newBalance,

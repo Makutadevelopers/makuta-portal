@@ -3,6 +3,7 @@ import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { formatINR } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 interface VendorRow {
   vendor: string;
@@ -20,6 +21,7 @@ export default function VendorAging() {
   const [sortBy, setSortBy] = useState<string>('overdueBalance');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const { withinTerms, overdue, loading } = useAgingCalc(site);
+  const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
   const vendorRows = useMemo(() => {
     const map = new Map<string, VendorRow>();
@@ -72,7 +74,11 @@ export default function VendorAging() {
   }
 
   const SortTh = ({ col, label, right }: { col: string; label: string; right?: boolean }) => (
-    <th onClick={() => handleSort(col)} className={`px-4 py-2.5 font-medium whitespace-nowrap cursor-pointer select-none bg-gray-50 ${right ? 'text-right' : 'text-left'} ${sortBy === col ? 'text-gray-900' : 'text-gray-500'}`}>
+    <th
+      onClick={() => handleSort(col)}
+      className={`px-4 py-2.5 font-medium whitespace-nowrap cursor-pointer select-none bg-gray-50 sticky z-20 border-b border-gray-100 ${right ? 'text-right' : 'text-left'} ${sortBy === col ? 'text-gray-900' : 'text-gray-500'}`}
+      style={{ top: stickyHeaderHeight }}
+    >
       {label} <span className="text-[10px] opacity-50">{sortBy === col ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}</span>
     </th>
   );
@@ -83,15 +89,20 @@ export default function VendorAging() {
 
   return (
     <AppShell>
-      <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
-        <div>
-          <div className="text-lg font-medium text-gray-900">Vendor Aging</div>
-          <div className="text-xs text-gray-500 mt-1">One row per vendor · outstanding balance split by overdue vs within terms · click headers to sort</div>
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-2 mb-4"
+      >
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <div className="text-lg font-medium text-gray-900">Vendor Aging</div>
+            <div className="text-xs text-gray-500 mt-1">One row per vendor · outstanding balance split by overdue vs within terms · click headers to sort</div>
+          </div>
+          <select value={site} onChange={e => setSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+            <option value="All">All Sites</option>
+            {SITES.map(s => <option key={s}>{s}</option>)}
+          </select>
         </div>
-        <select value={site} onChange={e => setSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-          <option value="All">All Sites</option>
-          {SITES.map(s => <option key={s}>{s}</option>)}
-        </select>
       </div>
 
       {loading ? (
@@ -115,19 +126,19 @@ export default function VendorAging() {
           </div>
 
           {/* Vendor table */}
-          <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+          <div className="bg-white rounded-xl border border-gray-100">
             <table className="w-full text-[13px]">
               <thead>
                 <tr>
                   <SortTh col="vendor" label="Vendor" />
-                  <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50">Terms</th>
-                  <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50">Invoices</th>
+                  <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Terms</th>
+                  <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Invoices</th>
                   <SortTh col="totalBalance" label="Total Balance" right />
                   <SortTh col="withinBalance" label="Within Terms" right />
                   <SortTh col="overdueBalance" label="Overdue Balance" right />
                   <SortTh col="maxDaysPast" label="Max Days Past Due" right />
-                  <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50">Next Due</th>
-                  <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50">Status</th>
+                  <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Next Due</th>
+                  <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Status</th>
                 </tr>
               </thead>
               <tbody>

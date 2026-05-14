@@ -20,6 +20,7 @@ import { Invoice } from '../../types/invoice';
 import { CreditNote } from '../../types/creditNote';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 export default function CreditNotes() {
   const { user } = useAuth();
@@ -33,6 +34,7 @@ export default function CreditNotes() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -69,19 +71,24 @@ export default function CreditNotes() {
 
   return (
     <AppShell>
-      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-        <div>
-          <div className="text-lg font-medium text-gray-900">Credit Notes</div>
-          <div className="text-xs text-gray-500 mt-0.5">
-            Record vendor credit notes for returns, rate corrections, and discounts
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-2 mb-4"
+      >
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <div className="text-lg font-medium text-gray-900">Credit Notes</div>
+            <div className="text-xs text-gray-500 mt-0.5">
+              Record vendor credit notes for returns, rate corrections, and discounts
+            </div>
           </div>
+          <button
+            onClick={() => setShowForm((s) => !s)}
+            className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+          >
+            {showForm ? 'Cancel' : '+ New Credit Note'}
+          </button>
         </div>
-        <button
-          onClick={() => setShowForm((s) => !s)}
-          className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-        >
-          {showForm ? 'Cancel' : '+ New Credit Note'}
-        </button>
       </div>
 
       {showForm && (
@@ -106,16 +113,17 @@ export default function CreditNotes() {
           <div className="text-gray-500 text-sm">No credit notes yet</div>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+        <div className="bg-white rounded-xl border border-gray-100">
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
                 {['CN Date', 'CN No', 'Vendor', 'Site', 'Total', 'Allocated', 'Unallocated', 'Remarks', 'Actions'].map((h) => (
                   <th
                     key={h}
-                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap ${
+                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky z-20 border-b border-gray-100 ${
                       ['Total', 'Allocated', 'Unallocated'].includes(h) ? 'text-right' : 'text-left'
                     }`}
+                    style={{ top: stickyHeaderHeight }}
                   >
                     {h}
                   </th>

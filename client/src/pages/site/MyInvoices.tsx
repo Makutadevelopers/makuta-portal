@@ -16,6 +16,8 @@ import SiteBulkPayModal from '../../components/shared/SiteBulkPayModal';
 import { getAllBalances } from '../../api/pettyCash';
 import { PettyCashBalance } from '../../types/pettyCash';
 import { useToast } from '../../context/ToastContext';
+import { normaliseSearch, highlight, amountMatchesSearch } from '../../utils/searchHighlight';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 const MINOR_LIMIT = 50000;
 
@@ -36,6 +38,7 @@ export default function MyInvoices() {
   const [duplicateFrom, setDuplicateFrom] = useState<Invoice | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const { notify } = useToast();
+  const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
   const selectedInvoices = useMemo(
     () => invoices.filter(i => selectedIds.has(i.id)),
     [invoices, selectedIds]
@@ -106,8 +109,20 @@ export default function MyInvoices() {
         if (invMonth !== fMonth) return false;
       }
       if (search) {
-        const q = search.toLowerCase();
-        if (!`${i.vendor_name} ${i.invoice_no} ${i.po_number ?? ''}`.toLowerCase().includes(q)) return false;
+        const q = normaliseSearch(search);
+        if (q) {
+          const amount = Number(i.invoice_amount);
+          const hay = [
+            i.vendor_name,
+            i.invoice_no,
+            i.po_number,
+            Number.isFinite(amount) ? amount.toString() : '',
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
       }
       return true;
     });
@@ -128,7 +143,11 @@ export default function MyInvoices() {
 
   return (
     <AppShell>
-      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-1 mb-4"
+      >
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="text-lg font-medium text-gray-900">My Invoices</div>
         <div className="flex items-center gap-2 flex-wrap">
           {selectedIds.size > 0 && (
@@ -228,24 +247,6 @@ export default function MyInvoices() {
         />
       )}
 
-      {/* New Invoice Form (top). Edit opens inline below the row — see table below. */}
-      {showForm && (
-        <InvoiceForm
-          key={duplicateFrom ? `dup-${duplicateFrom.id}` : 'new'}
-          allowedSites={user?.sites && user.sites.length > 0 ? user.sites : (user?.site ? [user.site] : [])}
-          vendors={vendors}
-          editInvoice={null}
-          prefillFrom={duplicateFrom}
-          onCancel={() => { setShowForm(false); setDuplicateFrom(null); }}
-          onSaved={() => {
-            setShowForm(false);
-            notify(duplicateFrom ? 'Invoice duplicated' : 'Invoice added');
-            setDuplicateFrom(null);
-            refresh();
-          }}
-        />
-      )}
-
       {/* Filters */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <input
@@ -287,15 +288,37 @@ export default function MyInvoices() {
         </select>
         <span className="text-xs text-gray-400 ml-auto">{filtered.length} records</span>
       </div>
+      </div>
+
+      {/* New Invoice Form (top). Edit opens inline below the row — see table below. */}
+      {showForm && (
+        <InvoiceForm
+          key={duplicateFrom ? `dup-${duplicateFrom.id}` : 'new'}
+          allowedSites={user?.sites && user.sites.length > 0 ? user.sites : (user?.site ? [user.site] : [])}
+          vendors={vendors}
+          editInvoice={null}
+          prefillFrom={duplicateFrom}
+          onCancel={() => { setShowForm(false); setDuplicateFrom(null); }}
+          onSaved={() => {
+            setShowForm(false);
+            notify(duplicateFrom ? 'Invoice duplicated' : 'Invoice added');
+            setDuplicateFrom(null);
+            refresh();
+          }}
+        />
+      )}
 
       {loading ? (
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+        <div className="bg-white rounded-xl border border-gray-100">
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-2.5 w-8">
+                <th
+                  className="px-4 py-2.5 w-8 bg-gray-50 sticky z-20 border-b border-gray-100"
+                  style={{ top: stickyHeaderHeight }}
+                >
                   {(() => {
                     const eligible = filtered.filter(i => !i.pushed && i.payment_status !== 'Paid');
                     const allSelected = eligible.length > 0 && eligible.every(i => selectedIds.has(i.id));
@@ -317,7 +340,11 @@ export default function MyInvoices() {
                   })()}
                 </th>
                 {['#', 'Int. No', 'Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Amount', 'Status', 'Actions'].map(h => (
-                  <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap ${h === 'Amount' ? 'text-right' : 'text-left'}`}>
+                  <th
+                    key={h}
+                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}
+                    style={{ top: stickyHeaderHeight }}
+                  >
                     {h}
                   </th>
                 ))}
@@ -338,11 +365,11 @@ export default function MyInvoices() {
                   <td className="px-4 py-3 text-gray-400">{inv.sl_no}</td>
                   <td className="px-4 py-3 text-xs font-mono text-gray-500">{inv.internal_no ?? '—'}</td>
                   <td className="px-4 py-3 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
-                  <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={inv.vendor_name}>{inv.vendor_name}</td>
-                  <td className="px-4 py-3">{inv.invoice_no}</td>
-                  <td className="px-4 py-3 text-gray-500 max-w-[140px] truncate" title={inv.po_number ?? ''}>{inv.po_number ?? '—'}</td>
+                  <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={inv.vendor_name}>{highlight(inv.vendor_name, search)}</td>
+                  <td className="px-4 py-3">{highlight(inv.invoice_no, search)}</td>
+                  <td className="px-4 py-3 text-gray-500 max-w-[140px] truncate" title={inv.po_number ?? ''}>{inv.po_number ? highlight(inv.po_number, search) : '—'}</td>
                   <td className="px-4 py-3 text-gray-500">{inv.purpose}</td>
-                  <td className="px-4 py-3 text-right font-medium">
+                  <td className={`px-4 py-3 text-right font-medium ${amountMatchesSearch(Number(inv.invoice_amount), search) ? 'bg-yellow-100' : ''}`}>
                     {formatINR(Number(inv.invoice_amount))}
                     {Number(inv.allocated_credits ?? 0) > 0 && (
                       <div className="text-[10px] font-normal text-purple-600" title={`Credit note applied: ₹${Number(inv.allocated_credits).toLocaleString('en-IN')}`}>

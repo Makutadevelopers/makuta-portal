@@ -597,6 +597,13 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
               bankTxnId,
             ]
           );
+
+          // Recompute payment_status from sum(payments) + CN allocations so the
+          // denormalized invoices.payment_status stays in sync with reality.
+          // Without this, a CSV that lists paymentStatus='Partial' (or a value
+          // that doesn't match the auto-created payment) leaves the row stuck
+          // in the wrong state until something else triggers a recompute.
+          await recomputeInvoiceStatus(insertedInvoice.id);
         }
 
         imported++;

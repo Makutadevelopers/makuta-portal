@@ -9,6 +9,7 @@ import { formatINR, formatDate } from '../../utils/formatters';
 import { getSiteBalance, createExpense, getLedger } from '../../api/pettyCash';
 import { PettyCashBalance, PettyCashLedgerEntry } from '../../types/pettyCash';
 import { useToast } from '../../context/ToastContext';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 const MINOR_LIMIT = 50000;
 
@@ -22,6 +23,7 @@ export default function SitePettyCash() {
   const [balance, setBalance] = useState<PettyCashBalance | null>(null);
   const [ledger, setLedger]   = useState<PettyCashLedgerEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
   // Log Expense form
   const [showForm, setShowForm] = useState(false);
@@ -121,25 +123,30 @@ export default function SitePettyCash() {
 
   return (
     <AppShell>
-      <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
-        <div>
-          <div className="text-lg font-medium text-gray-900">Petty Cash</div>
-          <div className="text-xs text-gray-500 mt-1">
-            Your site's cash float · Log site-level expenses here
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-2 mb-4"
+      >
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <div className="text-lg font-medium text-gray-900">Petty Cash</div>
+            <div className="text-xs text-gray-500 mt-1">
+              Your site's cash float · Log site-level expenses here
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setShowPay(true)}
-            disabled={empty || payableInvoices.length === 0}
-            title={payableInvoices.length === 0 ? 'No draft invoices to pay' : empty ? 'No petty cash available' : ''}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50">
-            Pay Invoice
-          </button>
-          <button onClick={() => setShowForm(true)}
-            disabled={empty}
-            className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d] disabled:opacity-50">
-            + Log Expense
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowPay(true)}
+              disabled={empty || payableInvoices.length === 0}
+              title={payableInvoices.length === 0 ? 'No draft invoices to pay' : empty ? 'No petty cash available' : ''}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+              Pay Invoice
+            </button>
+            <button onClick={() => setShowForm(true)}
+              disabled={empty}
+              className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d] disabled:opacity-50">
+              + Log Expense
+            </button>
+          </div>
         </div>
       </div>
 
@@ -286,12 +293,18 @@ export default function SitePettyCash() {
       {loading ? (
         <div className="text-gray-500 text-sm py-12 text-center">Loading…</div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+        <div className="bg-white rounded-xl border border-gray-100">
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
                 {['Date','Type','Description','By','Amount'].map(h => (
-                  <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap ${h === 'Amount' ? 'text-right' : 'text-left'}`}>{h}</th>
+                  <th
+                    key={h}
+                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}
+                    style={{ top: stickyHeaderHeight }}
+                  >
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>

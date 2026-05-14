@@ -20,6 +20,7 @@ import {
   purgeOldBinInvoices,
   markDisputed,
   clearDispute,
+  recomputeAllStatuses,
 } from '../controllers/invoice.controller';
 
 const router = Router();
@@ -34,6 +35,7 @@ router.delete('/bin/:id', requireRole(['mgmt']), permanentDeleteInvoice);
 router.post('/', requireRole(['ho', 'site']), createInvoice);
 router.post('/bulk-finalize', requireRole(['ho']), bulkPushInvoices);
 router.post('/bulk-delete', requireRole(['ho']), bulkDeleteInvoices);
+router.post('/recompute-statuses', requireRole(['ho']), recomputeAllStatuses);
 router.patch('/:id', requireRole(['ho', 'site']), updateInvoice);
 router.post('/:id/push', requireRole(['ho']), pushInvoice);
 router.post('/:id/undo-push', requireRole(['ho']), undoPushInvoice);

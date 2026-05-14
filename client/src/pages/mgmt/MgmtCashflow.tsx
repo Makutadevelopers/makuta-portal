@@ -4,6 +4,7 @@ import { useVendors } from '../../hooks/useVendors';
 import { formatINR } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 interface PivotRow {
   month: string;
@@ -26,6 +27,7 @@ export default function MgmtCashflow() {
   const [fSite, setFSite] = useState('All');
   const [fCategory, setFCategory] = useState('All');
   const [fVendor, setFVendor] = useState('');
+  const { ref: stickyHeaderRef } = useStickyHeaderHeight();
 
   const drillByVendor = fCategory !== 'All';
 
@@ -77,24 +79,29 @@ export default function MgmtCashflow() {
 
   return (
     <AppShell>
-      <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
-        <div>
-          <div className="text-lg font-medium text-gray-900">Cashflow & Expenditure</div>
-          <div className="text-xs text-gray-500 mt-1">Monthly breakdown by accounting month</div>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <select value={fSite} onChange={e => setFSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-            <option value="All">All Sites</option>
-            {SITES.map(s => <option key={s}>{s}</option>)}
-          </select>
-          <select value={fCategory} onChange={e => setFCategory(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-            <option value="All">All Categories</option>
-            {allCategories.map(c => <option key={c}>{c}</option>)}
-          </select>
-          <select value={fVendor} onChange={e => setFVendor(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-            <option value="">All Vendors</option>
-            {vendors.map(v => <option key={v.id} value={v.name}>{v.name}</option>)}
-          </select>
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-2 mb-4"
+      >
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <div className="text-lg font-medium text-gray-900">Cashflow & Expenditure</div>
+            <div className="text-xs text-gray-500 mt-1">Monthly breakdown by accounting month</div>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <select value={fSite} onChange={e => setFSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+              <option value="All">All Sites</option>
+              {SITES.map(s => <option key={s}>{s}</option>)}
+            </select>
+            <select value={fCategory} onChange={e => setFCategory(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+              <option value="All">All Categories</option>
+              {allCategories.map(c => <option key={c}>{c}</option>)}
+            </select>
+            <select value={fVendor} onChange={e => setFVendor(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+              <option value="">All Vendors</option>
+              {vendors.map(v => <option key={v.id} value={v.name}>{v.name}</option>)}
+            </select>
+          </div>
         </div>
       </div>
 

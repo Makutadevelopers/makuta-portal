@@ -14,6 +14,8 @@ import { Vendor } from '../../types/vendor';
 import AppShell from '../../components/layout/AppShell';
 import BulkImportModal from '../../components/shared/BulkImportModal';
 import { useToast } from '../../context/ToastContext';
+import { highlight } from '../../utils/searchHighlight';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 const TERM_OPTIONS = [7, 10, 14, 15, 21, 30, 45, 60, 75, 90];
 
@@ -25,6 +27,7 @@ export default function VendorMaster() {
   const canManage = (v: Vendor) => !isSite || v.created_by === user?.id;
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
   // showForm renders the form above the table — used only for "+ Add Vendor"
   // and the unmastered-vendor quick-add buttons. Row-level Edit uses
   // expandedEditId so the form opens inline below the clicked row.
@@ -120,7 +123,11 @@ export default function VendorMaster() {
 
   return (
     <AppShell>
-      <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-1 mb-4"
+      >
+      <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
         <div>
           <div className="text-lg font-medium text-gray-900">Vendor Master</div>
           <div className="text-xs text-gray-500 mt-1">Set payment terms per vendor — used to calculate due dates in Payment Aging</div>
@@ -135,6 +142,19 @@ export default function VendorMaster() {
             + Add Vendor
           </button>
         </div>
+      </div>
+
+      <div className="flex items-center gap-3 mb-0">
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendors..."
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        <CategorySelect
+          value={categoryFilter || 'All'}
+          onChange={v => setCategoryFilter(v === 'All' ? '' : v)}
+          includeAll
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+        />
+        <span className="text-xs text-gray-400 ml-auto">{filtered.length} vendors in master</span>
+      </div>
       </div>
 
       {showImport && (
@@ -225,27 +245,21 @@ export default function VendorMaster() {
         />
       )}
 
-      <div className="flex items-center gap-3 mb-4">
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendors..."
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-        <CategorySelect
-          value={categoryFilter || 'All'}
-          onChange={v => setCategoryFilter(v === 'All' ? '' : v)}
-          includeAll
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
-        />
-        <span className="text-xs text-gray-400 ml-auto">{filtered.length} vendors in master</span>
-      </div>
-
       {loading ? (
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+        <div className="bg-white rounded-xl border border-gray-100">
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
                 {['Vendor Name', 'Category', 'Terms', 'GSTIN', 'Contact', 'Phone', 'Email', 'Notes', ''].map(h => (
-                  <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 ${h === 'Terms' ? 'text-center' : 'text-left'}`}>{h}</th>
+                  <th
+                    key={h}
+                    className={`px-4 py-2.5 font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100 ${h === 'Terms' ? 'text-center' : 'text-left'}`}
+                    style={{ top: stickyHeaderHeight }}
+                  >
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
@@ -257,7 +271,7 @@ export default function VendorMaster() {
                   <Fragment key={v.id}>
                     <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${isExpanded ? 'bg-blue-50/40' : ''}`}>
                       <td className="px-4 py-3">
-                        <Link to={`/vendors/${v.id}`} className="font-medium text-blue-700 hover:underline">{v.name}</Link>
+                        <Link to={`/vendors/${v.id}`} className="font-medium text-blue-700 hover:underline">{highlight(v.name, search)}</Link>
                         {outstanding && outstanding > 0 && (
                           <div className="text-[11px] text-red-500 mt-0.5">{formatINR(outstanding)} outstanding</div>
                         )}

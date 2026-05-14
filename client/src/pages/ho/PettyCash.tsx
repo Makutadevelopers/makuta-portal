@@ -16,6 +16,7 @@ import {
   PettyCashLedgerEntry,
 } from '../../types/pettyCash';
 import { useToast } from '../../context/ToastContext';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 export default function PettyCash() {
   const { notify } = useToast();
@@ -25,6 +26,7 @@ export default function PettyCash() {
   const [ledger, setLedger]     = useState<PettyCashLedgerEntry[]>([]);
   const [filterSite, setFilterSite] = useState<string>('');
   const [loading, setLoading]       = useState(true);
+  const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
   // Give Petty Cash form
   const [showForm, setShowForm]   = useState(false);
@@ -94,7 +96,11 @@ export default function PettyCash() {
 
   return (
     <AppShell>
-      <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-1 mb-4"
+      >
+      <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
         <div>
           <div className="text-lg font-medium text-gray-900">Petty Cash</div>
           <div className="text-xs text-gray-500 mt-1">
@@ -105,6 +111,16 @@ export default function PettyCash() {
           className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
           + Give Petty Cash
         </button>
+      </div>
+
+      <div className="flex items-center gap-3 mb-0">
+        <select value={filterSite} onChange={e => setFilterSite(e.target.value)}
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+          <option value="">All sites</option>
+          {SITES.map(s => <option key={s}>{s}</option>)}
+        </select>
+        <span className="text-xs text-gray-400 ml-auto">{ledger.length} entries</span>
+      </div>
       </div>
 
       {/* Balance tiles */}
@@ -190,25 +206,21 @@ export default function PettyCash() {
         </div>
       )}
 
-      {/* Ledger */}
-      <div className="flex items-center gap-3 mb-3">
-        <select value={filterSite} onChange={e => setFilterSite(e.target.value)}
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-          <option value="">All sites</option>
-          {SITES.map(s => <option key={s}>{s}</option>)}
-        </select>
-        <span className="text-xs text-gray-400 ml-auto">{ledger.length} entries</span>
-      </div>
-
       {loading ? (
         <div className="text-gray-500 text-sm py-12 text-center">Loading…</div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+        <div className="bg-white rounded-xl border border-gray-100">
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
                 {['Date','Site','Type','Description','By','Amount'].map(h => (
-                  <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap ${h === 'Amount' ? 'text-right' : 'text-left'}`}>{h}</th>
+                  <th
+                    key={h}
+                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}
+                    style={{ top: stickyHeaderHeight }}
+                  >
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>

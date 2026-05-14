@@ -3,6 +3,7 @@ import { getUsers, createUser, updateUser, resetUserPassword, sendTempPassword, 
 import { getAlerts, resolveAlert, Alert } from '../../api/alerts';
 import { useToast } from '../../context/ToastContext';
 import AppShell from '../../components/layout/AppShell';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 const SITES = ['Nirvana', 'Taranga', 'Horizon', 'Green Wood Villas', 'Aruna Arcade', 'Office'];
 const ROLES: { value: string; label: string }[] = [
@@ -21,6 +22,7 @@ export default function EmployeeManagement() {
   const [newPassword, setNewPassword] = useState('');
   const [filter, setFilter] = useState('all');
   const [pendingResets, setPendingResets] = useState<Alert[]>([]);
+  const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
   const [tempPasswordResult, setTempPasswordResult] = useState<{
     tempPassword: string;
     userName: string;
@@ -203,14 +205,29 @@ export default function EmployeeManagement() {
   return (
     <AppShell>
       <div className="max-w-[1000px]">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <div className="text-lg font-medium text-gray-900">Employee Management</div>
-            <div className="text-xs text-gray-500 mt-1">Add, edit, and manage user accounts</div>
+        <div
+          ref={stickyHeaderRef}
+          className="sticky top-0 z-30 bg-gray-50 pt-1 pb-2 mb-4"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="text-lg font-medium text-gray-900">Employee Management</div>
+              <div className="text-xs text-gray-500 mt-1">Add, edit, and manage user accounts</div>
+            </div>
+            <button onClick={openCreate} className="px-4 py-2 bg-[#1a3c5e] text-white text-sm rounded-lg hover:bg-[#15324e]">
+              + Add Employee
+            </button>
           </div>
-          <button onClick={openCreate} className="px-4 py-2 bg-[#1a3c5e] text-white text-sm rounded-lg hover:bg-[#15324e]">
-            + Add Employee
-          </button>
+
+          {/* Filter tabs */}
+          <div className="flex gap-2 mb-0">
+            {[{ v: 'all', l: `All (${users.length})` }, { v: 'ho', l: `HO (${users.filter(u => u.role === 'ho').length})` }, { v: 'mgmt', l: `MD (${users.filter(u => u.role === 'mgmt').length})` }, { v: 'site', l: `Site (${users.filter(u => u.role === 'site').length})` }].map(f => (
+              <button key={f.v} onClick={() => setFilter(f.v)}
+                className={`px-3 py-1.5 text-xs rounded-lg font-medium ${filter === f.v ? 'bg-[#1a3c5e] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                {f.l}
+              </button>
+            ))}
+          </div>
         </div>
 
         {pendingResets.length > 0 && (
@@ -251,29 +268,19 @@ export default function EmployeeManagement() {
           </div>
         )}
 
-        {/* Filter tabs */}
-        <div className="flex gap-2 mb-5">
-          {[{ v: 'all', l: `All (${users.length})` }, { v: 'ho', l: `HO (${users.filter(u => u.role === 'ho').length})` }, { v: 'mgmt', l: `MD (${users.filter(u => u.role === 'mgmt').length})` }, { v: 'site', l: `Site (${users.filter(u => u.role === 'site').length})` }].map(f => (
-            <button key={f.v} onClick={() => setFilter(f.v)}
-              className={`px-3 py-1.5 text-xs rounded-lg font-medium ${filter === f.v ? 'bg-[#1a3c5e] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-              {f.l}
-            </button>
-          ))}
-        </div>
-
         {loading ? (
           <div className="text-gray-400 text-sm py-12 text-center">Loading...</div>
         ) : (
-          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          <div className="bg-white rounded-xl border border-gray-100">
             <table className="w-full text-sm">
               <thead className="bg-gray-50/60 text-xs text-gray-500 uppercase tracking-wider">
                 <tr>
-                  <th className="px-4 py-3 text-left font-medium">Name</th>
-                  <th className="px-4 py-3 text-left font-medium">Email</th>
-                  <th className="px-4 py-3 text-left font-medium">Role</th>
-                  <th className="px-4 py-3 text-left font-medium">Site</th>
-                  <th className="px-4 py-3 text-left font-medium">Status</th>
-                  <th className="px-4 py-3 text-right font-medium">Actions</th>
+                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Name</th>
+                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Email</th>
+                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Role</th>
+                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Site</th>
+                  <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Status</th>
+                  <th className="px-4 py-3 text-right font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">

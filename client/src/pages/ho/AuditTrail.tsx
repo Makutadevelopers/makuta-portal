@@ -3,6 +3,7 @@ import { getAuditLogs, undoBatchImport } from '../../api/audit';
 import { AuditLog } from '../../types/audit';
 import AppShell from '../../components/layout/AppShell';
 import { SITES } from '../../utils/constants';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 export default function AuditTrail() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -16,6 +17,7 @@ export default function AuditTrail() {
   const [fInvoiceNo, setFInvoiceNo] = useState('');
   const [fDateFrom, setFDateFrom] = useState('');
   const [fDateTo, setFDateTo] = useState('');
+  const { ref: stickyHeaderRef } = useStickyHeaderHeight();
 
   // Substring matchers for the Action dropdown — kept simple (case-insensitive
   // prefix/contains) so we don't have to coordinate with every controller's wording.
@@ -173,7 +175,11 @@ export default function AuditTrail() {
 
   return (
     <AppShell>
-      <div className="mb-4">
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-1 mb-4"
+      >
+      <div className="mb-3">
         <div className="text-lg font-medium text-gray-900">Audit Trail — All Users</div>
       </div>
 
@@ -233,7 +239,7 @@ export default function AuditTrail() {
       </div>
 
       {/* Date presets */}
-      <div className="flex items-center gap-2 mb-5 flex-wrap">
+      <div className="flex items-center gap-2 mb-0 flex-wrap">
         <span className="text-xs text-gray-500 mr-1">Quick range:</span>
         {[
           { key: 'today', label: 'Today' },
@@ -250,6 +256,7 @@ export default function AuditTrail() {
             {p.label}
           </button>
         ))}
+      </div>
       </div>
 
       {/* Per-site tally — only shown when more than one site is in the result, so HO

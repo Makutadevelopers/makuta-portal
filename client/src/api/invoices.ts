@@ -79,6 +79,16 @@ export function bulkDeleteInvoices(ids: string[]): Promise<{ deleted: number; to
   });
 }
 
+export interface RecomputeStatusesResult {
+  total: number;
+  changed: number;
+  counts: { Paid?: number; Partial?: number; 'Not Paid'?: number };
+}
+
+export function recomputeInvoiceStatuses(): Promise<RecomputeStatusesResult> {
+  return apiFetch('/invoices/recompute-statuses', { method: 'POST' });
+}
+
 export interface AuditLogEntry {
   id: string;
   user_id: string;

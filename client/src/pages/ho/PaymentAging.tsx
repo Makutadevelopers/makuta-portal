@@ -5,12 +5,14 @@ import { useToast } from '../../context/ToastContext';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 export default function PaymentAging() {
   const [site, setSite] = useState('All');
   const [exporting, setExporting] = useState(false);
   const { notify } = useToast();
   const { withinTerms, overdue, loading } = useAgingCalc(site);
+  const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
   const totalOutstanding = [...withinTerms, ...overdue].reduce((s, r) => s + Number(r.balance), 0);
   const withinTotal = withinTerms.reduce((s, r) => s + Number(r.balance), 0);
@@ -30,24 +32,29 @@ export default function PaymentAging() {
 
   return (
     <AppShell>
-      <div className="flex items-start justify-between mb-6 flex-wrap gap-3">
-        <div>
-          <div className="text-lg font-medium text-gray-900">Payment Aging</div>
-          <div className="text-xs text-gray-500 mt-1">Due dates are calculated from each vendor's individual payment terms</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <select value={site} onChange={e => setSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-            <option value="All">All Sites</option>
-            {SITES.map(s => <option key={s}>{s}</option>)}
-          </select>
-          <button
-            type="button"
-            onClick={handleExport}
-            disabled={exporting}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-          >
-            {exporting ? 'Preparing PDF…' : 'Export PDF'}
-          </button>
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-2 mb-4"
+      >
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <div className="text-lg font-medium text-gray-900">Payment Aging</div>
+            <div className="text-xs text-gray-500 mt-1">Due dates are calculated from each vendor's individual payment terms</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <select value={site} onChange={e => setSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+              <option value="All">All Sites</option>
+              {SITES.map(s => <option key={s}>{s}</option>)}
+            </select>
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={exporting}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {exporting ? 'Preparing PDF…' : 'Export PDF'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -80,6 +87,7 @@ export default function PaymentAging() {
             subtitle={`${withinTerms.length} invoices · ${formatINR(withinTotal)}`}
             rows={withinTerms}
             isOverdue={false}
+            stickyTop={stickyHeaderHeight}
           />
 
           {/* Overdue table */}
@@ -88,6 +96,7 @@ export default function PaymentAging() {
             subtitle={`${overdue.length} invoices · ${formatINR(overdueTotal)}`}
             rows={overdue}
             isOverdue={true}
+            stickyTop={stickyHeaderHeight}
           />
         </>
       )}
@@ -112,8 +121,8 @@ interface AgingRow {
   payment_status: string;
 }
 
-function AgingTable({ title, subtitle, rows, isOverdue }: {
-  title: string; subtitle: string; rows: AgingRow[]; isOverdue: boolean;
+function AgingTable({ title, subtitle, rows, isOverdue, stickyTop }: {
+  title: string; subtitle: string; rows: AgingRow[]; isOverdue: boolean; stickyTop: number;
 }) {
   const [sortCol, setSortCol] = useState<string>('due_date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(isOverdue ? 'desc' : 'asc');
@@ -137,7 +146,8 @@ function AgingTable({ title, subtitle, rows, isOverdue }: {
   const SortTh = ({ col, label, right }: { col: string; label: string; right?: boolean }) => (
     <th
       onClick={() => handleSort(col)}
-      className={`px-4 py-2.5 font-medium whitespace-nowrap cursor-pointer select-none ${right ? 'text-right' : 'text-left'} ${sortCol === col ? 'text-gray-900' : 'text-gray-500'}`}
+      className={`px-4 py-2.5 font-medium whitespace-nowrap cursor-pointer select-none bg-gray-50 sticky z-20 border-b border-gray-100 ${right ? 'text-right' : 'text-left'} ${sortCol === col ? 'text-gray-900' : 'text-gray-500'}`}
+      style={{ top: stickyTop }}
     >
       {label} <span className="text-[10px] opacity-50">{sortCol === col ? (sortDir === 'desc' ? '↓' : '↑') : '⇅'}</span>
     </th>
@@ -152,16 +162,16 @@ function AgingTable({ title, subtitle, rows, isOverdue }: {
         </div>
         <span className="text-[11px] text-gray-400">Click column headers to sort</span>
       </div>
-      <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+      <div className="bg-white rounded-xl border border-gray-100">
         <table className="w-full text-[13px]">
           <thead className="bg-gray-50">
             <tr>
               <SortTh col="vendor_name" label="Vendor" />
-              <th className="px-4 py-2.5 text-left font-medium text-gray-500">Site</th>
-              <th className="px-4 py-2.5 text-left font-medium text-gray-500">Category</th>
-              <th className="px-4 py-2.5 text-left font-medium text-gray-500">Invoice No</th>
+              <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyTop }}>Site</th>
+              <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyTop }}>Category</th>
+              <th className="px-4 py-2.5 text-left font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyTop }}>Invoice No</th>
               <SortTh col="invoice_date" label="Invoice Date" />
-              <th className="px-4 py-2.5 text-center font-medium text-gray-500">Terms</th>
+              <th className="px-4 py-2.5 text-center font-medium text-gray-500 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyTop }}>Terms</th>
               <SortTh col="due_date" label="Due Date" />
               <SortTh col={isOverdue ? 'days_past_due' : 'days_left'} label={isOverdue ? 'Days Past Due' : 'Days Left'} right />
               <SortTh col="invoice_amount" label="Invoice Amt" right />

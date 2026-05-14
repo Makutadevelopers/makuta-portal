@@ -15,6 +15,7 @@ import { notifyInvoicePushed } from '../services/email.service';
 import { deleteInvoiceFilesFromDisk } from './attachment.controller';
 import { userHasSite } from '../middleware/auth';
 import { normaliseSiteName } from '../utils/sites';
+import { paymentStatusCase } from '../services/payment.service';
 
 // ISO date YYYY-MM-DD (strict — rejects "banana", "2026/04/01", partial dates, etc.)
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
@@ -469,6 +470,44 @@ export async function pushInvoice(req: Request, res: Response, next: NextFunctio
     }).catch((err) => console.error('[email] notifyInvoicePushed failed:', err));
 
     res.json(invoice);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Recompute every non-deleted invoice's denormalized payment_status from the
+// authoritative sum(payments) + sum(credit_note_allocations). Heals rows that
+// drifted out of sync (e.g. payments inserted by an older code path that
+// skipped the recompute). HO-only — touches every invoice row.
+export async function recomputeAllStatuses(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const before = await query<{ id: string; payment_status: string }>(
+      'SELECT id, payment_status FROM invoices WHERE deleted_at IS NULL'
+    );
+    const beforeMap = new Map(before.map(r => [r.id, r.payment_status]));
+
+    const after = await query<{ id: string; payment_status: string }>(
+      `UPDATE invoices
+         SET payment_status = ${paymentStatusCase('invoices')},
+             updated_at = NOW()
+       WHERE deleted_at IS NULL
+       RETURNING id, payment_status`
+    );
+
+    let changed = 0;
+    const counts = { Paid: 0, Partial: 0, 'Not Paid': 0 } as Record<string, number>;
+    for (const row of after) {
+      if (beforeMap.get(row.id) !== row.payment_status) changed++;
+      counts[row.payment_status] = (counts[row.payment_status] ?? 0) + 1;
+    }
+
+    await logAudit({
+      userId: req.user!.id,
+      action: `Recomputed payment_status across ${after.length} invoices (${changed} changed)`,
+      metadata: { total: after.length, changed, counts },
+    });
+
+    res.json({ total: after.length, changed, counts });
   } catch (err) {
     next(err);
   }

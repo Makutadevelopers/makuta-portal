@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import AppShell from '../../components/layout/AppShell';
 import { getBankReconciliation, BankReconciliationRow } from '../../api/reconciliation';
 import { formatINR, formatDate } from '../../utils/formatters';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 export default function BankReconciliation() {
   const [rows, setRows] = useState<BankReconciliationRow[]>([]);
@@ -9,6 +10,7 @@ export default function BankReconciliation() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [fType, setFType] = useState('All');
+  const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
   async function load() {
     setLoading(true);
@@ -38,11 +40,28 @@ export default function BankReconciliation() {
 
   return (
     <AppShell>
-      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-1 mb-4"
+      >
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div>
           <div className="text-lg font-medium text-gray-900">Bank Reconciliation</div>
           <div className="text-xs text-gray-500">Cheque &amp; transaction allocations across invoices</div>
         </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex items-center gap-3 mb-0 flex-wrap">
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search cheque no, txn id, bank..."
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        <select value={fType} onChange={e => setFType(e.target.value)}
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+          <option value="All">All Types</option>
+          <option>Cheque</option><option>NEFT</option><option>RTGS</option><option>UPI</option><option>Cash</option>
+        </select>
+        <span className="text-xs text-gray-400 ml-auto">{filtered.length} records</span>
+      </div>
       </div>
 
       {/* KPIs */}
@@ -53,34 +72,22 @@ export default function BankReconciliation() {
         <Kpi label="Un-tallied" value={String(untally)} tone={untally > 0 ? 'warn' : 'ok'} />
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search cheque no, txn id, bank..."
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-        <select value={fType} onChange={e => setFType(e.target.value)}
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-          <option value="All">All Types</option>
-          <option>Cheque</option><option>NEFT</option><option>RTGS</option><option>UPI</option><option>Cash</option>
-        </select>
-        <span className="text-xs text-gray-400 ml-auto">{filtered.length} records</span>
-      </div>
-
       {/* Table */}
-      <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="bg-white border border-gray-100 rounded-xl">
+        <div>
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
-                <th className="text-left px-4 py-2.5 font-medium w-12">S.No</th>
-                <th className="text-left px-4 py-2.5 font-medium">Date</th>
-                <th className="text-left px-4 py-2.5 font-medium">Payment Type</th>
-                <th className="text-left px-4 py-2.5 font-medium">Cheque / Txn ID</th>
-                <th className="text-left px-4 py-2.5 font-medium">Bank</th>
-                <th className="text-right px-4 py-2.5 font-medium">Cheque Amount</th>
-                <th className="text-right px-4 py-2.5 font-medium">Allocated</th>
-                <th className="text-right px-4 py-2.5 font-medium">Balance</th>
-                <th className="text-center px-4 py-2.5 font-medium">Invoices</th>
-                <th className="text-center px-4 py-2.5 font-medium">Tally</th>
+                <th className="text-left px-4 py-2.5 font-medium w-12 bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>S.No</th>
+                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Date</th>
+                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Payment Type</th>
+                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Cheque / Txn ID</th>
+                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Bank</th>
+                <th className="text-right px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Cheque Amount</th>
+                <th className="text-right px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Allocated</th>
+                <th className="text-right px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Balance</th>
+                <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Invoices</th>
+                <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky z-20 border-b border-gray-100" style={{ top: stickyHeaderHeight }}>Tally</th>
               </tr>
             </thead>
             <tbody>

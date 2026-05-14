@@ -5,6 +5,7 @@ import { formatINR, formatDate } from '../../utils/formatters';
 import AppShell from '../../components/layout/AppShell';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../hooks/useAuth';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 interface BinInvoice extends Invoice {
   deleted_by_name: string | null;
@@ -17,6 +18,7 @@ export default function Bin() {
   const { user } = useAuth();
   const canPermanentDelete = user?.role === 'mgmt';
   const canRestore = user?.role === 'ho';
+  const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,17 +72,22 @@ export default function Bin() {
 
   return (
     <AppShell>
-      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-        <div>
-          <div className="text-lg font-medium text-gray-900">Bin</div>
-          <div className="text-xs text-gray-500 mt-0.5">Deleted invoices are auto-purged after 30 days</div>
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-2 mb-4"
+      >
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <div className="text-lg font-medium text-gray-900">Bin</div>
+            <div className="text-xs text-gray-500 mt-0.5">Deleted invoices are auto-purged after 30 days</div>
+          </div>
+          {invoices.length > 0 && canPermanentDelete && (
+            <button onClick={handlePurge}
+              className="px-3 py-2 border border-red-200 rounded-lg text-sm text-red-600 hover:bg-red-50">
+              Purge Old (30+ days)
+            </button>
+          )}
         </div>
-        {invoices.length > 0 && canPermanentDelete && (
-          <button onClick={handlePurge}
-            className="px-3 py-2 border border-red-200 rounded-lg text-sm text-red-600 hover:bg-red-50">
-            Purge Old (30+ days)
-          </button>
-        )}
       </div>
 
       {loading ? (
@@ -91,12 +98,16 @@ export default function Bin() {
           <div className="text-gray-500 text-sm">Bin is empty</div>
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+        <div className="bg-white rounded-xl border border-gray-100">
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
                 {['Date', 'Vendor', 'Inv. No', 'Site', 'Amount', 'Deleted By', 'Deleted On', 'Auto-purge', 'Actions'].map(h => (
-                  <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap ${h === 'Amount' ? 'text-right' : 'text-left'}`}>
+                  <th
+                    key={h}
+                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}
+                    style={{ top: stickyHeaderHeight }}
+                  >
                     {h}
                   </th>
                 ))}

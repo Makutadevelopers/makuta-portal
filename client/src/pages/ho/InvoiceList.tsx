@@ -4,7 +4,7 @@ import { downloadAuthenticated } from '../../api/client';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { useVendors } from '../../hooks/useVendors';
-import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, bulkDeleteInvoices, getInvoiceHistory, AuditLogEntry, createInvoice, updateInvoice, deleteInvoice as deleteInvoiceApi } from '../../api/invoices';
+import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, bulkDeleteInvoices, getInvoiceHistory, AuditLogEntry, createInvoice, updateInvoice, deleteInvoice as deleteInvoiceApi, recomputeInvoiceStatuses } from '../../api/invoices';
 import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
 import { createPayment, getPayments } from '../../api/payments';
 import { bulkPayInvoices } from '../../api/reconciliation';
@@ -12,8 +12,9 @@ import { getInvoiceCreditSuggestions, addAllocation } from '../../api/creditNote
 import { InvoiceCreditSuggestions } from '../../types/creditNote';
 import { createVendor } from '../../api/vendors';
 import { formatINR, formatDate } from '../../utils/formatters';
-import { SITES, PAYMENT_TYPES, BANKS } from '../../utils/constants';
+import { SITES, PAYMENT_TYPES } from '../../utils/constants';
 import CategorySelect from '../../components/shared/CategorySelect';
+import BankSelect from '../../components/shared/BankSelect';
 import { Invoice } from '../../types/invoice';
 import { Payment } from '../../types/payment';
 import AppShell from '../../components/layout/AppShell';
@@ -21,6 +22,8 @@ import BulkImportModal from '../../components/shared/BulkImportModal';
 import AttachmentViewer from '../../components/shared/AttachmentViewer';
 import DisputeModal from '../../components/shared/DisputeModal';
 import { useToast } from '../../context/ToastContext';
+import { normaliseSearch, highlight, amountMatchesSearch } from '../../utils/searchHighlight';
+import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 export default function InvoiceList() {
   const { invoices, loading, refresh } = useInvoices();
@@ -68,6 +71,8 @@ export default function InvoiceList() {
   const [infoHistory, setInfoHistory] = useState<AuditLogEntry[]>([]);
   const [infoLoading, setInfoLoading] = useState(false);
   const { notify } = useToast();
+
+  const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
   function getTimelineRange(tl: string): { from: string; to: string } | null {
     if (tl === 'all') return null;
@@ -142,8 +147,20 @@ export default function InvoiceList() {
         if (invMonth !== fMonth) return false;
       }
       if (search) {
-        const q = search.toLowerCase();
-        if (!`${i.vendor_name} ${i.invoice_no} ${i.po_number ?? ''}`.toLowerCase().includes(q)) return false;
+        const q = normaliseSearch(search);
+        if (q) {
+          const amount = Number(i.invoice_amount);
+          const hay = [
+            i.vendor_name,
+            i.invoice_no,
+            i.po_number,
+            Number.isFinite(amount) ? amount.toString() : '',
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
       }
       return true;
     });
@@ -253,6 +270,23 @@ export default function InvoiceList() {
     }
   }
 
+  const [recomputing, setRecomputing] = useState(false);
+  async function handleRecomputeStatuses() {
+    if (!confirm('Recompute Paid / Partial / Not Paid status for every invoice from the underlying payments? Use this to heal rows where the badge looks wrong.')) return;
+    setRecomputing(true);
+    try {
+      const r = await recomputeInvoiceStatuses();
+      notify(r.changed > 0
+        ? `Recomputed ${r.total} invoices · ${r.changed} status${r.changed === 1 ? '' : 'es'} corrected`
+        : `Recomputed ${r.total} invoices · all already up to date`);
+      refresh();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Recompute failed');
+    } finally {
+      setRecomputing(false);
+    }
+  }
+
   async function openInfo(inv: Invoice) {
     setInfoInvoice(inv);
     setInfoLoading(true);
@@ -275,7 +309,11 @@ export default function InvoiceList() {
 
   return (
     <AppShell>
-      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+      <div
+        ref={stickyHeaderRef}
+        className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-1 mb-4"
+      >
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="text-lg font-medium text-gray-900">All Invoices</div>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowImport(true)}
@@ -368,7 +406,18 @@ export default function InvoiceList() {
           <option value="created_at">Latest added first</option>
           <option value="invoice_date">Latest invoice date first</option>
         </select>
-        <span className="text-xs text-gray-400 ml-auto">{filtered.length} records</span>
+        <div className="ml-auto flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleRecomputeStatuses}
+            disabled={recomputing}
+            title="Heal stale Paid / Partial / Not Paid badges by recomputing from the payments table"
+            className="text-xs text-gray-500 hover:text-gray-700 hover:underline disabled:opacity-50 disabled:cursor-wait"
+          >
+            {recomputing ? 'Recomputing…' : 'Recompute statuses'}
+          </button>
+          <span className="text-xs text-gray-400">{filtered.length} records</span>
+        </div>
       </div>
 
       {/* Bulk actions bar */}
@@ -406,6 +455,7 @@ export default function InvoiceList() {
           <button onClick={() => setSelected(new Set())} className="text-sm text-gray-500 hover:text-gray-700">Clear</button>
         </div>
       )}
+      </div>
 
       {/* Bulk Pay Modal */}
       {showBulkPay && (
@@ -498,17 +548,24 @@ export default function InvoiceList() {
       {loading ? (
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+        <div className="bg-white rounded-xl border border-gray-100">
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-2.5 w-8">
+                <th
+                  className="px-4 py-2.5 w-8 bg-gray-50 sticky z-20 border-b border-gray-100"
+                  style={{ top: stickyHeaderHeight }}
+                >
                   <input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
                     className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
                     title="Select all draft invoices" />
                 </th>
                 {['Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Site', 'Amount', 'Balance', 'Days', 'Status', 'Docs', 'Actions'].map(h => (
-                  <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap ${h === 'Amount' || h === 'Balance' ? 'text-right' : 'text-left'}`}>
+                  <th
+                    key={h}
+                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky z-20 border-b border-gray-100 ${h === 'Amount' || h === 'Balance' ? 'text-right' : 'text-left'}`}
+                    style={{ top: stickyHeaderHeight }}
+                  >
                     {h}
                   </th>
                 ))}
@@ -534,12 +591,12 @@ export default function InvoiceList() {
                         />
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={inv.vendor_name}>{inv.vendor_name}</td>
-                      <td className="px-4 py-3">{inv.invoice_no}</td>
-                      <td className="px-4 py-3 text-gray-500 max-w-[120px] truncate" title={inv.po_number ?? ''}>{inv.po_number ?? '—'}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={inv.vendor_name}>{highlight(inv.vendor_name, search)}</td>
+                      <td className="px-4 py-3">{highlight(inv.invoice_no, search)}</td>
+                      <td className="px-4 py-3 text-gray-500 max-w-[120px] truncate" title={inv.po_number ?? ''}>{inv.po_number ? highlight(inv.po_number, search) : '—'}</td>
                       <td className="px-4 py-3 text-gray-500">{inv.purpose}</td>
                       <td className="px-4 py-3">{inv.site}</td>
-                      <td className="px-4 py-3 text-right font-medium">
+                      <td className={`px-4 py-3 text-right font-medium ${amountMatchesSearch(Number(inv.invoice_amount), search) ? 'bg-yellow-100' : ''}`}>
                         {formatINR(Number(inv.invoice_amount))}
                         {Number(inv.allocated_credits ?? 0) > 0 && (
                           <div className="text-[10px] font-normal text-purple-600" title={`Credit note applied: ₹${Number(inv.allocated_credits).toLocaleString('en-IN')}`}>
@@ -820,10 +877,11 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
           {paymentType !== 'Cash' && (
             <div>
               <label className="block text-xs text-gray-500 mb-1">Bank</label>
-              <select value={bank} onChange={e => setBank(e.target.value)}
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white">
-                {BANKS.map(b => <option key={b}>{b}</option>)}
-              </select>
+              <BankSelect
+                value={bank}
+                onChange={setBank}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+              />
             </div>
           )}
         </div>
@@ -1888,10 +1946,11 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
             {txnType !== 'Cash' && (
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Bank</label>
-                <select value={bank} onChange={e => setBank(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
-                  {BANKS.map(b => <option key={b}>{b}</option>)}
-                </select>
+                <BankSelect
+                  value={bank}
+                  onChange={setBank}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
               </div>
             )}
             <div>
