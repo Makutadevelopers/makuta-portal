@@ -232,7 +232,7 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
        u.email                                        AS created_by_email
      FROM invoices i
      LEFT JOIN (
-       SELECT invoice_id, SUM(amount) AS total_paid
+       SELECT invoice_id, SUM(amount + tds_amount) AS total_paid
        FROM payments
        GROUP BY invoice_id
      ) p ON p.invoice_id = i.id

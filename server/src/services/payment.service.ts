@@ -1,9 +1,11 @@
 // payment.service.ts
 // Handles payment insertion and automatic invoice status recomputation.
 //
-// Business rules (effective payable = invoice_amount − sum(credit note allocations)):
-// - sum(payments) ≥ effective_payable → 'Paid'
-// - sum(payments) > 0 OR sum(CN allocations) > 0 (but effective not met) → 'Partial'
+// Business rules (effective payable = invoice_amount − sum(credit note allocations);
+// each payment can also withhold TDS, which counts toward settlement):
+// - sum(payments.amount + payments.tds_amount) ≥ effective_payable → 'Paid'
+// - sum(payments.amount + payments.tds_amount) > 0
+//     OR sum(CN allocations) > 0 (but effective not met) → 'Partial'
 // - nothing → 'Not Paid'
 
 import { query, queryOne } from '../db/query';
@@ -18,12 +20,15 @@ interface StatusResult {
  * Pass the invoice-row alias (e.g. 'i' or 'invoices') so the subqueries join correctly.
  */
 export function paymentStatusCase(alias: string): string {
+  // settled = cash actually received + TDS withheld (per payment row).
+  // payments.tds_amount defaults to 0 (migration 027) so pre-TDS rows
+  // and TDS-aware rows both work without special-casing.
   return `CASE
-    WHEN (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = ${alias}.id)
+    WHEN (SELECT COALESCE(SUM(amount + tds_amount), 0) FROM payments WHERE invoice_id = ${alias}.id)
          >= ${alias}.invoice_amount
             - (SELECT COALESCE(SUM(allocated_amount), 0) FROM credit_note_allocations WHERE invoice_id = ${alias}.id)
       THEN 'Paid'
-    WHEN (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = ${alias}.id) > 0
+    WHEN (SELECT COALESCE(SUM(amount + tds_amount), 0) FROM payments WHERE invoice_id = ${alias}.id) > 0
       OR (SELECT COALESCE(SUM(allocated_amount), 0) FROM credit_note_allocations WHERE invoice_id = ${alias}.id) > 0
       THEN 'Partial'
     ELSE 'Not Paid'

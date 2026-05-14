@@ -704,8 +704,13 @@ export default function InvoiceList() {
 function PaymentModal({ invoice, balance, onClose, onSaved }: {
   invoice: Invoice; balance: number; onClose: () => void; onSaved: () => void;
 }) {
+  const invoiceAmount = Number(invoice.invoice_amount);
   const [mode, setMode] = useState<'full' | 'part'>('full');
-  const [amount, setAmount] = useState(String(balance));
+  const [tdsPct, setTdsPct] = useState('0');
+  const numTdsPct = Math.max(0, Math.min(10, Number(tdsPct) || 0));
+  const tdsAmount = Math.round(invoiceAmount * numTdsPct) / 100;
+  // Full payment means cash + TDS together settles the remaining balance.
+  const [amount, setAmount] = useState(String(Math.max(0, balance - tdsAmount)));
   const [paymentType, setPaymentType] = useState('Cheque');
   const [paymentRef, setPaymentRef] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
@@ -715,6 +720,11 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
   const [prevPayments, setPrevPayments] = useState<Payment[]>([]);
   const [creditSuggestions, setCreditSuggestions] = useState<InvoiceCreditSuggestions | null>(null);
   const [applyingCredit, setApplyingCredit] = useState(false);
+
+  // Keep "Full" mode in sync: amount + tds = balance. Toggle to Part to override.
+  useEffect(() => {
+    if (mode === 'full') setAmount(String(Math.max(0, balance - tdsAmount)));
+  }, [mode, balance, tdsAmount]);
 
   useEffect(() => {
     getPayments(invoice.id).then(setPrevPayments).catch(() => {});
@@ -737,19 +747,20 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
   }
 
   const numAmount = Number(amount) || 0;
-  const balanceAfter = balance - numAmount;
-  const isOverpay = numAmount > balance;
+  const settlement = numAmount + tdsAmount;
+  const balanceAfter = balance - settlement;
+  const isOverpay = settlement > balance + 0.001;
 
   function handleModeChange(m: 'full' | 'part') {
     setMode(m);
-    if (m === 'full') setAmount(String(balance));
+    if (m === 'full') setAmount(String(Math.max(0, balance - tdsAmount)));
     else setAmount('');
   }
 
   async function handleSubmit() {
-    if (numAmount <= 0) { setError('Enter a valid amount'); return; }
-    if (isOverpay) { setError('Amount exceeds balance'); return; }
-    if (paymentType !== 'Cash' && !paymentRef.trim()) { setError('Reference / TXN number is required'); return; }
+    if (settlement <= 0) { setError('Enter a valid amount or TDS %'); return; }
+    if (isOverpay) { setError('Cash + TDS exceeds outstanding balance'); return; }
+    if (numAmount > 0 && paymentType !== 'Cash' && !paymentRef.trim()) { setError('Reference / TXN number is required'); return; }
 
     setSaving(true);
     setError('');
@@ -760,6 +771,7 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
         payment_ref: paymentType === 'Cash' ? null : paymentRef.trim(),
         payment_date: paymentDate,
         bank: paymentType === 'Cash' ? null : (bank.trim() || null),
+        tds_pct: numTdsPct,
       });
       onSaved();
     } catch (err) {
@@ -845,20 +857,50 @@ function PaymentModal({ invoice, balance, onClose, onSaved }: {
           </button>
         </div>
 
-        {/* Amount */}
-        <div className="mb-4">
-          <label className="block text-xs text-gray-500 mb-1">Amount (₹)</label>
-          {mode === 'full' ? (
-            <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 font-medium">{formatINR(balance)}</div>
-          ) : (
-            <input type="number" value={amount} onChange={e => setAmount(e.target.value)} min="1" max={balance}
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
-          )}
-          {mode === 'part' && numAmount > 0 && !isOverpay && (
-            <div className="text-xs text-gray-500 mt-1">Balance after this payment: {formatINR(balanceAfter)}</div>
-          )}
-          {isOverpay && <div className="text-xs text-red-600 mt-1">Amount exceeds outstanding balance</div>}
+        {/* Amount + TDS */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+          <div className="sm:col-span-2">
+            <label className="block text-xs text-gray-500 mb-1">Cash Paid (₹)</label>
+            {mode === 'full' ? (
+              <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 font-medium">{formatINR(Math.max(0, balance - tdsAmount))}</div>
+            ) : (
+              <input type="number" value={amount} onChange={e => setAmount(e.target.value)} min="0" max={balance}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            )}
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1" title="TDS withheld at source. Computed on the full invoice amount.">TDS %</label>
+            <input
+              type="number"
+              value={tdsPct}
+              onChange={e => setTdsPct(e.target.value)}
+              min="0"
+              max="10"
+              step="0.01"
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
+          </div>
         </div>
+        {(numTdsPct > 0 || numAmount > 0) && (
+          <div className="mb-4 -mt-2 p-3 bg-gray-50 border border-gray-100 rounded-lg text-xs text-gray-600 space-y-1">
+            <div className="flex justify-between"><span>Cash to vendor</span><span className="font-medium">{formatINR(numAmount)}</span></div>
+            {numTdsPct > 0 && (
+              <div className="flex justify-between">
+                <span>TDS withheld ({numTdsPct}% of {formatINR(invoiceAmount)})</span>
+                <span className="font-medium text-amber-700">{formatINR(tdsAmount)}</span>
+              </div>
+            )}
+            <div className="flex justify-between border-t border-gray-200 pt-1 mt-1">
+              <span>Settles</span>
+              <span className="font-medium">{formatINR(settlement)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Balance after</span>
+              <span className={`font-medium ${balanceAfter <= 0 ? 'text-green-700' : 'text-gray-700'}`}>{formatINR(Math.max(0, balanceAfter))}</span>
+            </div>
+          </div>
+        )}
+        {isOverpay && <div className="text-xs text-red-600 -mt-2 mb-3">Cash + TDS exceeds outstanding balance of {formatINR(balance)}</div>}
 
         {/* Payment details */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -1093,8 +1135,11 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
   onPaymentChanged: () => void | Promise<void>;
 }) {
   const [editing, setEditing] = useState<Payment | null>(null);
-  const totalPaid = payments.reduce((s, p) => s + Number(p.amount), 0);
+  const totalCash = payments.reduce((s, p) => s + Number(p.amount), 0);
+  const totalTds = payments.reduce((s, p) => s + Number(p.tds_amount ?? 0), 0);
+  const totalPaid = totalCash + totalTds;
   const balance = Number(invoice.invoice_amount) - totalPaid;
+  const hasAnyTds = totalTds > 0;
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
@@ -1117,38 +1162,55 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
           <table className="w-full text-[13px] mb-4">
             <thead className="bg-gray-50">
               <tr>
-                {['Date', 'Amount', 'Type', 'Reference', 'Bank', ''].map((h, i) => (
-                  <th key={i} className={`px-4 py-2.5 font-medium text-gray-500 ${h === 'Amount' ? 'text-right' : 'text-left'}`}>{h}</th>
+                {(hasAnyTds
+                  ? ['Date', 'Cash', 'TDS', 'Type', 'Reference', 'Bank', '']
+                  : ['Date', 'Amount', 'Type', 'Reference', 'Bank', '']
+                ).map((h, i) => (
+                  <th key={i} className={`px-4 py-2.5 font-medium text-gray-500 ${h === 'Amount' || h === 'Cash' || h === 'TDS' ? 'text-right' : 'text-left'}`}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {payments.map(p => (
-                <tr key={p.id} className="border-t border-gray-50">
-                  <td className="px-4 py-3 whitespace-nowrap">{formatDate(p.payment_date)}</td>
-                  <td className="px-4 py-3 text-right font-medium text-green-700">{formatINR(Number(p.amount))}</td>
-                  <td className="px-4 py-3">{p.payment_type}</td>
-                  <td className="px-4 py-3 text-gray-500">{p.payment_ref || '—'}</td>
-                  <td className="px-4 py-3 text-gray-500">{p.bank || '—'}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => setEditing(p)}
-                      className="text-xs text-blue-600 hover:text-blue-700 hover:underline"
-                    >
-                      Edit
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {payments.map(p => {
+                const tdsAmt = Number(p.tds_amount ?? 0);
+                const tdsPct = Number(p.tds_pct ?? 0);
+                return (
+                  <tr key={p.id} className="border-t border-gray-50">
+                    <td className="px-4 py-3 whitespace-nowrap">{formatDate(p.payment_date)}</td>
+                    <td className="px-4 py-3 text-right font-medium text-green-700">{formatINR(Number(p.amount))}</td>
+                    {hasAnyTds && (
+                      <td className="px-4 py-3 text-right">
+                        {tdsAmt > 0
+                          ? <span className="font-medium text-amber-700">{formatINR(tdsAmt)} <span className="text-[10px] text-gray-400 font-normal">({tdsPct}%)</span></span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
+                    )}
+                    <td className="px-4 py-3">{p.payment_type}</td>
+                    <td className="px-4 py-3 text-gray-500">{p.payment_ref || '—'}</td>
+                    <td className="px-4 py-3 text-gray-500">{p.bank || '—'}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => setEditing(p)}
+                        className="text-xs text-blue-600 hover:text-blue-700 hover:underline"
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
             <tfoot className="border-t-2 border-gray-200 bg-gray-50">
               <tr>
-                <td className="px-4 py-2.5 font-medium text-gray-900">Total Paid</td>
-                <td className="px-4 py-2.5 text-right font-semibold text-green-700">{formatINR(totalPaid)}</td>
-                <td colSpan={4} className="px-4 py-2.5 text-right text-sm">
+                <td className="px-4 py-2.5 font-medium text-gray-900">{hasAnyTds ? 'Totals' : 'Total Paid'}</td>
+                <td className="px-4 py-2.5 text-right font-semibold text-green-700">{formatINR(totalCash)}</td>
+                {hasAnyTds && (
+                  <td className="px-4 py-2.5 text-right font-semibold text-amber-700">{formatINR(totalTds)}</td>
+                )}
+                <td colSpan={hasAnyTds ? 4 : 4} className="px-4 py-2.5 text-right text-sm">
                   {balance > 0
                     ? <span className="text-red-600 font-medium">Balance remaining: {formatINR(balance)}</span>
-                    : <span className="text-green-600 font-medium">Fully paid</span>}
+                    : <span className="text-green-600 font-medium">Fully settled{hasAnyTds ? ` (Cash ${formatINR(totalCash)} + TDS ${formatINR(totalTds)})` : ''}</span>}
                 </td>
               </tr>
             </tfoot>
@@ -1168,7 +1230,7 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
           <EditPaymentModal
             invoice={invoice}
             payment={editing}
-            otherPaid={payments.filter(x => x.id !== editing.id).reduce((s, p) => s + Number(p.amount), 0)}
+            otherPaid={payments.filter(x => x.id !== editing.id).reduce((s, p) => s + Number(p.amount) + Number(p.tds_amount ?? 0), 0)}
             onClose={() => setEditing(null)}
             onSaved={async () => { setEditing(null); await onPaymentChanged(); }}
           />
@@ -1187,25 +1249,30 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
   onSaved: () => void | Promise<void>;
 }) {
   const { notify } = useToast();
-  const headroom = Number(invoice.invoice_amount) - otherPaid;
+  const invoiceAmount = Number(invoice.invoice_amount);
+  const headroom = invoiceAmount - otherPaid;
 
   const [amount, setAmount] = useState(String(payment.amount));
   const [paymentType, setPaymentType] = useState(payment.payment_type);
   const [paymentRef, setPaymentRef] = useState(payment.payment_ref ?? '');
   const [paymentDate, setPaymentDate] = useState(String(payment.payment_date).slice(0, 10));
   const [bank, setBank] = useState(payment.bank ?? '');
+  const [tdsPct, setTdsPct] = useState(String(payment.tds_pct ?? 0));
   const [saving, setSaving] = useState(false);
 
   const numAmount = Number(amount) || 0;
-  const overHeadroom = numAmount > headroom + 0.001;
+  const numTdsPct = Math.max(0, Math.min(10, Number(tdsPct) || 0));
+  const tdsAmount = Math.round(invoiceAmount * numTdsPct) / 100;
+  const settlement = numAmount + tdsAmount;
+  const overHeadroom = settlement > headroom + 0.001;
 
   async function handleSubmit() {
-    if (numAmount <= 0) { notify('Amount must be greater than 0'); return; }
+    if (settlement <= 0) { notify('Amount or TDS must be greater than 0'); return; }
     if (overHeadroom) {
-      notify(`Amount exceeds invoice headroom of ${formatINR(headroom)}`);
+      notify(`Cash + TDS exceeds invoice headroom of ${formatINR(headroom)}`);
       return;
     }
-    if (paymentType !== 'Cash' && !paymentRef.trim()) {
+    if (numAmount > 0 && paymentType !== 'Cash' && !paymentRef.trim()) {
       notify('Reference / TXN no is required for non-cash payments');
       return;
     }
@@ -1217,6 +1284,7 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
         payment_ref: paymentType === 'Cash' ? null : paymentRef.trim(),
         payment_date: paymentDate,
         bank: paymentType === 'Cash' ? null : (bank.trim() || null),
+        tds_pct: numTdsPct,
       });
       notify('Payment updated');
       await onSaved();
@@ -1242,13 +1310,24 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Amount *</label>
+            <label className="block text-xs text-gray-500 mb-1">Cash Paid *</label>
             <input
               type="number" step="0.01" value={amount}
               onChange={e => setAmount(e.target.value)}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
-            {overHeadroom && <div className="text-xs text-red-600 mt-1">Exceeds invoice headroom</div>}
+            {overHeadroom && <div className="text-xs text-red-600 mt-1">Cash + TDS exceeds invoice headroom</div>}
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1" title="TDS withheld. Computed on the full invoice amount.">TDS %</label>
+            <input
+              type="number" step="0.01" min="0" max="10" value={tdsPct}
+              onChange={e => setTdsPct(e.target.value)}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
+            {numTdsPct > 0 && (
+              <div className="text-[11px] text-amber-700 mt-1">TDS amount: {formatINR(tdsAmount)} ({numTdsPct}% of {formatINR(invoiceAmount)})</div>
+            )}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Payment Date</label>

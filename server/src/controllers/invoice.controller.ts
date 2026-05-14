@@ -63,8 +63,11 @@ const SITE_COLUMNS = `
   additional_charge_igst_pct, additional_charge_reason,
   disputed, dispute_severity, dispute_reason, disputed_by, disputed_at,
   payment_status,
+  -- Balance subtracts both the cash paid and any TDS withheld, since TDS
+  -- (sec 194C/194J etc) settles part of the vendor's invoice without cash
+  -- changing hands. See migration 027 + payment.service.ts.
   (invoice_amount - COALESCE(
-    (SELECT SUM(p.amount) FROM payments p WHERE p.invoice_id = invoices.id), 0
+    (SELECT SUM(p.amount + p.tds_amount) FROM payments p WHERE p.invoice_id = invoices.id), 0
   ))::NUMERIC(14,2) AS balance,
   remarks, pushed, pushed_at, minor_payment,
   created_by, created_at, updated_at

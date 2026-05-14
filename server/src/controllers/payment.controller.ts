@@ -20,23 +20,33 @@ const MINOR_LIMIT = 50000;
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
   .refine(v => !isNaN(new Date(v).getTime()), 'Invalid calendar date');
 
+// TDS deducted at source. Indian construction TDS sits around 1–2% (sec 194C);
+// other sections go up to 10%, so we cap at 10 here and let the UI suggest 2.
+const tdsPct = z.number().min(0, 'TDS % cannot be negative').max(10, 'TDS % cannot exceed 10').optional();
+
 const createPaymentSchema = z.object({
-  amount: z.number().positive('Amount must be positive').max(1e12, 'Amount too large'),
+  amount: z.number().nonnegative('Amount cannot be negative').max(1e12, 'Amount too large'),
   payment_type: z.string().min(1, 'Payment type is required').max(50),
   // payment_ref is optional/nullable at the API layer — Cash payments don't carry a
   // cheque/TXN reference. The client enforces "ref required for non-Cash".
   payment_ref: z.string().max(100).nullable().optional(),
   payment_date: isoDate,
   bank: z.string().max(100).nullable().optional(),
+  tds_pct: tdsPct,
+}).refine(d => d.amount > 0 || (d.tds_pct ?? 0) > 0, {
+  message: 'Either Amount or TDS % must be greater than zero',
 });
 
 // Update is HO-only and any field is optional, but the body must be non-empty.
 const updatePaymentSchema = z.object({
-  amount: z.number().positive('Amount must be positive').max(1e12, 'Amount too large'),
+  amount: z.number().nonnegative('Amount cannot be negative').max(1e12, 'Amount too large'),
   payment_type: z.string().min(1, 'Payment type is required').max(50),
   payment_ref: z.string().max(100).nullable().optional(),
   payment_date: isoDate,
   bank: z.string().max(100).nullable().optional(),
+  tds_pct: tdsPct,
+}).refine(d => d.amount > 0 || (d.tds_pct ?? 0) > 0, {
+  message: 'Either Amount or TDS % must be greater than zero',
 });
 
 interface InvoiceRow {
@@ -59,6 +69,8 @@ interface PaymentRow {
   bank: string | null;
   recorded_by: string | null;
   created_at: string;
+  tds_pct: number;
+  tds_amount: number;
 }
 
 export async function createPayment(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -100,31 +112,39 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
         return { status: 403, body: { error: 'Forbidden', message: 'Finalized invoices can only be paid by Head Office' } };
       }
 
-      // Sum existing payments + CN allocations inside the same transaction so we see the latest state
+      // Sum existing payments (cash + TDS) + CN allocations inside the same
+      // transaction so the balance check uses the latest state.
       const sumRows = await tx.query<{ total: string; allocated: string }>(
         `SELECT
-           COALESCE((SELECT SUM(amount) FROM payments WHERE invoice_id = $1), 0)::TEXT AS total,
+           COALESCE((SELECT SUM(amount + tds_amount) FROM payments WHERE invoice_id = $1), 0)::TEXT AS total,
            COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = $1), 0)::TEXT AS allocated`,
         [invoiceId]
       );
       const alreadyPaid = Number(sumRows[0]?.total ?? 0);
       const allocated = Number(sumRows[0]?.allocated ?? 0);
       const balance = Number(invoice.invoice_amount) - alreadyPaid - allocated;
-      if (data.amount > balance) {
+
+      // TDS is charged on the FULL invoice amount, not on this payment's
+      // cash component. The site accountant supplies the %; we compute and
+      // freeze the rupee value here so reads don't have to re-round.
+      const tdsPctVal = data.tds_pct ?? 0;
+      const tdsAmount = Math.round(Number(invoice.invoice_amount) * tdsPctVal) / 100;
+      const settlement = data.amount + tdsAmount;
+      if (settlement > balance + 0.001) {
         return {
           status: 400,
           body: {
             error: 'Bad Request',
-            message: `Payment of ₹${data.amount.toLocaleString('en-IN')} exceeds outstanding balance of ₹${balance.toLocaleString('en-IN')}`,
+            message: `Payment (₹${data.amount.toLocaleString('en-IN')} cash + ₹${tdsAmount.toLocaleString('en-IN')} TDS) exceeds outstanding balance of ₹${balance.toLocaleString('en-IN')}`,
           },
         };
       }
 
       const payment = await tx.queryOne<PaymentRow>(
-        `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, tds_pct, tds_amount)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING *`,
-        [invoiceId, data.amount, data.payment_type, data.payment_ref ?? null, data.payment_date, data.bank ?? null, userId]
+        [invoiceId, data.amount, data.payment_type, data.payment_ref ?? null, data.payment_date, data.bank ?? null, userId, tdsPctVal, tdsAmount]
       );
 
       // If minor payment by site, mark invoice as minor_payment
@@ -146,13 +166,14 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
       );
 
       const newStatus = statusRow?.payment_status ?? 'Not Paid';
-      const newBalance = balance - data.amount;
+      const newBalance = balance - settlement;
       return {
         status: 201,
         body: {
           payment,
           newStatus,
           newBalance,
+          tdsAmount,
           vendorName: invoice.vendor_name,
           invoiceNo: invoice.invoice_no,
         },
@@ -165,20 +186,24 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
     }
 
     // Non-blocking audit + email outside the transaction
-    const { payment, newStatus, newBalance, vendorName, invoiceNo } = result.body as {
+    const { payment, newStatus, newBalance, tdsAmount, vendorName, invoiceNo } = result.body as {
       payment: PaymentRow;
       newStatus: string;
       newBalance: number;
+      tdsAmount: number;
       vendorName: string;
       invoiceNo: string | null;
     };
     const isPartial = newStatus === 'Partial';
+    const tdsSuffix = tdsAmount > 0
+      ? ` · TDS ${(data.tds_pct ?? 0).toString()}% (₹${tdsAmount.toLocaleString('en-IN')})`
+      : '';
     try {
       await logAudit({
         userId,
-        action: `${isPartial ? 'Part payment' : 'Full payment'}: ₹${data.amount.toLocaleString('en-IN')} via ${data.payment_type}${isPartial ? ` · Balance ₹${newBalance.toLocaleString('en-IN')}` : ''}`,
+        action: `${isPartial ? 'Part payment' : 'Full payment'}: ₹${data.amount.toLocaleString('en-IN')} via ${data.payment_type}${tdsSuffix}${isPartial ? ` · Balance ₹${newBalance.toLocaleString('en-IN')}` : ''}`,
         invoiceId,
-        metadata: { amount: data.amount, type: data.payment_type, ref: data.payment_ref },
+        metadata: { amount: data.amount, type: data.payment_type, ref: data.payment_ref, tds_pct: data.tds_pct ?? 0, tds_amount: tdsAmount },
       });
     } catch (auditErr) {
       console.error('[audit] createPayment audit log failed:', auditErr);
@@ -246,19 +271,22 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
 
       const sumRows = await tx.query<{ other_total: string; allocated: string }>(
         `SELECT
-           COALESCE((SELECT SUM(amount) FROM payments WHERE invoice_id = $1 AND id <> $2), 0)::TEXT AS other_total,
+           COALESCE((SELECT SUM(amount + tds_amount) FROM payments WHERE invoice_id = $1 AND id <> $2), 0)::TEXT AS other_total,
            COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = $1), 0)::TEXT AS allocated`,
         [invoiceId, paymentId]
       );
       const otherPaid = Number(sumRows[0]?.other_total ?? 0);
       const allocated = Number(sumRows[0]?.allocated ?? 0);
       const headroom = Number(invoice.invoice_amount) - otherPaid - allocated;
-      if (data.amount > headroom + 0.001) {
+      const tdsPctVal = data.tds_pct ?? 0;
+      const tdsAmount = Math.round(Number(invoice.invoice_amount) * tdsPctVal) / 100;
+      const settlement = data.amount + tdsAmount;
+      if (settlement > headroom + 0.001) {
         return {
           status: 400,
           body: {
             error: 'Bad Request',
-            message: `Updated amount ₹${data.amount.toLocaleString('en-IN')} exceeds remaining invoice headroom of ₹${headroom.toLocaleString('en-IN')}`,
+            message: `Updated payment (₹${data.amount.toLocaleString('en-IN')} cash + ₹${tdsAmount.toLocaleString('en-IN')} TDS) exceeds remaining invoice headroom of ₹${headroom.toLocaleString('en-IN')}`,
           },
         };
       }
@@ -269,10 +297,12 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
                payment_type = $2,
                payment_ref = $3,
                payment_date = $4,
-               bank = $5
-         WHERE id = $6 AND invoice_id = $7
+               bank = $5,
+               tds_pct = $6,
+               tds_amount = $7
+         WHERE id = $8 AND invoice_id = $9
          RETURNING *`,
-        [data.amount, data.payment_type, data.payment_ref ?? null, data.payment_date, data.bank ?? null, paymentId, invoiceId]
+        [data.amount, data.payment_type, data.payment_ref ?? null, data.payment_date, data.bank ?? null, tdsPctVal, tdsAmount, paymentId, invoiceId]
       );
 
       const statusRow = await tx.queryOne<{ payment_status: string }>(
@@ -319,6 +349,9 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
       }
       if ((before.bank ?? '') !== (payment.bank ?? '')) {
         diffs.push(`bank ${before.bank ?? '—'} → ${payment.bank ?? '—'}`);
+      }
+      if (Number(before.tds_pct ?? 0) !== Number(payment.tds_pct ?? 0)) {
+        diffs.push(`TDS ${Number(before.tds_pct ?? 0)}% (₹${Number(before.tds_amount ?? 0).toLocaleString('en-IN')}) → ${Number(payment.tds_pct)}% (₹${Number(payment.tds_amount).toLocaleString('en-IN')})`);
       }
       const summary = diffs.length ? diffs.join(' · ') : 'no field changes';
       await logAudit({

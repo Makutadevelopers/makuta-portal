@@ -98,7 +98,7 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
 
         const sumRow = await tx.query<{ total: string; allocated: string }>(
           `SELECT
-             COALESCE((SELECT SUM(amount) FROM payments WHERE invoice_id = $1), 0)::TEXT AS total,
+             COALESCE((SELECT SUM(amount + tds_amount) FROM payments WHERE invoice_id = $1), 0)::TEXT AS total,
              COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = $1), 0)::TEXT AS allocated`,
           [alloc.invoice_id]
         );
