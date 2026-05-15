@@ -30,11 +30,11 @@ export async function forgotPasswordApi(email: string): Promise<void> {
   }
 }
 
-export async function resetPasswordApi(token: string, newPassword: string): Promise<void> {
+export async function resetPasswordApi(email: string, otp: string, newPassword: string): Promise<void> {
   const res = await fetch(`${API_BASE}/auth/reset-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, newPassword }),
+    body: JSON.stringify({ email, otp, newPassword }),
   });
 
   if (!res.ok) {

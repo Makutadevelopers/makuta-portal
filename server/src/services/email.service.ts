@@ -173,6 +173,28 @@ export async function notifyTempPassword(params: {
   });
 }
 
+// Self-service password-reset OTP. The user types this code back into the
+// portal and chooses their own new password — their current password is
+// NOT changed until they verify the OTP.
+export async function notifyResetOtp(params: {
+  name: string;
+  email: string;
+  otp: string;
+}): Promise<boolean> {
+  return send({
+    to: params.email,
+    subject: 'Your Makuta password reset code',
+    html: `
+      <h3>Password reset code</h3>
+      <p>Hi ${params.name},</p>
+      <p>Use the 6-digit code below to set a new password on the Makuta portal. The code expires in 15 minutes.</p>
+      <p style="font-size:28px;font-weight:bold;font-family:monospace;letter-spacing:8px;background:#f3f4f6;padding:14px 22px;border-radius:6px;display:inline-block;">${params.otp}</p>
+      <p style="color:#666;font-size:12px;">If you didn't request a password reset, you can ignore this email — your password has not been changed.</p>
+      <hr><p style="color:#888;font-size:12px;">Makuta Developers — Invoice & Payment Portal</p>
+    `,
+  });
+}
+
 export async function notifyPaymentEdited(params: {
   vendorName: string;
   invoiceNo: string;
