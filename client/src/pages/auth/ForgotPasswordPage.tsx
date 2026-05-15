@@ -34,11 +34,11 @@ export default function ForgotPasswordPage() {
         {submitted ? (
           <div className="text-center">
             <div className="mb-4 p-3 bg-green-50 text-green-800 rounded-lg text-sm">
-              Your password reset request was received. The Managing Director has been notified
-              and will share a temporary password with you shortly.
+              If an account exists for that email, a temporary password has been sent to your inbox.
+              Sign in with it, then change your password from "Change password" in the top bar.
             </div>
             <p className="text-xs text-gray-500 mb-6">
-              No email is sent. The MD will reach out via WhatsApp / phone with a one-time password.
+              Didn't get an email? Check spam, or ask the Managing Director.
             </p>
             <Link to="/login" className="text-sm text-[#1a3c5e] hover:underline">← Back to sign in</Link>
           </div>

@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { queryOne, query } from '../db/query';
 import { env } from '../config/env';
 import { logAudit } from '../services/audit.service';
+import { notifyTempPassword } from '../services/email.service';
 
 const loginSchema = z.object({
   email: z.string().email('Valid email is required'),
@@ -79,17 +80,17 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
   }
 }
 
-// ── Forgot password (MD-mediated flow) ─────────────────────────────────────
+// ── Forgot password (self-service flow) ────────────────────────────────────
 //
 // POST /api/auth/forgot-password { email }
-//   * The user does NOT receive a reset link by email.
-//   * Instead, an alert is created so the MD sees the request on the bell
-//     dropdown / Employees page; MD then clicks "Send Temp Password" which
-//     generates an OTP, updates the user's password hash, and shows the OTP
-//     to the MD (and emails it if SMTP is configured) so they can share it
-//     with the user.
+//   * Generates an 8-char temporary password, hashes it into users, and emails
+//     it directly to the requesting user. No admin in the loop.
+//   * An audit-only alert is still recorded (auto-resolved) so the MD can see
+//     who reset their password and intervene if the email failed to deliver.
+//   * Rate-limited to one reset per 15 minutes per user to prevent an
+//     attacker from repeatedly invalidating someone's password.
 //   * Always returns 200 OK (no enumeration leak) regardless of whether the
-//     email matched a real user.
+//     email matched a real user, or whether we actually did the reset.
 
 const forgotSchema = z.object({
   email: z.string().email('Valid email is required'),
@@ -99,8 +100,8 @@ export async function forgotPassword(req: Request, res: Response, next: NextFunc
   try {
     const { email } = forgotSchema.parse(req.body);
 
-    const user = await queryOne<{ id: string; name: string; is_active: boolean }>(
-      'SELECT id, name, is_active FROM users WHERE email = $1',
+    const user = await queryOne<{ id: string; name: string; email: string; is_active: boolean }>(
+      'SELECT id, name, email, is_active FROM users WHERE email = $1',
       [email]
     );
 
@@ -111,29 +112,78 @@ export async function forgotPassword(req: Request, res: Response, next: NextFunc
       return;
     }
 
-    // Avoid spamming MD with duplicate alerts: dedupe on (alert_type, user.id)
-    // when an unresolved request already exists.
-    const existing = await queryOne<{ id: string }>(
+    // Rate-limit: if this user has already requested a reset in the last 15
+    // minutes (resolved or not), don't churn their password again — just
+    // return the generic OK. Uses the alerts table so we don't need a
+    // dedicated migration.
+    const recent = await queryOne<{ id: string }>(
       `SELECT id FROM alerts
         WHERE alert_type = 'password_reset_request'
-          AND resolved = FALSE
-          AND metadata->>'userId' = $1`,
+          AND metadata->>'userId' = $1
+          AND created_at > NOW() - INTERVAL '15 minutes'
+        LIMIT 1`,
       [user.id]
     );
-
-    if (!existing) {
-      await query(
-        `INSERT INTO alerts (alert_type, title, message, metadata)
-         VALUES ('password_reset_request', $1, $2, $3)`,
-        [
-          `Password reset requested — ${user.name}`,
-          `${user.name} (${email}) requested a password reset. Send a temporary password from the Employees page.`,
-          JSON.stringify({ userId: user.id, email, name: user.name }),
-        ]
-      );
+    if (recent) {
+      console.log(`[auth] Forgot-password throttled for ${email} (recent request exists)`);
+      res.json(genericResponse);
+      return;
     }
 
-    console.log(`[auth] Password reset requested by ${email} (alerted MD)`);
+    // Generate temp password, hash it, and replace the user's password.
+    const tempPassword = generateOtp(8);
+    const hash = await bcrypt.hash(tempPassword, 12);
+    await query(
+      `UPDATE users
+          SET password_hash = $1,
+              reset_token_hash = NULL,
+              reset_token_expires_at = NULL,
+              updated_at = NOW()
+        WHERE id = $2`,
+      [hash, user.id]
+    );
+
+    // Best-effort email to the user. notifyTempPassword swallows SMTP errors
+    // and returns false; the alert metadata records that so MD can follow up
+    // out-of-band if delivery failed.
+    const emailSent = await notifyTempPassword({
+      name: user.name,
+      email: user.email,
+      tempPassword,
+    });
+
+    // Record an audit-only alert. It's auto-resolved because no admin action
+    // is required — this is just so MD can see who's been resetting and
+    // intervene if a delivery failed.
+    await query(
+      `INSERT INTO alerts (
+         alert_type, title, message, metadata,
+         resolved, resolved_at
+       )
+       VALUES (
+         'password_reset_request', $1, $2, $3,
+         TRUE, NOW()
+       )`,
+      [
+        `Password auto-reset — ${user.name}`,
+        emailSent
+          ? `${user.name} (${email}) requested a password reset. Temp password emailed.`
+          : `${user.name} (${email}) requested a password reset. Email delivery FAILED — please reach out via WhatsApp/phone.`,
+        JSON.stringify({ userId: user.id, email, name: user.name, autoSent: true, emailSent }),
+      ]
+    );
+
+    try {
+      await logAudit({
+        userId: user.id,
+        action: 'Self-service password reset',
+        metadata: { email, emailSent, method: 'forgot-password' },
+      });
+    } catch (auditErr) {
+      console.error('[audit] forgotPassword audit log failed:', auditErr);
+    }
+
+    console.log(`[auth] Forgot-password processed for ${email} (emailSent=${emailSent})`);
 
     res.json(genericResponse);
   } catch (err) {
