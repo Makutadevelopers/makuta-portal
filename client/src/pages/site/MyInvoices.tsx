@@ -141,6 +141,26 @@ export default function MyInvoices() {
     return result;
   }, [invoices, fPurpose, fMonth, search, sortBy]);
 
+  // Summary tiles — totalled from the same filtered set the table renders,
+  // so changing month / category / search updates the cards in lockstep.
+  // Site role gets per-invoice balance from the API; paid is derived
+  // (invoice_amount - balance) since total_paid is HO/MD-only data.
+  const totals = useMemo(() => {
+    let totalAmount = 0;
+    let balance = 0;
+    for (const i of filtered) {
+      totalAmount += Number(i.invoice_amount) || 0;
+      const bal = i.balance != null ? Number(i.balance) : Number(i.invoice_amount);
+      balance += Number.isFinite(bal) ? bal : 0;
+    }
+    return {
+      count: filtered.length,
+      totalAmount,
+      paid: Math.max(0, totalAmount - balance),
+      balance,
+    };
+  }, [filtered]);
+
   return (
     <AppShell>
       <div
@@ -288,6 +308,30 @@ export default function MyInvoices() {
         </select>
         <span className="text-xs text-gray-400 ml-auto">{filtered.length} records</span>
       </div>
+      </div>
+
+      {/* Summary tiles — react live to the month / category / search filters.
+          Site role only — balance per invoice comes from the API. */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+        <div className="bg-blue-50 rounded-xl border border-blue-100 p-4">
+          <div className="text-[11px] font-medium text-blue-700 uppercase tracking-wider">Invoices Raised</div>
+          <div className="text-xl font-semibold text-blue-800 mt-1">{formatINR(totals.totalAmount)}</div>
+          <div className="text-xs text-blue-600 mt-1">{totals.count} invoice{totals.count === 1 ? '' : 's'}{fMonth ? ` · ${fMonth}` : ''}</div>
+        </div>
+        <div className="bg-green-50 rounded-xl border border-green-100 p-4">
+          <div className="text-[11px] font-medium text-green-700 uppercase tracking-wider">Amount Paid</div>
+          <div className="text-xl font-semibold text-green-700 mt-1">{formatINR(totals.paid)}</div>
+          <div className="text-xs text-green-600 mt-1">
+            {totals.totalAmount > 0 ? `${Math.round((totals.paid / totals.totalAmount) * 100)}% of raised` : '—'}
+          </div>
+        </div>
+        <div className="bg-red-50 rounded-xl border border-red-100 p-4">
+          <div className="text-[11px] font-medium text-red-700 uppercase tracking-wider">Outstanding</div>
+          <div className="text-xl font-semibold text-red-700 mt-1">{formatINR(totals.balance)}</div>
+          <div className="text-xs text-red-500 mt-1">
+            {totals.totalAmount > 0 ? `${Math.round((totals.balance / totals.totalAmount) * 100)}% of raised` : '—'}
+          </div>
+        </div>
       </div>
 
       {/* New Invoice Form (top). Edit opens inline below the row — see table below. */}
