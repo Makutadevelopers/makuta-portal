@@ -117,20 +117,21 @@ export async function forgotPassword(req: Request, res: Response, next: NextFunc
       return;
     }
 
-    // Rate-limit: if this user has already requested a reset in the last 15
-    // minutes (resolved or not), don't churn their password again — just
-    // return the generic OK. Uses the alerts table so we don't need a
-    // dedicated migration.
-    const recent = await queryOne<{ id: string }>(
-      `SELECT id FROM alerts
-        WHERE alert_type = 'password_reset_request'
-          AND metadata->>'userId' = $1
-          AND created_at > NOW() - INTERVAL '15 minutes'
-        LIMIT 1`,
+    // Per-user throttle: only block if THIS user has a live, unexpired OTP
+    // that was issued in the last 60 seconds. This prevents OTP-email
+    // spamming without piling up on stale `password_reset_request` alerts
+    // from earlier flows. The IP-based rate-limit middleware (5/hr) already
+    // covers the broader anti-abuse case.
+    const existing = await queryOne<{ issued_recently: boolean }>(
+      `SELECT (reset_token_expires_at > NOW() + INTERVAL '14 minutes') AS issued_recently
+         FROM users
+        WHERE id = $1
+          AND reset_token_hash IS NOT NULL
+          AND reset_token_expires_at > NOW()`,
       [user.id]
     );
-    if (recent) {
-      console.log(`[auth] Forgot-password throttled for ${email} (recent request exists)`);
+    if (existing?.issued_recently) {
+      console.log(`[auth] Forgot-password throttled for ${email} (OTP issued <60s ago)`);
       res.json(genericResponse);
       return;
     }
