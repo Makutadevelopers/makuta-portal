@@ -492,12 +492,17 @@ export interface MergeResult {
   keptVendor: VendorRow;
   repointedCount: number;
   removedName: string;
+  collapsedDuplicates: number;
 }
 
 interface InvoiceChange {
   invoice_id: string;
   prev_vendor_id: string | null;
   prev_vendor_name: string;
+  // Set true when this invoice was a duplicate of another (same invoice_no +
+  // amount + date under the kept vendor) and got soft-deleted by the merge.
+  // Revert flips deleted_at back to NULL.
+  soft_deleted_by_merge?: boolean;
 }
 
 export async function mergeVendors(
@@ -550,6 +555,97 @@ export async function mergeVendors(
     [keepVendor.name, keepId, removeVendor.name]
   );
 
+  // Collapse duplicate invoices under the kept vendor.  A "duplicate" means
+  // two live invoices share invoice_no (case-insensitive trimmed, non-empty)
+  // AND invoice_amount (within ₹1 paise tolerance) AND invoice_date.  All
+  // three must match — that's strict enough to catch the same physical bill
+  // entered under two vendor spellings without collapsing a vendor that
+  // legitimately reuses invoice numbers across different amounts/dates.
+  //
+  // Winner per group: prefer pushed (locked/official), then most payments,
+  // then most attachments, then oldest created_at (the original entry).
+  const dupGroups = await query<{
+    invoice_no_norm: string;
+    invoice_amount: string;
+    invoice_date: string;
+    ids: string[];
+  }>(
+    `WITH ranked AS (
+       SELECT
+         i.id,
+         LOWER(TRIM(i.invoice_no)) AS invoice_no_norm,
+         i.invoice_amount,
+         i.invoice_date
+       FROM invoices i
+       WHERE i.vendor_id = $1
+         AND i.deleted_at IS NULL
+         AND i.invoice_no IS NOT NULL
+         AND TRIM(i.invoice_no) <> ''
+     )
+     SELECT invoice_no_norm, invoice_amount, invoice_date,
+            ARRAY_AGG(id) AS ids
+     FROM ranked
+     GROUP BY invoice_no_norm, invoice_amount, invoice_date
+     HAVING COUNT(*) > 1`,
+    [keepId]
+  );
+
+  let collapsedDuplicates = 0;
+  for (const g of dupGroups) {
+    // Rank rows in the group; first row is the winner, rest get soft-deleted.
+    const ranked = await query<{
+      id: string;
+      pushed: boolean | null;
+      payment_count: string;
+      attachment_count: string;
+      created_at: string;
+      vendor_id: string | null;
+      vendor_name: string;
+    }>(
+      `SELECT
+         i.id,
+         i.pushed,
+         (SELECT COUNT(*) FROM payments p WHERE p.invoice_id = i.id) AS payment_count,
+         (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = i.id) AS attachment_count,
+         i.created_at,
+         i.vendor_id,
+         i.vendor_name
+       FROM invoices i
+       WHERE i.id = ANY($1::uuid[])
+       ORDER BY
+         COALESCE(i.pushed, FALSE) DESC,
+         (SELECT COUNT(*) FROM payments p WHERE p.invoice_id = i.id) DESC,
+         (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = i.id) DESC,
+         i.created_at ASC,
+         i.id ASC`,
+      [g.ids]
+    );
+
+    // Soft-delete every row past the winner.
+    const losers = ranked.slice(1);
+    for (const loser of losers) {
+      await query(
+        `UPDATE invoices SET deleted_at = NOW(), deleted_by = $1, updated_at = NOW()
+         WHERE id = $2 AND deleted_at IS NULL`,
+        [mergedByUserId, loser.id]
+      );
+      // Add to invoice_changes if it isn't already tracked (rows that were
+      // re-pointed from removeId are already in the list — flag them).
+      const existing = invoiceChanges.find(c => c.invoice_id === loser.id);
+      if (existing) {
+        existing.soft_deleted_by_merge = true;
+      } else {
+        invoiceChanges.push({
+          invoice_id: loser.id,
+          prev_vendor_id: loser.vendor_id,
+          prev_vendor_name: loser.vendor_name,
+          soft_deleted_by_merge: true,
+        });
+      }
+      collapsedDuplicates += 1;
+    }
+  }
+
   // Delete the removed vendor.  Cascades clean up vendor_dedup_dismissed
   // rows that reference this UUID; those won't be restored on revert
   // (intentional — dismissals are advisory and easy to redo).
@@ -576,6 +672,7 @@ export async function mergeVendors(
     keptVendor: keepVendor,
     repointedCount: invoiceChanges.length,
     removedName: removeVendor.name,
+    collapsedDuplicates,
   };
 }
 
@@ -642,14 +739,27 @@ export async function revertVendorMerge(
     ]
   );
 
-  // Restore each invoice's previous vendor link.
+  // Restore each invoice's previous vendor link.  If the invoice was
+  // soft-deleted as a duplicate during the merge, also clear deleted_at /
+  // deleted_by so it comes back to life.
   for (const ch of merge.invoice_changes) {
-    await query(
-      `UPDATE invoices
-       SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
-       WHERE id = $3`,
-      [ch.prev_vendor_id, ch.prev_vendor_name, ch.invoice_id]
-    );
+    if (ch.soft_deleted_by_merge) {
+      await query(
+        `UPDATE invoices
+         SET vendor_id = $1, vendor_name = $2,
+             deleted_at = NULL, deleted_by = NULL,
+             updated_at = NOW()
+         WHERE id = $3`,
+        [ch.prev_vendor_id, ch.prev_vendor_name, ch.invoice_id]
+      );
+    } else {
+      await query(
+        `UPDATE invoices
+         SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
+         WHERE id = $3`,
+        [ch.prev_vendor_id, ch.prev_vendor_name, ch.invoice_id]
+      );
+    }
   }
 
   await query(

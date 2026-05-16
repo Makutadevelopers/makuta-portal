@@ -211,8 +211,11 @@ function VendorDedupPanel() {
     const key = [pair.vendorA.id, pair.vendorB.id].sort().join(':');
     setMerging(key);
     try {
-      await mergeVendors(keepId, removeId);
-      notify(`Merged into "${keepName}"`);
+      const res = await mergeVendors(keepId, removeId);
+      const suffix = res.collapsedDuplicates > 0
+        ? ` · ${res.collapsedDuplicates} duplicate invoice${res.collapsedDuplicates === 1 ? '' : 's'} collapsed`
+        : '';
+      notify(`Merged into "${keepName}"${suffix}`);
       setPairs(prev => prev.filter(p => {
         const k = [p.vendorA.id, p.vendorB.id].sort().join(':');
         return k !== key;

@@ -235,9 +235,12 @@ export default function VendorMaster() {
           removeVendor={mergeFrom}
           allVendors={vendors}
           onClose={() => setMergeFrom(null)}
-          onMerged={(removedName, keptName) => {
+          onMerged={(removedName, keptName, collapsedDuplicates) => {
             setMergeFrom(null);
-            notify(`Merged "${removedName}" into "${keptName}"`);
+            const suffix = collapsedDuplicates > 0
+              ? ` · ${collapsedDuplicates} duplicate invoice${collapsedDuplicates === 1 ? '' : 's'} collapsed`
+              : '';
+            notify(`Merged "${removedName}" into "${keptName}"${suffix}`);
             refresh();
             loadMerges();
           }}
@@ -569,7 +572,7 @@ function MergeIntoModal({
   removeVendor: Vendor;
   allVendors: Vendor[];
   onClose: () => void;
-  onMerged: (removedName: string, keptName: string) => void;
+  onMerged: (removedName: string, keptName: string, collapsedDuplicates: number) => void;
   onError: (msg: string) => void;
 }) {
   const [search, setSearch] = useState('');
@@ -587,8 +590,8 @@ function MergeIntoModal({
     if (!keepVendor) return;
     setSubmitting(true);
     try {
-      await mergeVendorsApi(keepId, removeVendor.id);
-      onMerged(removeVendor.name, keepVendor.name);
+      const res = await mergeVendorsApi(keepId, removeVendor.id);
+      onMerged(removeVendor.name, keepVendor.name, res.collapsedDuplicates);
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Merge failed');
     } finally {

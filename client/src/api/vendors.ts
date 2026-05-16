@@ -110,6 +110,7 @@ export function dismissDuplicateVendorPair(vendorAId: string, vendorBId: string)
 export interface MergeVendorsResponse extends Vendor {
   mergeId: string;
   repointedCount: number;
+  collapsedDuplicates: number;
   removedName: string;
 }
 

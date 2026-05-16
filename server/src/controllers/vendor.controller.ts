@@ -318,14 +318,19 @@ export async function mergeVendors(
       return;
     }
 
+    const collapsedSuffix = result.collapsedDuplicates > 0
+      ? `, ${result.collapsedDuplicates} duplicate invoice${result.collapsedDuplicates === 1 ? '' : 's'} collapsed`
+      : '';
+
     await logAudit({
       userId: req.user!.id,
-      action: `Merged vendor "${result.removedName}" into "${result.keptVendor.name}" (${result.repointedCount} invoice${result.repointedCount === 1 ? '' : 's'} re-pointed)`,
+      action: `Merged vendor "${result.removedName}" into "${result.keptVendor.name}" (${result.repointedCount} invoice${result.repointedCount === 1 ? '' : 's'} re-pointed${collapsedSuffix})`,
       metadata: {
         mergeId: result.mergeId,
         keepId,
         removeId,
         repointedCount: result.repointedCount,
+        collapsedDuplicates: result.collapsedDuplicates,
         removedName: result.removedName,
       },
     });
@@ -334,6 +339,7 @@ export async function mergeVendors(
       ...result.keptVendor,
       mergeId: result.mergeId,
       repointedCount: result.repointedCount,
+      collapsedDuplicates: result.collapsedDuplicates,
       removedName: result.removedName,
     });
   } catch (err) {
