@@ -127,33 +127,6 @@ export async function notifyInvoicePushed(params: {
   });
 }
 
-export async function notifyPaymentRecorded(params: {
-  vendorName: string;
-  invoiceNo: string;
-  paymentAmount: number;
-  paymentType: string;
-  balance: number;
-}): Promise<void> {
-  const recipients = await getHoRecipients();
-  if (recipients.length === 0) {
-    console.log('[email] notifyPaymentRecorded — no HO recipients configured, skipping');
-    return;
-  }
-  const isPaid = params.balance <= 0;
-  await send({
-    to: recipients.join(','),
-    subject: `${isPaid ? 'Full' : 'Part'} payment recorded — #${params.invoiceNo}`,
-    html: `
-      <h3>Payment Recorded</h3>
-      <p><strong>Vendor:</strong> ${params.vendorName}</p>
-      <p><strong>Invoice:</strong> #${params.invoiceNo}</p>
-      <p><strong>Payment:</strong> ₹${params.paymentAmount.toLocaleString('en-IN')} via ${params.paymentType}</p>
-      <p><strong>Remaining balance:</strong> ${isPaid ? 'Fully paid' : `₹${params.balance.toLocaleString('en-IN')}`}</p>
-      <hr><p style="color:#888;font-size:12px;">Makuta Developers — Invoice & Payment Portal</p>
-    `,
-  });
-}
-
 export async function notifyTempPassword(params: {
   name: string;
   email: string;

@@ -11,7 +11,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { query, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
-import { notifyPaymentRecorded, notifyPaymentEdited } from '../services/email.service';
+import { notifyPaymentEdited } from '../services/email.service';
 import { userHasSite } from '../middleware/auth';
 import { paymentStatusCase } from '../services/payment.service';
 
@@ -208,14 +208,6 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
     } catch (auditErr) {
       console.error('[audit] createPayment audit log failed:', auditErr);
     }
-
-    notifyPaymentRecorded({
-      vendorName: vendorName || '(vendor not set)',
-      invoiceNo: invoiceNo ?? '(no invoice no)',
-      paymentAmount: data.amount,
-      paymentType: data.payment_type,
-      balance: newBalance,
-    }).catch((err) => console.error('[email] notifyPaymentRecorded failed:', err));
 
     res.status(201).json({ ...payment, invoice_payment_status: newStatus });
   } catch (err) {
