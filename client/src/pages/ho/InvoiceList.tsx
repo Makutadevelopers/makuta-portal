@@ -2127,7 +2127,7 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
   const allocTotal = Object.values(allocs).reduce((s, v) => s + (Number(v) || 0), 0);
   const txnAmtNum = Number(txnAmount) || 0;
   const diff = Number((txnAmtNum - allocTotal).toFixed(2));
-  const tallied = Math.abs(diff) < 0.01 && txnAmtNum > 0;
+  const tallied = Math.abs(diff) < 1 && txnAmtNum > 0;
 
   function balanceFor(inv: Invoice): number {
     return agingMap.get(inv.id)?.balance ?? Number(inv.invoice_amount);

@@ -60,9 +60,9 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
     const data = bulkPaySchema.parse(req.body);
     const { id: userId } = req.user!;
 
-    // Allocation total must tally with cheque / transaction amount
+    // Allocation total must tally with cheque / transaction amount (allow ₹1 paise tolerance)
     const allocTotal = data.allocations.reduce((s, a) => s + a.amount, 0);
-    if (Math.abs(allocTotal - data.txn_amount) > 0.009) {
+    if (Math.abs(allocTotal - data.txn_amount) >= 1) {
       res.status(400).json({
         error: 'Bad Request',
         message: `Allocations total ₹${allocTotal.toLocaleString('en-IN')} does not match cheque / transaction amount ₹${data.txn_amount.toLocaleString('en-IN')}`,
