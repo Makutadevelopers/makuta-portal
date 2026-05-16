@@ -197,6 +197,7 @@ interface NormalizedRow {
   additionalChargeReason: string;
   remarks: string;
   paymentStatus: string;
+  paidAmount: number;
   paymentType: string;
   paymentRef: string;
   paymentDate: string | null;
@@ -228,6 +229,7 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
   const addReasonStr = row['additional_charge_reason'] || row['Additional Charge Reason'] || row['Add Charge Reason'] || '';
   const remarks = row['remarks'] || row['Remarks'] || '';
   const paymentStatus = row['payment_status'] || row['Payment Status'] || row['Status'] || 'Not Paid';
+  const paidAmountStr = row['paid_amount'] || row['Paid Amount'] || row['Amount Paid'] || '';
   const paymentType = row['payment_type'] || row['Payment Type'] || row['Pay Type'] || '';
   const paymentRef = row['payment_details'] || row['Payment Details'] || row['Cheque No'] || row['Txn ID'] || '';
   const paymentDateRaw = row['payment_date'] || row['Payment Date'] || '';
@@ -295,6 +297,27 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
   const parsedPaymentDate = parseDate(paymentDateRaw);
   const parsedPaymentMonth = parseMonthColumn(paymentMonthRaw);
 
+  // Paid Amount lets a Partial row carry how much was actually paid; for Paid
+  // rows it's optional and defaults to the full invoice amount.
+  const normalizedStatus = paymentStatus.trim().toLowerCase();
+  let paidAmount = 0;
+  if (paidAmountStr) {
+    paidAmount = parseFloat(paidAmountStr.replace(/[₹,\s]/g, '') || '0');
+    if (isNaN(paidAmount) || paidAmount < 0) {
+      return { skip: true, reason: `invalid Paid Amount "${paidAmountStr}"` };
+    }
+  }
+  if (normalizedStatus === 'paid') {
+    if (paidAmount === 0) paidAmount = amount;
+  } else if (normalizedStatus === 'partial') {
+    if (paidAmount <= 0) {
+      return { skip: true, reason: 'Partial payment requires a Paid Amount > 0' };
+    }
+    if (paidAmount >= amount) {
+      return { skip: true, reason: `Paid Amount ${paidAmount} is >= invoice amount ${amount} — set Payment Status to "Paid" instead of "Partial"` };
+    }
+  }
+
   return {
     rowNum,
     month: monthDate,
@@ -316,6 +339,7 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
     additionalChargeReason,
     remarks,
     paymentStatus,
+    paidAmount,
     paymentType,
     paymentRef,
     paymentDate: parsedPaymentDate,
@@ -546,8 +570,12 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
           ]
         );
 
-        // Auto-create payment + bank transaction for Paid invoices
-        if (insertedInvoice && r.paymentStatus === 'Paid' && r.amount > 0) {
+        // Auto-create payment + bank transaction for Paid / Partial invoices.
+        // For Paid: paidAmount defaults to invoice amount in the normalizer.
+        // For Partial: paidAmount is the user-supplied part-payment.
+        const status = r.paymentStatus.trim().toLowerCase();
+        const hasPaymentToRecord = (status === 'paid' || status === 'partial') && r.paidAmount > 0;
+        if (insertedInvoice && hasPaymentToRecord) {
           let bankTxnId: string | null = null;
           const isBankPayment = r.paymentType && r.paymentType.toLowerCase() !== 'cash';
 
@@ -562,7 +590,7 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
               // Add this amount to the existing transaction
               await queryOne(
                 `UPDATE bank_transactions SET txn_amount = txn_amount + $1 WHERE id = $2`,
-                [r.amount, bankTxnId]
+                [r.paidAmount, bankTxnId]
               );
             } else {
               const newTxn = await queryOne<{ id: string }>(
@@ -571,7 +599,7 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
                 [
                   r.paymentType,
                   r.paymentRef,
-                  r.amount,
+                  r.paidAmount,
                   r.paymentDate || r.invoiceDate,
                   r.paymentBank || '',
                   `Imported batch ${batchId.slice(0, 8)}`,
@@ -587,7 +615,7 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [
               insertedInvoice.id,
-              r.amount,
+              r.paidAmount,
               r.paymentType || 'Import',
               r.paymentRef || `IMPORT-${batchId.slice(0, 8)}`,
               r.paymentDate || r.invoiceDate,
@@ -910,26 +938,29 @@ export function downloadTemplate(req: Request, res: Response): void {
       content:
         // Mirrors every field on the manual entry form so a CSV can carry
         // base + GST + additional charge + reason + payment info in one row.
+        // Paid Amount is mandatory for Partial rows so the importer knows how
+        // much of the invoice has been settled; leave blank for Paid (defaults
+        // to full invoice amount) and Not Paid.
         'Sl.No,Month,Invoice date,Vendor Name,Invoice no,PO Number,Head,Site Location,' +
         'Base Amount,CGST %,SGST %,IGST %,' +
         'Additional Charge,Additional Charge CGST %,Additional Charge SGST %,Additional Charge IGST %,Additional Charge Reason,' +
         'Invoice amount,' +
-        'Payment Status,Pending Days,Payment Type,Payment Details,Payment Date,Bank,Payment Month\n' +
-        // Example 1: full tax split with no additional charge
+        'Payment Status,Paid Amount,Pending Days,Payment Type,Payment Details,Payment Date,Bank,Payment Month\n' +
+        // Example 1: Not Paid — Paid Amount blank
         '1,2026-04-01,2026-04-01,Vendor Name,INV-001,PO-001,Steel,Nirvana,' +
         '100000,9,9,0,' +
         ',,,,,' +
-        '118000,Not Paid,,,,,,\n' +
-        // Example 2: tax split + additional transport charge with its own GST
+        '118000,Not Paid,,,,,,,\n' +
+        // Example 2: Fully Paid via cheque — Paid Amount blank means full
         '2,2026-04-01,2026-04-01,Vendor Name,INV-002,PO-002,Cement,Nirvana,' +
         '50000,9,9,0,' +
         '500,9,9,0,Transport,' +
-        '59590,Not Paid,,,,,,\n' +
-        // Example 3: legacy — only Invoice amount, importer treats it as the full amount
+        '59590,Paid,,0,Cheque,000856,2026-04-05,HDFC,Apr-2026\n' +
+        // Example 3: Partial — must specify Paid Amount
         '3,2026-04-01,2026-04-01,Other Vendor,INV-003,PO-003,Cement,Nirvana,' +
         ',,,,' +
         ',,,,,' +
-        '25000,Not Paid,,,,,,\n',
+        '25000,Partial,10000,,NEFT,UTR123456,2026-04-10,ICICI,Apr-2026\n',
     },
     vendors: {
       filename: 'vendor_import_template.csv',
