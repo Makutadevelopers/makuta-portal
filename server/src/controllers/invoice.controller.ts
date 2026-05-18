@@ -56,41 +56,65 @@ const updateInvoiceSchema = createInvoiceSchema.partial();
 // Columns safe for site role — payment_status badge plus the outstanding
 // balance (so site dashboards can show "outstanding per project"). Aging
 // data (days_past_due, overdue) and total_paid stay HO+mgmt only.
-const SITE_COLUMNS = `
-  id, sl_no, internal_no, month, invoice_date, vendor_id, vendor_name,
-  invoice_no, po_number, purpose, site, invoice_amount,
-  base_amount, cgst_pct, sgst_pct, igst_pct,
-  additional_charge, additional_charge_cgst_pct, additional_charge_sgst_pct,
-  additional_charge_igst_pct, additional_charge_reason,
-  disputed, dispute_severity, dispute_reason, disputed_by, disputed_at,
-  payment_status,
-  -- Balance subtracts both the cash paid and any TDS withheld, since TDS
-  -- (sec 194C/194J etc) settles part of the vendor's invoice without cash
-  -- changing hands. See migration 027 + payment.service.ts.
-  (invoice_amount - COALESCE(
-    (SELECT SUM(p.amount + p.tds_amount) FROM payments p WHERE p.invoice_id = invoices.id), 0
-  ))::NUMERIC(14,2) AS balance,
-  remarks, pushed, pushed_at, minor_payment,
-  created_by, created_at, updated_at
+// Balance subtracts both the cash paid and any TDS withheld, since TDS
+// (sec 194C/194J etc) settles part of the vendor's invoice without cash
+// changing hands. See migration 027 + payment.service.ts.
+const SITE_PROJECTION = `
+  inv.id, inv.sl_no, inv.internal_no, inv.month, inv.invoice_date,
+  inv.vendor_id, inv.vendor_name, inv.invoice_no, inv.po_number, inv.purpose,
+  inv.site, inv.invoice_amount,
+  inv.base_amount, inv.cgst_pct, inv.sgst_pct, inv.igst_pct,
+  inv.additional_charge, inv.additional_charge_cgst_pct, inv.additional_charge_sgst_pct,
+  inv.additional_charge_igst_pct, inv.additional_charge_reason,
+  inv.disputed, inv.dispute_severity, inv.dispute_reason, inv.disputed_by, inv.disputed_at,
+  inv.payment_status,
+  (inv.invoice_amount - COALESCE(ps.paid_sum, 0))::NUMERIC(14,2) AS balance,
+  inv.remarks, inv.pushed, inv.pushed_at, inv.minor_payment,
+  inv.created_by, inv.created_at, inv.updated_at
 `;
 
-// All columns for ho and mgmt
-const FULL_COLUMNS = `*`;
+// Pre-aggregated subqueries fold per-invoice sums/counts into one scan each,
+// so the planner runs three GROUP BYs (not three subqueries per row). Was the
+// #1 cause of slow invoice-list responses once row counts grew.
+const AGG_JOINS = `
+  LEFT JOIN (
+    SELECT invoice_id, SUM(amount + tds_amount) AS paid_sum
+    FROM payments
+    GROUP BY invoice_id
+  ) ps  ON ps.invoice_id  = inv.id
+  LEFT JOIN (
+    SELECT invoice_id, SUM(allocated_amount) AS cn_sum
+    FROM credit_note_allocations
+    GROUP BY invoice_id
+  ) cna ON cna.invoice_id = inv.id
+  LEFT JOIN (
+    SELECT invoice_id, COUNT(*)::int AS cnt
+    FROM attachments
+    GROUP BY invoice_id
+  ) att ON att.invoice_id = inv.id
+`;
+
+// Computed columns that the AGG_JOINS make available — kept shape-identical
+// to the previous correlated-subquery output so client code needs no change.
+const AGG_FIELDS = `
+  COALESCE(cna.cn_sum, 0)::NUMERIC(14,2) AS allocated_credits,
+  (inv.invoice_amount - COALESCE(cna.cn_sum, 0))::NUMERIC(14,2) AS effective_payable,
+  COALESCE(att.cnt, 0) AS attachment_count
+`;
 
 interface InvoiceRow {
   id: string;
   [key: string]: unknown;
 }
 
+// Defensive cap so a runaway client (or future growth) can't pull the entire
+// table at once. At current scale (~1–2k invoices) this is invisible; if it
+// ever clips real data we'll need server-side filter/sort + real pagination.
+const INVOICE_LIST_LIMIT = 5000;
+
 export async function getInvoices(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { role, site } = req.user!;
-
-    // Computed fields shared by all roles: allocated_credits + effective_payable
-    const CN_FIELDS = `
-      COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = invoices.id), 0)::NUMERIC(14,2) AS allocated_credits,
-      (invoice_amount - COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = invoices.id), 0))::NUMERIC(14,2) AS effective_payable
-    `;
 
     if (role === 'site') {
       // Site: any of the user's assigned sites only, NO payment data.
@@ -100,20 +124,25 @@ export async function getInvoices(req: Request, res: Response, next: NextFunctio
         ? req.user!.sites
         : (site ? [site] : []);
       const invoices = await query<InvoiceRow>(
-        `SELECT ${SITE_COLUMNS}, ${CN_FIELDS},
-           (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = invoices.id)::int AS attachment_count
-         FROM invoices WHERE site = ANY($1) AND deleted_at IS NULL
-         ORDER BY invoice_date DESC, created_at DESC`,
-        [userSites]
+        `SELECT ${SITE_PROJECTION}, ${AGG_FIELDS}
+         FROM invoices inv
+         ${AGG_JOINS}
+         WHERE inv.site = ANY($1) AND inv.deleted_at IS NULL
+         ORDER BY inv.invoice_date DESC, inv.created_at DESC
+         LIMIT $2`,
+        [userSites, INVOICE_LIST_LIMIT]
       );
       res.json(invoices);
     } else {
       // ho + mgmt: all invoices, full data
       const invoices = await query<InvoiceRow>(
-        `SELECT ${FULL_COLUMNS}, ${CN_FIELDS},
-           (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = invoices.id)::int AS attachment_count
-         FROM invoices WHERE deleted_at IS NULL
-         ORDER BY invoice_date DESC, created_at DESC`
+        `SELECT inv.*, ${AGG_FIELDS}
+         FROM invoices inv
+         ${AGG_JOINS}
+         WHERE inv.deleted_at IS NULL
+         ORDER BY inv.invoice_date DESC, inv.created_at DESC
+         LIMIT $1`,
+        [INVOICE_LIST_LIMIT]
       );
       res.json(invoices);
     }

@@ -18,6 +18,11 @@ interface AuditRow {
   created_at: string;
 }
 
+// Hard cap so the audit page doesn't ship the entire table over the wire.
+// 2000 covers ~3 months of activity at current usage; older rows stay in the
+// DB and remain accessible via the per-invoice history endpoint.
+const AUDIT_LIST_LIMIT = 2000;
+
 export async function getAuditLogs(_req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const logs = await query<AuditRow>(
@@ -30,7 +35,9 @@ export async function getAuditLogs(_req: Request, res: Response, next: NextFunct
        FROM audit_logs a
        LEFT JOIN users u    ON u.id = a.user_id
        LEFT JOIN invoices i ON i.id = a.invoice_id
-       ORDER BY a.created_at DESC`
+       ORDER BY a.created_at DESC
+       LIMIT $1`,
+      [AUDIT_LIST_LIMIT]
     );
     res.json(logs);
   } catch (err) {
