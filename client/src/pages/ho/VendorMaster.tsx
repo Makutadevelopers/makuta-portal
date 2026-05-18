@@ -66,10 +66,18 @@ export default function VendorMaster() {
     }
   }
 
+  // Outstanding per vendor, keyed by vendor_id (stable) — not vendor_name,
+  // which can drift between an invoice's denormalised text and the master row
+  // after renames or partial merges. Sum the actual balance (invoice_amount −
+  // payments), not the full invoice_amount, so Partial invoices don't get
+  // double-counted. Invoices with no vendor_id are "unmastered" — they're
+  // surfaced in the banner below, not aggregated into any master here.
   const vendorStats = new Map<string, number>();
   for (const inv of invoices) {
-    if (inv.payment_status !== 'Paid') {
-      vendorStats.set(inv.vendor_name, (vendorStats.get(inv.vendor_name) ?? 0) + Number(inv.invoice_amount));
+    if (!inv.vendor_id) continue;
+    const bal = Number(inv.balance ?? 0);
+    if (bal > 0) {
+      vendorStats.set(inv.vendor_id, (vendorStats.get(inv.vendor_id) ?? 0) + bal);
     }
   }
 
@@ -101,9 +109,14 @@ export default function VendorMaster() {
 
   async function handleDelete(v: Vendor) {
     if (!confirm(`Delete vendor "${v.name}"? Invoices for this vendor will default to 30-day terms.`)) return;
-    await deleteVendor(v.id);
-    notify(`${v.name} removed`, 'error');
-    refresh();
+    try {
+      await deleteVendor(v.id);
+      notify(`${v.name} removed`, 'error');
+      refresh();
+      refreshInvoices();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Delete failed', 'error');
+    }
   }
 
   async function handleRevert(m: VendorMerge) {
@@ -272,7 +285,7 @@ export default function VendorMaster() {
             </thead>
             <tbody>
               {filtered.map(v => {
-                const outstanding = vendorStats.get(v.name);
+                const outstanding = vendorStats.get(v.id);
                 const isExpanded = expandedEditId === v.id;
                 return (
                   <Fragment key={v.id}>
