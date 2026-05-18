@@ -69,7 +69,11 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
       title: user.title,
     };
 
-    const token = jwt.sign(payload, env.JWT_SECRET as string, { expiresIn: '8h' });
+    const token = jwt.sign(payload, env.JWT_SECRET as string, {
+      expiresIn: '8h',
+      audience: 'makuta-portal',
+      issuer: 'makuta-auth',
+    });
 
     res.json({
       token,
