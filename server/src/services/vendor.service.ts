@@ -495,7 +495,16 @@ export interface MergeResult {
   collapsedDuplicates: number;
 }
 
-interface InvoiceChange {
+// Entries in vendor_merges.invoice_changes are a discriminated union: rows
+// that have `invoice_id` are invoice re-points (the original use), rows
+// that have `credit_note_id` are credit-note re-points (added when CNs were
+// blocking the DELETE FROM vendors because of their FK to vendors.id).
+//
+// Backward compatibility: pre-existing rows in the DB are all of the
+// "invoice" shape and have no `kind` discriminator — that's fine, the
+// revert code distinguishes them by the presence of `invoice_id` vs
+// `credit_note_id`.
+interface InvoiceMergeChange {
   invoice_id: string;
   prev_vendor_id: string | null;
   prev_vendor_name: string;
@@ -503,6 +512,22 @@ interface InvoiceChange {
   // amount + date under the kept vendor) and got soft-deleted by the merge.
   // Revert flips deleted_at back to NULL.
   soft_deleted_by_merge?: boolean;
+}
+
+interface CreditNoteMergeChange {
+  credit_note_id: string;
+  prev_vendor_id: string;
+  prev_vendor_name: string;
+}
+
+type InvoiceChange = InvoiceMergeChange | CreditNoteMergeChange;
+
+function isInvoiceChange(c: InvoiceChange): c is InvoiceMergeChange {
+  return 'invoice_id' in c;
+}
+
+function isCreditNoteChange(c: InvoiceChange): c is CreditNoteMergeChange {
+  return 'credit_note_id' in c;
 }
 
 export async function mergeVendors(
@@ -554,6 +579,30 @@ export async function mergeVendors(
      WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM($3)) AND vendor_id IS DISTINCT FROM $2`,
     [keepVendor.name, keepId, removeVendor.name]
   );
+
+  // Re-point credit notes. credit_notes.vendor_id has a NOT NULL FK to
+  // vendors(id) with no ON DELETE clause — leaving them pointed at the
+  // removed vendor would block the DELETE FROM vendors below. Snapshot
+  // first so revert can put them back to where they came from.
+  const cnRows = await query<{ id: string; vendor_id: string; vendor_name: string }>(
+    `SELECT id, vendor_id, vendor_name FROM credit_notes WHERE vendor_id = $1`,
+    [removeId]
+  );
+  for (const cn of cnRows) {
+    invoiceChanges.push({
+      credit_note_id: cn.id,
+      prev_vendor_id: cn.vendor_id,
+      prev_vendor_name: cn.vendor_name,
+    });
+  }
+  if (cnRows.length > 0) {
+    await query(
+      `UPDATE credit_notes
+         SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
+       WHERE vendor_id = $3`,
+      [keepId, keepVendor.name, removeId]
+    );
+  }
 
   // Collapse duplicate invoices under the kept vendor.  A "duplicate" means
   // two live invoices share invoice_no (case-insensitive trimmed, non-empty)
@@ -631,7 +680,9 @@ export async function mergeVendors(
       );
       // Add to invoice_changes if it isn't already tracked (rows that were
       // re-pointed from removeId are already in the list — flag them).
-      const existing = invoiceChanges.find(c => c.invoice_id === loser.id);
+      const existing = invoiceChanges.find(
+        (c): c is InvoiceMergeChange => isInvoiceChange(c) && c.invoice_id === loser.id
+      );
       if (existing) {
         existing.soft_deleted_by_merge = true;
       } else {
@@ -739,25 +790,35 @@ export async function revertVendorMerge(
     ]
   );
 
-  // Restore each invoice's previous vendor link.  If the invoice was
-  // soft-deleted as a duplicate during the merge, also clear deleted_at /
-  // deleted_by so it comes back to life.
+  // Restore each tracked row's previous vendor link. Invoices and credit
+  // notes share the same change array; dispatch by the discriminator.
+  // For invoices that were soft-deleted as duplicates during the merge,
+  // also clear deleted_at / deleted_by so they come back to life.
   for (const ch of merge.invoice_changes) {
-    if (ch.soft_deleted_by_merge) {
+    if (isInvoiceChange(ch)) {
+      if (ch.soft_deleted_by_merge) {
+        await query(
+          `UPDATE invoices
+           SET vendor_id = $1, vendor_name = $2,
+               deleted_at = NULL, deleted_by = NULL,
+               updated_at = NOW()
+           WHERE id = $3`,
+          [ch.prev_vendor_id, ch.prev_vendor_name, ch.invoice_id]
+        );
+      } else {
+        await query(
+          `UPDATE invoices
+           SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
+           WHERE id = $3`,
+          [ch.prev_vendor_id, ch.prev_vendor_name, ch.invoice_id]
+        );
+      }
+    } else if (isCreditNoteChange(ch)) {
       await query(
-        `UPDATE invoices
-         SET vendor_id = $1, vendor_name = $2,
-             deleted_at = NULL, deleted_by = NULL,
-             updated_at = NOW()
-         WHERE id = $3`,
-        [ch.prev_vendor_id, ch.prev_vendor_name, ch.invoice_id]
-      );
-    } else {
-      await query(
-        `UPDATE invoices
+        `UPDATE credit_notes
          SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
          WHERE id = $3`,
-        [ch.prev_vendor_id, ch.prev_vendor_name, ch.invoice_id]
+        [ch.prev_vendor_id, ch.prev_vendor_name, ch.credit_note_id]
       );
     }
   }
