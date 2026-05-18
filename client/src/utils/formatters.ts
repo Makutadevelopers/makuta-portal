@@ -27,8 +27,28 @@ export function formatINRPaisa(value: number): string {
   return inrPaisaFormatter.format(value);
 }
 
-/** Format an ISO date string as "14 Nov 2025". */
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Format an ISO date string as "14 Nov 2025".
+ *
+ * The DB stores invoice_date etc. as DATE (no time) — pg serializes that as
+ * UTC midnight ("2026-05-12T00:00:00.000Z"). Round-tripping through
+ * `new Date(...).toLocaleDateString()` would render that in the BROWSER's
+ * timezone, which shifts the displayed day by one for any client west of
+ * UTC (a CSV row dated 12 May then shows as 11 May). We parse the YYYY-MM-DD
+ * prefix directly to keep the display tied to the stored calendar date.
+ */
 export function formatDate(dateStr: string): string {
+  if (!dateStr) return '';
+  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    const [, y, mo, d] = m;
+    const monthIdx = parseInt(mo, 10) - 1;
+    if (monthIdx >= 0 && monthIdx < 12) {
+      return `${d} ${MONTH_ABBR[monthIdx]} ${y}`;
+    }
+  }
   return new Date(dateStr).toLocaleDateString('en-IN', {
     day: '2-digit',
     month: 'short',
