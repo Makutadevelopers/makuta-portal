@@ -41,6 +41,7 @@ export default function VendorMaster() {
   const [mergeFrom, setMergeFrom] = useState<Vendor | null>(null);
   const [merges, setMerges] = useState<VendorMerge[]>([]);
   const [revertingId, setRevertingId] = useState<string | null>(null);
+  const [showAllMerges, setShowAllMerges] = useState(false);
   const { notify } = useToast();
 
   const loadMerges = useCallback(() => {
@@ -213,36 +214,51 @@ export default function VendorMaster() {
         />
       )}
 
-      {merges.filter(m => !m.reverted_at).length > 0 && (
-        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <div className="text-xs font-medium text-blue-900 mb-2">
-            Recent merges {isSite ? '(yours)' : ''} — you can revert if needed
-          </div>
-          <div className="space-y-1.5">
-            {merges.filter(m => !m.reverted_at).slice(0, 5).map(m => (
-              <div key={m.id} className="flex items-center justify-between gap-3 px-3 py-2 bg-white rounded border border-blue-100 text-xs">
-                <div className="min-w-0 flex-1 text-gray-800">
-                  <span className="font-medium">{m.removed_vendor_name}</span>
-                  <span className="text-blue-600 mx-2">→</span>
-                  <span className="font-medium">{m.kept_vendor_name ?? '(deleted)'}</span>
-                  <span className="text-gray-500 ml-2">
-                    · {m.invoice_count} invoice{m.invoice_count === 1 ? '' : 's'}
-                    {m.merged_by_name ? ` · by ${m.merged_by_name}` : ''}
-                    {' · '}{formatDate(m.merged_at)}
-                  </span>
+      {(() => {
+        const liveMerges = merges.filter(m => !m.reverted_at);
+        if (liveMerges.length === 0) return null;
+        const visible = showAllMerges ? liveMerges : liveMerges.slice(0, 5);
+        const hidden = liveMerges.length - visible.length;
+        return (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="text-xs font-medium text-blue-900 mb-2">
+              Recent merges {isSite ? '(yours)' : ''} — you can revert if needed
+              <span className="text-blue-600/70 font-normal ml-1">({liveMerges.length})</span>
+            </div>
+            <div className={`space-y-1.5 ${showAllMerges ? 'max-h-80 overflow-y-auto pr-1' : ''}`}>
+              {visible.map(m => (
+                <div key={m.id} className="flex items-center justify-between gap-3 px-3 py-2 bg-white rounded border border-blue-100 text-xs">
+                  <div className="min-w-0 flex-1 text-gray-800">
+                    <span className="font-medium">{m.removed_vendor_name}</span>
+                    <span className="text-blue-600 mx-2">→</span>
+                    <span className="font-medium">{m.kept_vendor_name ?? '(deleted)'}</span>
+                    <span className="text-gray-500 ml-2">
+                      · {m.invoice_count} invoice{m.invoice_count === 1 ? '' : 's'}
+                      {m.merged_by_name ? ` · by ${m.merged_by_name}` : ''}
+                      {' · '}{formatDate(m.merged_at)}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleRevert(m)}
+                    disabled={revertingId === m.id}
+                    className="text-xs text-amber-700 hover:bg-amber-50 rounded px-2 py-1 disabled:opacity-50 flex-shrink-0"
+                  >
+                    {revertingId === m.id ? 'Reverting…' : 'Revert'}
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleRevert(m)}
-                  disabled={revertingId === m.id}
-                  className="text-xs text-amber-700 hover:bg-amber-50 rounded px-2 py-1 disabled:opacity-50 flex-shrink-0"
-                >
-                  {revertingId === m.id ? 'Reverting…' : 'Revert'}
-                </button>
-              </div>
-            ))}
+              ))}
+            </div>
+            {(hidden > 0 || showAllMerges) && (
+              <button
+                onClick={() => setShowAllMerges(v => !v)}
+                className="mt-2 text-xs text-blue-700 hover:underline"
+              >
+                {showAllMerges ? 'Show less' : `Show ${hidden} more`}
+              </button>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {mergeFrom && (
         <MergeIntoModal
