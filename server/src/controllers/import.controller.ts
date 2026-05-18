@@ -11,7 +11,7 @@ import { randomUUID } from 'crypto';
 import { query, queryOne } from '../db/query';
 import { logAudit } from '../services/audit.service';
 import { paymentStatusCase, recomputeInvoiceStatus } from '../services/payment.service';
-import { normaliseSiteName } from '../utils/sites';
+import { normaliseSiteName, isCanonicalSite, CANONICAL_SITES } from '../utils/sites';
 
 interface CsvRow {
   [key: string]: string;
@@ -431,6 +431,28 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
     // Default = preview so accidental uploads don't clobber data.
     const mode = (req.body?.mode as string) || 'preview';
 
+    // Optional site remap: { "Taranga Kukatpally": "Taranga", ... } sent on
+    // commit so non-canonical CSV site labels can be rewritten to a real
+    // project before insert. Preview surfaces the list of unknown sites so
+    // the uploader can decide row-by-site whether to remap or keep as-is.
+    let siteRemap: Record<string, string> = {};
+    if (req.body?.siteRemap) {
+      try {
+        const parsed = typeof req.body.siteRemap === 'string'
+          ? JSON.parse(req.body.siteRemap)
+          : req.body.siteRemap;
+        if (parsed && typeof parsed === 'object') {
+          for (const [k, v] of Object.entries(parsed)) {
+            if (typeof v === 'string' && isCanonicalSite(v)) {
+              siteRemap[k.trim().toLowerCase()] = normaliseSiteName(v);
+            }
+          }
+        }
+      } catch {
+        // Bad JSON → just ignore the remap, treat as no remap supplied.
+      }
+    }
+
     const callerRole = req.user!.role;
     const callerSites = (req.user!.sites && req.user!.sites.length > 0)
       ? req.user!.sites
@@ -439,6 +461,9 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
     // Phase 1: normalize all rows
     const normalized: NormalizedRow[] = [];
     const skippedRows: Array<{ row: number; reason: string }> = [];
+    // Track non-canonical site labels found in the CSV so the preview UI can
+    // prompt for a remap. Keyed by lowercased site name for dedup.
+    const unknownSiteCounts = new Map<string, { name: string; rowCount: number }>();
 
     for (let i = 0; i < records.length; i++) {
       const row = records[i];
@@ -448,6 +473,23 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
       if ('skip' in norm) {
         skippedRows.push({ row: rowNum, reason: norm.reason });
         continue;
+      }
+
+      // Apply user-supplied remap first (e.g. "Taranga Kukatpally" → "Taranga"),
+      // so role validation and dupe detection see the corrected site.
+      if (norm.site) {
+        const remapped = siteRemap[norm.site.toLowerCase().trim()];
+        if (remapped) norm.site = remapped;
+      }
+
+      // Tally unknown sites for the preview response. Skipped only when the
+      // value is non-empty AND not in CANONICAL_SITES — blank sites are
+      // surfaced as ordinary "skipped" rows below.
+      if (norm.site && !isCanonicalSite(norm.site)) {
+        const key = norm.site.toLowerCase().trim();
+        const prev = unknownSiteCounts.get(key);
+        if (prev) prev.rowCount++;
+        else unknownSiteCounts.set(key, { name: norm.site, rowCount: 1 });
       }
 
       // Site accountants must specify a site that's in their assigned list.
@@ -471,6 +513,9 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
       normalized.push(norm);
     }
 
+    const unknownSites = Array.from(unknownSiteCounts.values())
+      .sort((a, b) => b.rowCount - a.rowCount);
+
     // Phase 2: detect duplicates against current DB state
     const duplicates = await findDuplicates(normalized);
     const duplicateRowNums = new Set(duplicates.map(d => d.row));
@@ -483,6 +528,8 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
         toImport: normalized.length - duplicates.length,
         duplicates,
         skipped: skippedRows,
+        unknownSites,
+        canonicalSites: CANONICAL_SITES,
       });
       return;
     }
