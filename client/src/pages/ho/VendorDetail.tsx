@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, Fragment, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { getVendorDetail, VendorDetailResponse } from '../../api/vendors';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { getVendorDetail, VendorDetailResponse, VendorDetailInvoice } from '../../api/vendors';
 import { deleteInvoice } from '../../api/invoices';
 import { getVendorCreditBalance } from '../../api/creditNotes';
 import { VendorCreditBalance } from '../../types/creditNote';
@@ -8,23 +8,28 @@ import { formatINR, formatDate } from '../../utils/formatters';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../context/ToastContext';
 import AppShell from '../../components/layout/AppShell';
+import ActionsMenu from '../../components/shared/ActionsMenu';
+import PaymentModal from '../../components/shared/PaymentModal';
 
 type StatusFilter = 'All' | 'Paid' | 'Partial' | 'Not Paid';
 type OrderType = 'All' | 'PO' | 'WO';
 
 export default function VendorDetail() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [data, setData] = useState<VendorDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
   const [orderType, setOrderType] = useState<OrderType>('All');
   const [monthFilter, setMonthFilter] = useState<string>('All');
+  const [siteFilter, setSiteFilter] = useState<string>('All');
   const [creditBalance, setCreditBalance] = useState<VendorCreditBalance | null>(null);
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
   const [showAllFiles, setShowAllFiles] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [payInvoice, setPayInvoice] = useState<VendorDetailInvoice | null>(null);
   const { user } = useAuth();
   const { notify } = useToast();
   const isHO = user?.role === 'ho';
@@ -91,11 +96,14 @@ export default function VendorDetail() {
     new Set(invoices.map(i => monthKey(i.invoice_date)).filter(Boolean))
   ).sort((a, b) => b.localeCompare(a));
 
+  const siteOptions = Array.from(new Set(invoices.map(i => i.site).filter(Boolean))).sort();
+
   const filtered = invoices.filter(inv => {
     if (statusFilter !== 'All' && inv.payment_status !== statusFilter) return false;
     if (orderType === 'PO' && !(inv.po_number || '').toUpperCase().includes('/PO/')) return false;
     if (orderType === 'WO' && !(inv.po_number || '').toUpperCase().includes('/WO/')) return false;
     if (monthFilter !== 'All' && monthKey(inv.invoice_date) !== monthFilter) return false;
+    if (siteFilter !== 'All' && inv.site !== siteFilter) return false;
     return true;
   });
 
@@ -264,6 +272,27 @@ export default function VendorDetail() {
               {ot === 'All' ? 'All Orders' : ot === 'PO' ? 'Purchase Orders' : 'Work Orders'}
             </button>
           ))}
+
+          {siteOptions.length > 1 && (
+            <>
+              <div className="w-px h-5 bg-gray-200 mx-1" />
+              <select
+                value={siteFilter}
+                onChange={e => setSiteFilter(e.target.value)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer ${
+                  siteFilter !== 'All'
+                    ? 'bg-[#1a3c5e] text-white border-[#1a3c5e]'
+                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                }`}
+                title="Filter invoices by project / site"
+              >
+                <option value="All">All projects</option>
+                {siteOptions.map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </>
+          )}
 
           {monthOptions.length > 0 && (
             <>
@@ -443,15 +472,29 @@ export default function VendorDetail() {
                       </td>
                       {isHO && (
                         <td className="px-4 py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(inv.id, inv.invoice_no)}
-                            disabled={deletingId === inv.id}
-                            className="text-xs text-red-600 hover:bg-red-50 rounded px-2 py-1 disabled:opacity-50"
-                            title="Move this invoice to the bin"
-                          >
-                            {deletingId === inv.id ? 'Deleting…' : 'Delete'}
-                          </button>
+                          {deletingId === inv.id ? (
+                            <span className="text-xs text-gray-400">Deleting…</span>
+                          ) : (
+                            <ActionsMenu
+                              items={[
+                                {
+                                  label: 'Edit',
+                                  color: 'text-gray-700',
+                                  onClick: () => navigate(`/invoices?focus=${inv.id}`),
+                                },
+                                ...(inv.payment_status !== 'Paid' ? [{
+                                  label: inv.payment_status === 'Not Paid' ? 'Mark Paid' : 'Add Payment',
+                                  color: 'text-green-600',
+                                  onClick: () => setPayInvoice(inv),
+                                }] : []),
+                                {
+                                  label: 'Delete',
+                                  color: 'text-red-500',
+                                  onClick: () => handleDelete(inv.id, inv.invoice_no),
+                                },
+                              ]}
+                            />
+                          )}
                         </td>
                       )}
                     </tr>
@@ -510,6 +553,20 @@ export default function VendorDetail() {
           </table>
         </div>
       </div>
+
+      {payInvoice && (
+        <PaymentModal
+          invoice={{
+            id: payInvoice.id,
+            vendor_name: vendor.name,
+            invoice_no: payInvoice.invoice_no,
+            invoice_amount: payInvoice.invoice_amount,
+          }}
+          balance={Number(payInvoice.balance)}
+          onClose={() => setPayInvoice(null)}
+          onSaved={() => { setPayInvoice(null); notify('Payment recorded'); reload(); }}
+        />
+      )}
     </AppShell>
   );
 }
