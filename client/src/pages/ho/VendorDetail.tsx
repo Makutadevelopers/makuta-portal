@@ -65,6 +65,40 @@ export default function VendorDetail() {
     return { count: selectedIds.size, amount, balance };
   }, [data, selectedIds]);
 
+  // Filtered view stats — drive the four KPI tiles so picking a project (or any
+  // other filter) immediately rescopes Total Invoices / Total Amount / Paid /
+  // Outstanding to that subset. Falls back to all-time when every filter is
+  // 'All' (filteredInvoices === invoices then).
+  const filteredStats = useMemo(() => {
+    const invs = data?.invoices ?? [];
+    const monthOf = (iso: string) => (iso || '').slice(0, 7);
+    let count = 0;
+    let totalAmount = 0;
+    let paidAmount = 0;
+    let outstandingAmount = 0;
+    let oldestUnpaid: string | null = null;
+    for (const inv of invs) {
+      if (statusFilter !== 'All' && inv.payment_status !== statusFilter) continue;
+      if (orderType === 'PO' && !(inv.po_number || '').toUpperCase().includes('/PO/')) continue;
+      if (orderType === 'WO' && !(inv.po_number || '').toUpperCase().includes('/WO/')) continue;
+      if (monthFilter !== 'All' && monthOf(inv.invoice_date) !== monthFilter) continue;
+      if (siteFilter !== 'All' && inv.site !== siteFilter) continue;
+      const amt = Number(inv.invoice_amount);
+      const bal = Number(inv.balance);
+      count++;
+      totalAmount += amt;
+      outstandingAmount += bal;
+      paidAmount += (amt - bal);
+      if (bal > 0 && (!oldestUnpaid || inv.invoice_date < oldestUnpaid)) {
+        oldestUnpaid = inv.invoice_date;
+      }
+    }
+    return { count, totalAmount, paidAmount, outstandingAmount, oldestUnpaid };
+  }, [data, statusFilter, orderType, monthFilter, siteFilter]);
+
+  const anyFilterActive =
+    statusFilter !== 'All' || orderType !== 'All' || monthFilter !== 'All' || siteFilter !== 'All';
+
   if (loading) {
     return (
       <AppShell>
@@ -84,7 +118,7 @@ export default function VendorDetail() {
     );
   }
 
-  const { vendor, stats, invoices } = data;
+  const { vendor, invoices } = data;
 
   const monthKey = (iso: string) => (iso || '').slice(0, 7); // YYYY-MM
   const monthLabel = (key: string) => {
@@ -176,11 +210,12 @@ export default function VendorDetail() {
     return 'bg-red-50 text-red-700 border-red-200';
   }
 
+  const scopeSub = anyFilterActive ? 'filtered view' : 'all time';
   const kpiCards = [
-    { label: 'Total Invoices', value: String(stats.totalInvoices), sub: 'all time', accent: '#1a3c5e', bg: '#e8eef5' },
-    { label: 'Total Amount', value: formatINR(stats.totalAmount), sub: 'total invoiced value', accent: '#1a3c5e', bg: '#eff6ff' },
-    { label: 'Paid Amount', value: formatINR(stats.paidAmount), sub: 'payments received', accent: '#15803d', bg: '#dcfce7' },
-    { label: 'Outstanding', value: formatINR(stats.outstandingAmount), sub: stats.oldestUnpaid ? `oldest unpaid: ${formatDate(stats.oldestUnpaid)}` : 'fully settled', accent: stats.outstandingAmount > 0 ? '#dc2626' : '#15803d', bg: stats.outstandingAmount > 0 ? '#fef2f2' : '#dcfce7' },
+    { label: 'Total Invoices', value: String(filteredStats.count), sub: scopeSub, accent: '#1a3c5e', bg: '#e8eef5' },
+    { label: 'Total Amount', value: formatINR(filteredStats.totalAmount), sub: anyFilterActive ? 'filtered view' : 'total invoiced value', accent: '#1a3c5e', bg: '#eff6ff' },
+    { label: 'Paid Amount', value: formatINR(filteredStats.paidAmount), sub: anyFilterActive ? 'filtered view' : 'payments received', accent: '#15803d', bg: '#dcfce7' },
+    { label: 'Outstanding', value: formatINR(filteredStats.outstandingAmount), sub: filteredStats.oldestUnpaid ? `oldest unpaid: ${formatDate(filteredStats.oldestUnpaid)}` : (filteredStats.count > 0 ? 'fully settled' : 'no invoices'), accent: filteredStats.outstandingAmount > 0 ? '#dc2626' : '#15803d', bg: filteredStats.outstandingAmount > 0 ? '#fef2f2' : '#dcfce7' },
   ];
 
   return (
