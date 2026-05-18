@@ -15,6 +15,15 @@ const SITE_BY_KEY = new Map<string, string>(
   CANONICAL_SITES.map(s => [s.toLowerCase().trim(), s])
 );
 
+// Aliases for the same physical project under different colloquial names
+// (locality suffix, abbreviation, etc.). Add new entries here when a CSV
+// import or stray manual entry creates a phantom site on the dashboard.
+// Keys are lowercased/trimmed for matching.
+const SITE_ALIASES: Record<string, string> = {
+  'taranga kukatpally': 'Taranga',
+  'taranga, kukatpally': 'Taranga',
+};
+
 /**
  * Map a free-text site name to its canonical capitalisation. Case-insensitive
  * match; whitespace is trimmed. Returns the canonical name when there is a
@@ -23,5 +32,11 @@ const SITE_BY_KEY = new Map<string, string>(
  */
 export function normaliseSiteName(input: string): string {
   const key = input.toLowerCase().trim();
+  if (SITE_ALIASES[key]) return SITE_ALIASES[key];
   return SITE_BY_KEY.get(key) ?? input.trim();
+}
+
+/** True when the (already-normalised) name is one of the canonical sites. */
+export function isCanonicalSite(name: string): boolean {
+  return SITE_BY_KEY.has(name.toLowerCase().trim());
 }
