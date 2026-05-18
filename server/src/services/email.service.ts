@@ -7,6 +7,11 @@ import { query } from '../db/query';
 
 const isConfigured = !!env.SMTP_HOST && !!env.SMTP_USER;
 
+// Workflow notifications (invoice push, payment edit, invoice deletion, credit
+// note allocation, weekly overdue digest) are paused per business request —
+// only password-related emails are sent. Flip this to true to re-enable.
+const WORKFLOW_EMAILS_ENABLED = false;
+
 const transporter = isConfigured
   ? nodemailer.createTransport({
       host: env.SMTP_HOST,
@@ -107,6 +112,7 @@ export async function notifyInvoicePushed(params: {
   amount: number;
   site: string;
 }): Promise<void> {
+  if (!WORKFLOW_EMAILS_ENABLED) return;
   const recipients = await getHoRecipients();
   if (recipients.length === 0) {
     console.log('[email] notifyInvoicePushed — no HO recipients configured, skipping');
@@ -175,6 +181,7 @@ export async function notifyPaymentEdited(params: {
   after:  { amount: number; type: string; ref: string | null; date: string; bank: string | null };
   editedBy: string;
 }): Promise<void> {
+  if (!WORKFLOW_EMAILS_ENABLED) return;
   const recipients = await getHoRecipients();
   if (recipients.length === 0) {
     console.log('[email] notifyPaymentEdited — no HO recipients configured, skipping');
@@ -215,6 +222,7 @@ export async function notifyInvoiceDeleted(params: {
   deletedBy: string;
   mode: 'bin' | 'permanent';
 }): Promise<void> {
+  if (!WORKFLOW_EMAILS_ENABLED) return;
   const recipients = await getHoRecipients();
   if (recipients.length === 0) {
     console.log('[email] notifyInvoiceDeleted — no HO recipients configured, skipping');
@@ -247,6 +255,7 @@ export async function notifyCreditNoteAllocated(params: {
   amount: number;
   allocatedBy: string;
 }): Promise<void> {
+  if (!WORKFLOW_EMAILS_ENABLED) return;
   const recipients = await getHoRecipients();
   if (recipients.length === 0) {
     console.log('[email] notifyCreditNoteAllocated — no HO recipients configured, skipping');
@@ -274,6 +283,7 @@ export async function notifyOverdueDigest(params: {
   totalOverdue: number;
   topVendors: Array<{ name: string; balance: number; daysPastDue: number; site?: string }>;
 }): Promise<void> {
+  if (!WORKFLOW_EMAILS_ENABLED) return;
   if (params.recipients.length === 0) {
     console.log(`[email] notifyOverdueDigest (${params.scopeLabel}) — no recipients, skipping`);
     return;
