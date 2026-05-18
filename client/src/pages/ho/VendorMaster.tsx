@@ -16,6 +16,7 @@ import BulkImportModal from '../../components/shared/BulkImportModal';
 import { useToast } from '../../context/ToastContext';
 import { highlight } from '../../utils/searchHighlight';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useConfirm } from '../../components/ui/ConfirmDialog';
 
 const TERM_OPTIONS = [7, 10, 14, 15, 21, 30, 45, 60, 75, 90];
 
@@ -43,6 +44,7 @@ export default function VendorMaster() {
   const [revertingId, setRevertingId] = useState<string | null>(null);
   const [showAllMerges, setShowAllMerges] = useState(false);
   const { notify } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const loadMerges = useCallback(() => {
     getVendorMerges().then(setMerges).catch(() => setMerges([]));
@@ -101,15 +103,25 @@ export default function VendorMaster() {
       .filter(name => !vendorNames.has(name.toLowerCase()))
   ));
 
+  // 30 days is the default for every vendor, so a yellow pill on every row
+  // communicated nothing. Only outliers get colour now; the default reads as
+  // quiet neutral text and the eye lands on the rows that need attention.
   function termsBadgeColor(days: number): string {
-    if (days <= 15) return 'bg-red-50 text-red-700 border-red-200';
-    if (days <= 30) return 'bg-yellow-50 text-yellow-700 border-yellow-200';
-    if (days <= 45) return 'bg-blue-50 text-blue-700 border-blue-200';
-    return 'bg-green-50 text-green-700 border-green-200';
+    if (days < 15) return 'bg-red-50 text-red-700 border-red-200';
+    if (days < 30) return 'bg-amber-50 text-amber-700 border-amber-200';
+    if (days > 45) return 'bg-green-50 text-green-700 border-green-200';
+    if (days > 30) return 'bg-blue-50 text-blue-700 border-blue-200';
+    return 'bg-gray-50 text-gray-600 border-gray-200';
   }
 
   async function handleDelete(v: Vendor) {
-    if (!confirm(`Delete vendor "${v.name}"? Invoices for this vendor will default to 30-day terms.`)) return;
+    const ok = await confirm({
+      title: `Delete vendor "${v.name}"?`,
+      message: 'Invoices for this vendor will default to 30-day terms.',
+      confirmLabel: 'Delete vendor',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await deleteVendor(v.id);
       notify(`${v.name} removed`, 'error');
@@ -121,7 +133,14 @@ export default function VendorMaster() {
   }
 
   async function handleRevert(m: VendorMerge) {
-    if (!confirm(`Revert this merge? "${m.removed_vendor_name}" will be restored as a separate vendor and ${m.invoice_count} invoice${m.invoice_count === 1 ? '' : 's'} will be re-pointed back to it.`)) return;
+    const invoiceWord = `${m.invoice_count} invoice${m.invoice_count === 1 ? '' : 's'}`;
+    const ok = await confirm({
+      title: 'Revert this merge?',
+      message: `"${m.removed_vendor_name}" will be restored as a separate vendor and ${invoiceWord} will be re-pointed back to it.`,
+      confirmLabel: 'Revert merge',
+      variant: 'warning',
+    });
+    if (!ok) return;
     setRevertingId(m.id);
     try {
       await revertVendorMerge(m.id);
@@ -138,6 +157,7 @@ export default function VendorMaster() {
 
   return (
     <AppShell>
+      {confirmDialog}
       <div
         ref={stickyHeaderRef}
         className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-1 mb-4"
@@ -312,7 +332,7 @@ export default function VendorMaster() {
                           <div className="text-[11px] text-red-500 mt-0.5">{formatINR(outstanding)} outstanding</div>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{v.category ?? '—'}</td>
+                      <td className="px-4 py-3 text-gray-600">{v.category ?? <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-center">
                         {editingTermsId === v.id && canManage(v) ? (
                           <select
@@ -340,31 +360,49 @@ export default function VendorMaster() {
                           </button>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{v.gstin ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-700">{v.contact_name ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">{v.phone ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">{v.email ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs max-w-[140px] truncate" title={v.notes ?? ''}>{v.notes || '—'}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{v.gstin ?? <span className="text-gray-300 font-sans">—</span>}</td>
+                      <td className="px-4 py-3 text-gray-700">{v.contact_name ?? <span className="text-gray-300">—</span>}</td>
+                      <td className="px-4 py-3 text-gray-600">{v.phone ?? <span className="text-gray-300">—</span>}</td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">{v.email ?? <span className="text-gray-300">—</span>}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs max-w-[140px] truncate" title={v.notes ?? ''}>{v.notes || <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
+                        {/* Visual hierarchy: Edit is the primary row action
+                            (most frequent), Merge is secondary, Delete is
+                            destructive and pushed to the right with a soft
+                            divider so it's harder to mis-click. */}
+                        <div className="flex items-center gap-1">
                           {canManage(v) && (
                             <button
                               onClick={() => { setShowForm(false); setExpandedEditId(isExpanded ? null : v.id); }}
-                              className="text-xs text-blue-600 hover:underline"
+                              className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
                             >
                               {isExpanded ? 'Close' : 'Edit'}
                             </button>
                           )}
-                          {/* Merge is open to HO and site on every vendor — revert is one click away. */}
                           <button
                             onClick={() => setMergeFrom(v)}
-                            className="text-xs text-amber-600 hover:underline"
+                            className="rounded-md px-2 py-1 text-xs text-gray-600 hover:bg-gray-100 hover:text-gray-900"
                             title="Merge this vendor into another (this row will be removed; can be reverted)"
                           >
                             Merge
                           </button>
                           {canManage(v) && (
-                            <button onClick={() => handleDelete(v)} className="text-xs text-red-500 hover:underline">Delete</button>
+                            <>
+                              <span className="mx-1 h-4 w-px bg-gray-200" aria-hidden />
+                              <button
+                                onClick={() => handleDelete(v)}
+                                className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                                title={`Delete ${v.name}`}
+                                aria-label={`Delete ${v.name}`}
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                                  <path d="M10 11v6M14 11v6" />
+                                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                                </svg>
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>
