@@ -3,7 +3,7 @@
 
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { query, queryOne } from '../db/query';
+import { query, queryOne, withTransaction } from '../db/query';
 import { s3 } from '../config/s3';
 
 export interface VendorRow {
@@ -530,201 +530,260 @@ function isCreditNoteChange(c: InvoiceChange): c is CreditNoteMergeChange {
   return 'credit_note_id' in c;
 }
 
+// Thrown when an invoice-number collision would make the merge violate the
+// partial UNIQUE index from migration 028 (vendor_id, invoice_no on live
+// rows). The dup-collapse pass only catches exact (invoice_no + amount +
+// date) duplicates; same number with a different amount or date is a real
+// conflict that needs human judgement. We surface the conflicting rows so
+// the user can fix one side and retry instead of seeing a Postgres error.
+export class VendorMergeConflictError extends Error {
+  status = 409;
+  code = 'MERGE_INVOICE_COLLISION';
+  conflicts: Array<{
+    invoice_no: string;
+    remove_amount: string;
+    remove_date: string;
+    keep_amount: string;
+    keep_date: string;
+  }>;
+  constructor(message: string, conflicts: VendorMergeConflictError['conflicts']) {
+    super(message);
+    this.name = 'VendorMergeConflictError';
+    this.conflicts = conflicts;
+  }
+}
+
 export async function mergeVendors(
   keepId: string,
   removeId: string,
   mergedByUserId: string
 ): Promise<MergeResult | null> {
-  const keepVendor = await getVendorById(keepId);
-  const removeVendor = await getVendorById(removeId);
-  if (!keepVendor || !removeVendor) return null;
+  return withTransaction(async (tx) => {
+    // Lock both vendor rows for the duration of the merge so two concurrent
+    // merges can't corrupt each other's snapshots.
+    const keepVendor = await tx.queryOne<VendorRow>(
+      'SELECT * FROM vendors WHERE id = $1 FOR UPDATE',
+      [keepId]
+    );
+    const removeVendor = await tx.queryOne<VendorRow>(
+      'SELECT * FROM vendors WHERE id = $1 FOR UPDATE',
+      [removeId]
+    );
+    if (!keepVendor || !removeVendor) return null;
 
-  // Snapshot every invoice that's about to be re-pointed, so revert can put
-  // each one back to exactly the vendor_id / vendor_name it had before.
-  // Two paths: rows linked by vendor_id (the canonical case) and rows linked
-  // only by the denormalised vendor_name (legacy / unmastered rows).
-  const byIdRows = await query<{ id: string; vendor_id: string | null; vendor_name: string }>(
-    `SELECT id, vendor_id, vendor_name FROM invoices WHERE vendor_id = $1`,
-    [removeId]
-  );
-  const byNameRows = await query<{ id: string; vendor_id: string | null; vendor_name: string }>(
-    `SELECT id, vendor_id, vendor_name FROM invoices
-     WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM($1)) AND vendor_id IS DISTINCT FROM $2`,
-    [removeVendor.name, keepId]
-  );
+    // Pre-flight: invoice_no collisions that AREN'T pure duplicates.
+    // The dup-collapse step below handles cases where invoice_no + amount +
+    // date all match (same physical bill, just entered twice). But if the
+    // numbers collide with different amount/date, the UPDATE that re-points
+    // vendor_id will violate the (vendor_id, invoice_no) unique index from
+    // migration 028 and the whole transaction dies. Catch it here so the
+    // user gets an actionable error instead.
+    const collisions = await tx.query<{
+      invoice_no: string;
+      remove_amount: string;
+      remove_date: string;
+      keep_amount: string;
+      keep_date: string;
+    }>(
+      `SELECT
+         r.invoice_no,
+         r.invoice_amount::text AS remove_amount,
+         r.invoice_date::text   AS remove_date,
+         k.invoice_amount::text AS keep_amount,
+         k.invoice_date::text   AS keep_date
+       FROM invoices r
+       JOIN invoices k
+         ON LOWER(TRIM(k.invoice_no)) = LOWER(TRIM(r.invoice_no))
+       WHERE r.vendor_id = $1
+         AND r.deleted_at IS NULL
+         AND r.invoice_no IS NOT NULL AND TRIM(r.invoice_no) <> ''
+         AND k.vendor_id = $2
+         AND k.deleted_at IS NULL
+         AND (k.invoice_amount <> r.invoice_amount OR k.invoice_date <> r.invoice_date)`,
+      [removeId, keepId]
+    );
 
-  const seen = new Set<string>();
-  const invoiceChanges: InvoiceChange[] = [];
-  for (const r of [...byIdRows, ...byNameRows]) {
-    if (seen.has(r.id)) continue;
-    seen.add(r.id);
-    invoiceChanges.push({
-      invoice_id: r.id,
-      prev_vendor_id: r.vendor_id,
-      prev_vendor_name: r.vendor_name,
-    });
-  }
+    if (collisions.length > 0) {
+      const sample = collisions.slice(0, 3).map(c =>
+        `${c.invoice_no} (${removeVendor.name}: ₹${c.remove_amount} on ${c.remove_date} vs ${keepVendor.name}: ₹${c.keep_amount} on ${c.keep_date})`
+      );
+      const more = collisions.length > 3 ? ` and ${collisions.length - 3} more` : '';
+      throw new VendorMergeConflictError(
+        `Cannot merge: ${collisions.length} invoice number${collisions.length === 1 ? '' : 's'} collide with different amounts/dates on the kept vendor. Resolve manually first — ${sample.join('; ')}${more}.`,
+        collisions
+      );
+    }
 
-  // Re-point by vendor_id.
-  await query(
-    `UPDATE invoices
-     SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
-     WHERE vendor_id = $3`,
-    [keepId, keepVendor.name, removeId]
-  );
+    // Snapshot every invoice that's about to be re-pointed, so revert can
+    // put each one back. Two paths: rows linked by vendor_id (canonical)
+    // and rows linked only by the denormalised vendor_name (legacy rows).
+    const byIdRows = await tx.query<{ id: string; vendor_id: string | null; vendor_name: string }>(
+      `SELECT id, vendor_id, vendor_name FROM invoices WHERE vendor_id = $1`,
+      [removeId]
+    );
+    const byNameRows = await tx.query<{ id: string; vendor_id: string | null; vendor_name: string }>(
+      `SELECT id, vendor_id, vendor_name FROM invoices
+       WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM($1)) AND vendor_id IS DISTINCT FROM $2`,
+      [removeVendor.name, keepId]
+    );
 
-  // Re-point by vendor_name (catches unlinked rows matching the removed vendor).
-  await query(
-    `UPDATE invoices SET vendor_name = $1, vendor_id = $2, updated_at = NOW()
-     WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM($3)) AND vendor_id IS DISTINCT FROM $2`,
-    [keepVendor.name, keepId, removeVendor.name]
-  );
+    const seen = new Set<string>();
+    const invoiceChanges: InvoiceChange[] = [];
+    for (const r of [...byIdRows, ...byNameRows]) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      invoiceChanges.push({
+        invoice_id: r.id,
+        prev_vendor_id: r.vendor_id,
+        prev_vendor_name: r.vendor_name,
+      });
+    }
 
-  // Re-point credit notes. credit_notes.vendor_id has a NOT NULL FK to
-  // vendors(id) with no ON DELETE clause — leaving them pointed at the
-  // removed vendor would block the DELETE FROM vendors below. Snapshot
-  // first so revert can put them back to where they came from.
-  const cnRows = await query<{ id: string; vendor_id: string; vendor_name: string }>(
-    `SELECT id, vendor_id, vendor_name FROM credit_notes WHERE vendor_id = $1`,
-    [removeId]
-  );
-  for (const cn of cnRows) {
-    invoiceChanges.push({
-      credit_note_id: cn.id,
-      prev_vendor_id: cn.vendor_id,
-      prev_vendor_name: cn.vendor_name,
-    });
-  }
-  if (cnRows.length > 0) {
-    await query(
-      `UPDATE credit_notes
-         SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
+    await tx.query(
+      `UPDATE invoices
+       SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
        WHERE vendor_id = $3`,
       [keepId, keepVendor.name, removeId]
     );
-  }
 
-  // Collapse duplicate invoices under the kept vendor.  A "duplicate" means
-  // two live invoices share invoice_no (case-insensitive trimmed, non-empty)
-  // AND invoice_amount (within ₹1 paise tolerance) AND invoice_date.  All
-  // three must match — that's strict enough to catch the same physical bill
-  // entered under two vendor spellings without collapsing a vendor that
-  // legitimately reuses invoice numbers across different amounts/dates.
-  //
-  // Winner per group: prefer pushed (locked/official), then most payments,
-  // then most attachments, then oldest created_at (the original entry).
-  const dupGroups = await query<{
-    invoice_no_norm: string;
-    invoice_amount: string;
-    invoice_date: string;
-    ids: string[];
-  }>(
-    `WITH ranked AS (
-       SELECT
-         i.id,
-         LOWER(TRIM(i.invoice_no)) AS invoice_no_norm,
-         i.invoice_amount,
-         i.invoice_date
-       FROM invoices i
-       WHERE i.vendor_id = $1
-         AND i.deleted_at IS NULL
-         AND i.invoice_no IS NOT NULL
-         AND TRIM(i.invoice_no) <> ''
-     )
-     SELECT invoice_no_norm, invoice_amount, invoice_date,
-            ARRAY_AGG(id) AS ids
-     FROM ranked
-     GROUP BY invoice_no_norm, invoice_amount, invoice_date
-     HAVING COUNT(*) > 1`,
-    [keepId]
-  );
-
-  let collapsedDuplicates = 0;
-  for (const g of dupGroups) {
-    // Rank rows in the group; first row is the winner, rest get soft-deleted.
-    const ranked = await query<{
-      id: string;
-      pushed: boolean | null;
-      payment_count: string;
-      attachment_count: string;
-      created_at: string;
-      vendor_id: string | null;
-      vendor_name: string;
-    }>(
-      `SELECT
-         i.id,
-         i.pushed,
-         (SELECT COUNT(*) FROM payments p WHERE p.invoice_id = i.id) AS payment_count,
-         (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = i.id) AS attachment_count,
-         i.created_at,
-         i.vendor_id,
-         i.vendor_name
-       FROM invoices i
-       WHERE i.id = ANY($1::uuid[])
-       ORDER BY
-         COALESCE(i.pushed, FALSE) DESC,
-         (SELECT COUNT(*) FROM payments p WHERE p.invoice_id = i.id) DESC,
-         (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = i.id) DESC,
-         i.created_at ASC,
-         i.id ASC`,
-      [g.ids]
+    await tx.query(
+      `UPDATE invoices SET vendor_name = $1, vendor_id = $2, updated_at = NOW()
+       WHERE LOWER(TRIM(vendor_name)) = LOWER(TRIM($3)) AND vendor_id IS DISTINCT FROM $2`,
+      [keepVendor.name, keepId, removeVendor.name]
     );
 
-    // Soft-delete every row past the winner.
-    const losers = ranked.slice(1);
-    for (const loser of losers) {
-      await query(
-        `UPDATE invoices SET deleted_at = NOW(), deleted_by = $1, updated_at = NOW()
-         WHERE id = $2 AND deleted_at IS NULL`,
-        [mergedByUserId, loser.id]
-      );
-      // Add to invoice_changes if it isn't already tracked (rows that were
-      // re-pointed from removeId are already in the list — flag them).
-      const existing = invoiceChanges.find(
-        (c): c is InvoiceMergeChange => isInvoiceChange(c) && c.invoice_id === loser.id
-      );
-      if (existing) {
-        existing.soft_deleted_by_merge = true;
-      } else {
-        invoiceChanges.push({
-          invoice_id: loser.id,
-          prev_vendor_id: loser.vendor_id,
-          prev_vendor_name: loser.vendor_name,
-          soft_deleted_by_merge: true,
-        });
-      }
-      collapsedDuplicates += 1;
+    // Re-point credit notes. credit_notes.vendor_id is NOT NULL with no
+    // ON DELETE — leaving them pointed at the removed vendor would block
+    // the DELETE FROM vendors below.
+    const cnRows = await tx.query<{ id: string; vendor_id: string; vendor_name: string }>(
+      `SELECT id, vendor_id, vendor_name FROM credit_notes WHERE vendor_id = $1`,
+      [removeId]
+    );
+    for (const cn of cnRows) {
+      invoiceChanges.push({
+        credit_note_id: cn.id,
+        prev_vendor_id: cn.vendor_id,
+        prev_vendor_name: cn.vendor_name,
+      });
     }
-  }
+    if (cnRows.length > 0) {
+      await tx.query(
+        `UPDATE credit_notes
+           SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
+         WHERE vendor_id = $3`,
+        [keepId, keepVendor.name, removeId]
+      );
+    }
 
-  // Delete the removed vendor.  Cascades clean up vendor_dedup_dismissed
-  // rows that reference this UUID; those won't be restored on revert
-  // (intentional — dismissals are advisory and easy to redo).
-  await query('DELETE FROM vendors WHERE id = $1', [removeId]);
+    // Collapse duplicate invoices under the kept vendor. A "duplicate" =
+    // same invoice_no_norm + invoice_amount + invoice_date. Strict enough
+    // to catch the same physical bill entered under two vendor spellings
+    // without collapsing legitimately distinct invoices.
+    const dupGroups = await tx.query<{
+      invoice_no_norm: string;
+      invoice_amount: string;
+      invoice_date: string;
+      ids: string[];
+    }>(
+      `WITH ranked AS (
+         SELECT
+           i.id,
+           LOWER(TRIM(i.invoice_no)) AS invoice_no_norm,
+           i.invoice_amount,
+           i.invoice_date
+         FROM invoices i
+         WHERE i.vendor_id = $1
+           AND i.deleted_at IS NULL
+           AND i.invoice_no IS NOT NULL
+           AND TRIM(i.invoice_no) <> ''
+       )
+       SELECT invoice_no_norm, invoice_amount, invoice_date,
+              ARRAY_AGG(id) AS ids
+       FROM ranked
+       GROUP BY invoice_no_norm, invoice_amount, invoice_date
+       HAVING COUNT(*) > 1`,
+      [keepId]
+    );
 
-  // Persist the merge so it can be reverted.
-  const inserted = await queryOne<{ id: string }>(
-    `INSERT INTO vendor_merges (
-       kept_vendor_id, removed_vendor_id, removed_vendor_snapshot,
-       invoice_changes, merged_by
-     ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5)
-     RETURNING id`,
-    [
-      keepId,
-      removeId,
-      JSON.stringify(removeVendor),
-      JSON.stringify(invoiceChanges),
-      mergedByUserId,
-    ]
-  );
+    let collapsedDuplicates = 0;
+    for (const g of dupGroups) {
+      const ranked = await tx.query<{
+        id: string;
+        pushed: boolean | null;
+        payment_count: string;
+        attachment_count: string;
+        created_at: string;
+        vendor_id: string | null;
+        vendor_name: string;
+      }>(
+        `SELECT
+           i.id,
+           i.pushed,
+           (SELECT COUNT(*) FROM payments p WHERE p.invoice_id = i.id) AS payment_count,
+           (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = i.id) AS attachment_count,
+           i.created_at,
+           i.vendor_id,
+           i.vendor_name
+         FROM invoices i
+         WHERE i.id = ANY($1::uuid[])
+         ORDER BY
+           COALESCE(i.pushed, FALSE) DESC,
+           (SELECT COUNT(*) FROM payments p WHERE p.invoice_id = i.id) DESC,
+           (SELECT COUNT(*) FROM attachments a WHERE a.invoice_id = i.id) DESC,
+           i.created_at ASC,
+           i.id ASC`,
+        [g.ids]
+      );
 
-  return {
-    mergeId: inserted!.id,
-    keptVendor: keepVendor,
-    repointedCount: invoiceChanges.length,
-    removedName: removeVendor.name,
-    collapsedDuplicates,
-  };
+      const losers = ranked.slice(1);
+      for (const loser of losers) {
+        await tx.query(
+          `UPDATE invoices SET deleted_at = NOW(), deleted_by = $1, updated_at = NOW()
+           WHERE id = $2 AND deleted_at IS NULL`,
+          [mergedByUserId, loser.id]
+        );
+        const existing = invoiceChanges.find(
+          (c): c is InvoiceMergeChange => isInvoiceChange(c) && c.invoice_id === loser.id
+        );
+        if (existing) {
+          existing.soft_deleted_by_merge = true;
+        } else {
+          invoiceChanges.push({
+            invoice_id: loser.id,
+            prev_vendor_id: loser.vendor_id,
+            prev_vendor_name: loser.vendor_name,
+            soft_deleted_by_merge: true,
+          });
+        }
+        collapsedDuplicates += 1;
+      }
+    }
+
+    await tx.query('DELETE FROM vendors WHERE id = $1', [removeId]);
+
+    const inserted = await tx.queryOne<{ id: string }>(
+      `INSERT INTO vendor_merges (
+         kept_vendor_id, removed_vendor_id, removed_vendor_snapshot,
+         invoice_changes, merged_by
+       ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5)
+       RETURNING id`,
+      [
+        keepId,
+        removeId,
+        JSON.stringify(removeVendor),
+        JSON.stringify(invoiceChanges),
+        mergedByUserId,
+      ]
+    );
+
+    return {
+      mergeId: inserted!.id,
+      keptVendor: keepVendor,
+      repointedCount: invoiceChanges.length,
+      removedName: removeVendor.name,
+      collapsedDuplicates,
+    };
+  });
 }
 
 // ── Revert ────────────────────────────────────────────────────────────────
@@ -755,83 +814,141 @@ export interface RevertResult {
   restoredInvoiceCount: number;
 }
 
+// Thrown when un-soft-deleting a duplicate during revert would put it back
+// next to another live invoice with the same invoice_no under the same
+// vendor — that violates migration 028's partial unique index. Surface it
+// to the user so they can decide what to do instead of seeing a raw
+// Postgres error.
+export class VendorRevertConflictError extends Error {
+  status = 409;
+  code = 'REVERT_INVOICE_COLLISION';
+  conflicts: Array<{ invoice_id: string; invoice_no: string; vendor_id: string }>;
+  constructor(message: string, conflicts: VendorRevertConflictError['conflicts']) {
+    super(message);
+    this.name = 'VendorRevertConflictError';
+    this.conflicts = conflicts;
+  }
+}
+
 export async function revertVendorMerge(
   mergeId: string,
   revertedByUserId: string
 ): Promise<RevertResult | null> {
-  const merge = await getVendorMergeById(mergeId);
-  if (!merge || merge.reverted_at) return null;
+  return withTransaction(async (tx) => {
+    // Lock the merge record so two concurrent reverts can't race.
+    const merge = await tx.queryOne<VendorMergeRow>(
+      `SELECT id, kept_vendor_id, removed_vendor_id, removed_vendor_snapshot,
+              invoice_changes, merged_by, merged_at, reverted_at, reverted_by
+       FROM vendor_merges WHERE id = $1 FOR UPDATE`,
+      [mergeId]
+    );
+    if (!merge || merge.reverted_at) return null;
 
-  const snap = merge.removed_vendor_snapshot;
+    const snap = merge.removed_vendor_snapshot;
 
-  // Re-create the removed vendor with the same UUID.  Use ON CONFLICT DO
-  // NOTHING in case a vendor with that ID somehow still exists (shouldn't,
-  // but cheap insurance).
-  const restored = await queryOne<VendorRow>(
-    `INSERT INTO vendors (
-       id, name, payment_terms, category, gstin, contact_name,
-       phone, email, notes, created_by, created_at, updated_at
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-     ON CONFLICT (id) DO UPDATE SET
-       name = EXCLUDED.name,
-       payment_terms = EXCLUDED.payment_terms,
-       category = EXCLUDED.category,
-       gstin = EXCLUDED.gstin,
-       contact_name = EXCLUDED.contact_name,
-       phone = EXCLUDED.phone,
-       email = EXCLUDED.email,
-       notes = EXCLUDED.notes,
-       updated_at = NOW()
-     RETURNING *`,
-    [
-      snap.id, snap.name, snap.payment_terms, snap.category, snap.gstin,
-      snap.contact_name, snap.phone, snap.email, snap.notes, snap.created_by,
-      snap.created_at,
-    ]
-  );
-
-  // Restore each tracked row's previous vendor link. Invoices and credit
-  // notes share the same change array; dispatch by the discriminator.
-  // For invoices that were soft-deleted as duplicates during the merge,
-  // also clear deleted_at / deleted_by so they come back to life.
-  for (const ch of merge.invoice_changes) {
-    if (isInvoiceChange(ch)) {
-      if (ch.soft_deleted_by_merge) {
-        await query(
-          `UPDATE invoices
-           SET vendor_id = $1, vendor_name = $2,
-               deleted_at = NULL, deleted_by = NULL,
-               updated_at = NOW()
-           WHERE id = $3`,
-          [ch.prev_vendor_id, ch.prev_vendor_name, ch.invoice_id]
-        );
-      } else {
-        await query(
-          `UPDATE invoices
-           SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
-           WHERE id = $3`,
-          [ch.prev_vendor_id, ch.prev_vendor_name, ch.invoice_id]
-        );
+    // Pre-flight: any soft-deleted-by-merge invoice whose previous owner
+    // was the KEPT vendor (not the removed one) is about to come back to
+    // life under the kept vendor. If a live invoice with the same
+    // invoice_no still exists under the kept vendor, the un-soft-delete
+    // hits migration 028's unique index. Detect and surface.
+    const restoreConflicts: VendorRevertConflictError['conflicts'] = [];
+    for (const ch of merge.invoice_changes) {
+      if (!isInvoiceChange(ch)) continue;
+      if (!ch.soft_deleted_by_merge) continue;
+      if (ch.prev_vendor_id !== merge.kept_vendor_id) continue;
+      const row = await tx.queryOne<{ invoice_no: string | null }>(
+        `SELECT invoice_no FROM invoices WHERE id = $1`,
+        [ch.invoice_id]
+      );
+      if (!row?.invoice_no || row.invoice_no.trim() === '') continue;
+      const live = await tx.queryOne<{ id: string }>(
+        `SELECT id FROM invoices
+         WHERE vendor_id = $1
+           AND deleted_at IS NULL
+           AND LOWER(TRIM(invoice_no)) = LOWER(TRIM($2))
+           AND id <> $3`,
+        [merge.kept_vendor_id, row.invoice_no, ch.invoice_id]
+      );
+      if (live) {
+        restoreConflicts.push({
+          invoice_id: ch.invoice_id,
+          invoice_no: row.invoice_no,
+          vendor_id: merge.kept_vendor_id,
+        });
       }
-    } else if (isCreditNoteChange(ch)) {
-      await query(
-        `UPDATE credit_notes
-         SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
-         WHERE id = $3`,
-        [ch.prev_vendor_id, ch.prev_vendor_name, ch.credit_note_id]
+    }
+    if (restoreConflicts.length > 0) {
+      const sample = restoreConflicts.slice(0, 3).map(c => c.invoice_no).join(', ');
+      const more = restoreConflicts.length > 3 ? ` and ${restoreConflicts.length - 3} more` : '';
+      throw new VendorRevertConflictError(
+        `Cannot revert: ${restoreConflicts.length} soft-deleted duplicate${restoreConflicts.length === 1 ? '' : 's'} would clash with live invoice numbers on the kept vendor (${sample}${more}). Delete or renumber the conflicting live invoice first, then retry.`,
+        restoreConflicts
       );
     }
-  }
 
-  await query(
-    `UPDATE vendor_merges SET reverted_at = NOW(), reverted_by = $1 WHERE id = $2`,
-    [revertedByUserId, mergeId]
-  );
+    // Re-create the removed vendor with the same UUID.
+    const restored = await tx.queryOne<VendorRow>(
+      `INSERT INTO vendors (
+         id, name, payment_terms, category, gstin, contact_name,
+         phone, email, notes, created_by, created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name,
+         payment_terms = EXCLUDED.payment_terms,
+         category = EXCLUDED.category,
+         gstin = EXCLUDED.gstin,
+         contact_name = EXCLUDED.contact_name,
+         phone = EXCLUDED.phone,
+         email = EXCLUDED.email,
+         notes = EXCLUDED.notes,
+         updated_at = NOW()
+       RETURNING *`,
+      [
+        snap.id, snap.name, snap.payment_terms, snap.category, snap.gstin,
+        snap.contact_name, snap.phone, snap.email, snap.notes, snap.created_by,
+        snap.created_at,
+      ]
+    );
 
-  return {
-    restoredVendor: restored!,
-    restoredInvoiceCount: merge.invoice_changes.length,
-  };
+    for (const ch of merge.invoice_changes) {
+      if (isInvoiceChange(ch)) {
+        if (ch.soft_deleted_by_merge) {
+          await tx.query(
+            `UPDATE invoices
+             SET vendor_id = $1, vendor_name = $2,
+                 deleted_at = NULL, deleted_by = NULL,
+                 updated_at = NOW()
+             WHERE id = $3`,
+            [ch.prev_vendor_id, ch.prev_vendor_name, ch.invoice_id]
+          );
+        } else {
+          await tx.query(
+            `UPDATE invoices
+             SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
+             WHERE id = $3`,
+            [ch.prev_vendor_id, ch.prev_vendor_name, ch.invoice_id]
+          );
+        }
+      } else if (isCreditNoteChange(ch)) {
+        await tx.query(
+          `UPDATE credit_notes
+           SET vendor_id = $1, vendor_name = $2, updated_at = NOW()
+           WHERE id = $3`,
+          [ch.prev_vendor_id, ch.prev_vendor_name, ch.credit_note_id]
+        );
+      }
+    }
+
+    await tx.query(
+      `UPDATE vendor_merges SET reverted_at = NOW(), reverted_by = $1 WHERE id = $2`,
+      [revertedByUserId, mergeId]
+    );
+
+    return {
+      restoredVendor: restored!,
+      restoredInvoiceCount: merge.invoice_changes.length,
+    };
+  });
 }
 
 // ── List ──────────────────────────────────────────────────────────────────
