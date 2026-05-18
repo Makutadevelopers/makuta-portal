@@ -167,7 +167,15 @@ function parseFile(buffer: Buffer, mimetype: string): CsvRow[] {
       if (!headers[j]) continue;
       const val = row[j] as unknown;
       if (val instanceof Date) {
-        obj[headers[j]] = val.toISOString().split('T')[0];
+        // SheetJS aligns date-cell Date objects to LOCAL midnight of the
+        // intended calendar date — toISOString().split('T')[0] would then
+        // shift dates by -1 day on any host running east of UTC (this is
+        // what corrupted batch 90209c92 on 2026-04-11). Read local getters
+        // to recover the intended day, independent of host timezone.
+        const y = val.getFullYear();
+        const m = String(val.getMonth() + 1).padStart(2, '0');
+        const d = String(val.getDate()).padStart(2, '0');
+        obj[headers[j]] = `${y}-${m}-${d}`;
       } else {
         obj[headers[j]] = String(val ?? '').trim();
       }
