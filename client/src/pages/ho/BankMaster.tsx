@@ -3,6 +3,7 @@ import AppShell from '../../components/layout/AppShell';
 import { Bank, listBanks, createBank, updateBank } from '../../api/banks';
 import { formatDate } from '../../utils/formatters';
 import { useToast } from '../../context/ToastContext';
+import { useConfirm } from '../../components/ui/ConfirmDialog';
 
 // HO-only Bank Master. Banks here drive the bank dropdown in payment
 // forms across HO and site. Banks are never hard-deleted — the active
@@ -10,6 +11,7 @@ import { useToast } from '../../context/ToastContext';
 // historical payments.
 export default function BankMaster() {
   const { notify } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [banks, setBanks] = useState<Bank[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -53,7 +55,15 @@ export default function BankMaster() {
 
   async function handleToggleActive(b: Bank) {
     const verb = b.active ? 'Deactivate' : 'Reactivate';
-    if (b.active && !confirm(`Deactivate "${b.name}"? It will no longer appear in new payment dropdowns. Historical payments are unaffected and you can reactivate it any time.`)) return;
+    if (b.active) {
+      const ok = await confirm({
+        title: `Deactivate "${b.name}"?`,
+        message: 'It will no longer appear in new payment dropdowns. Historical payments are unaffected and you can reactivate it any time.',
+        confirmLabel: 'Deactivate',
+        variant: 'warning',
+      });
+      if (!ok) return;
+    }
     setSavingId(b.id);
     try {
       await updateBank(b.id, { active: !b.active });
@@ -98,6 +108,7 @@ export default function BankMaster() {
 
   return (
     <AppShell>
+      {confirmDialog}
       <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
         <div>
           <div className="text-lg font-medium text-gray-900">Bank Master</div>

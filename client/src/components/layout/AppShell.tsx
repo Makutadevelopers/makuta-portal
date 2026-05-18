@@ -4,6 +4,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { getAlerts, getAlertCount, resolveAlert, Alert } from '../../api/alerts';
 import { sendTempPassword } from '../../api/users';
 import { useToast } from '../../context/ToastContext';
+import { useConfirm } from '../ui/ConfirmDialog';
 import { getPendingCount } from '../../utils/offlineSync';
 import CalculatorWidget from '../shared/CalculatorWidget';
 
@@ -85,6 +86,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [sendingTempFor, setSendingTempFor] = useState<string | null>(null);
   const { notify } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const loadCount = useCallback(async () => {
     // HO sees data-hygiene alerts; MD sees password-reset requests.
@@ -133,7 +135,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       notify('Alert is missing the user reference', 'error');
       return;
     }
-    if (!confirm(`Send a temporary password to ${meta?.name ?? 'this user'} (${meta?.email ?? ''})?`)) return;
+    const ok = await confirm({
+      title: 'Send temporary password?',
+      message: `${meta?.name ?? 'This user'} (${meta?.email ?? ''}) will receive a new temporary password. Their existing password will stop working.`,
+      confirmLabel: 'Send password',
+      variant: 'primary',
+    });
+    if (!ok) return;
     setSendingTempFor(alert.id);
     try {
       const res = await sendTempPassword(targetUserId);
@@ -155,6 +163,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {confirmDialog}
       {/* Header */}
       <header className="bg-white border-b border-gray-100 px-4 sm:px-6 py-3 flex justify-between items-center">
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">

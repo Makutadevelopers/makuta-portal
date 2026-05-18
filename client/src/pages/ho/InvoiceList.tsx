@@ -23,6 +23,7 @@ import AttachmentViewer from '../../components/shared/AttachmentViewer';
 import DisputeModal from '../../components/shared/DisputeModal';
 import ActionsMenu from '../../components/shared/ActionsMenu';
 import PaymentModal from '../../components/shared/PaymentModal';
+import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../context/ToastContext';
 import { normaliseSearch, highlight, amountMatchesSearch } from '../../utils/searchHighlight';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
@@ -88,6 +89,7 @@ export default function InvoiceList() {
   const [infoHistory, setInfoHistory] = useState<AuditLogEntry[]>([]);
   const [infoLoading, setInfoLoading] = useState(false);
   const { notify } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
@@ -250,7 +252,14 @@ export default function InvoiceList() {
     });
     const skipped = selected.size - draftIds.length;
     if (draftIds.length === 0) { notify('No draft invoices in selection to delete'); return; }
-    if (!confirm(`Move ${draftIds.length} invoice${draftIds.length > 1 ? 's' : ''} to bin?${skipped > 0 ? `\n(${skipped} finalized invoice${skipped > 1 ? 's' : ''} will be skipped)` : ''}\n\nYou can restore from Bin within 30 days.`)) return;
+    const skippedNote = skipped > 0 ? `\n(${skipped} finalized invoice${skipped > 1 ? 's' : ''} will be skipped — undo finalization first to delete them.)` : '';
+    const ok = await confirm({
+      title: `Move ${draftIds.length} invoice${draftIds.length > 1 ? 's' : ''} to Bin?`,
+      message: `You can restore from Bin within 30 days.${skippedNote}`,
+      confirmLabel: 'Move to Bin',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setBulkLoading(true);
     try {
       const result = await bulkDeleteInvoices(draftIds);
@@ -277,7 +286,13 @@ export default function InvoiceList() {
   }
 
   async function handleDelete(inv: Invoice) {
-    if (!confirm(`Delete invoice #${inv.invoice_no}? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete invoice #${inv.invoice_no}?`,
+      message: 'This cannot be undone.',
+      confirmLabel: 'Delete invoice',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await deleteInvoiceApi(inv.id);
       notify('Invoice deleted');
@@ -289,7 +304,13 @@ export default function InvoiceList() {
 
   const [recomputing, setRecomputing] = useState(false);
   async function handleRecomputeStatuses() {
-    if (!confirm('Recompute Paid / Partial / Not Paid status for every invoice from the underlying payments? Use this to heal rows where the badge looks wrong.')) return;
+    const ok = await confirm({
+      title: 'Recompute payment statuses?',
+      message: 'Re-derives Paid / Partial / Not Paid for every invoice from the underlying payments. Use this to heal rows where the badge looks wrong.',
+      confirmLabel: 'Recompute',
+      variant: 'primary',
+    });
+    if (!ok) return;
     setRecomputing(true);
     try {
       const r = await recomputeInvoiceStatuses();
@@ -326,6 +347,7 @@ export default function InvoiceList() {
 
   return (
     <AppShell>
+      {confirmDialog}
       <div
         ref={stickyHeaderRef}
         className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-1 mb-4"
@@ -1153,6 +1175,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
 }) {
   const isEdit = !!editInvoice;
   const { notify } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
 
@@ -1352,6 +1375,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-6 mb-6">
+      {confirmDialog}
       <div className="text-base font-medium text-gray-900 mb-5">{isEdit ? 'Edit Invoice' : 'New Invoice Entry'}</div>
       {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
 
@@ -1651,7 +1675,13 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
                       <a href={`${fullUrl}${fullUrl.includes('?') ? '&' : '?'}download=1`} className="px-2 py-1 text-xs text-green-600 hover:bg-green-50 rounded" title="Download">Download</a>
                       <button type="button" onClick={() => { navigator.clipboard.writeText(fullUrl); alert('Link copied to clipboard'); }} className="px-2 py-1 text-xs text-purple-600 hover:bg-purple-50 rounded" title="Copy share link">Share</button>
                       <button type="button" onClick={async () => {
-                        if (!confirm(`Delete ${att.file_name}?`)) return;
+                        const ok = await confirm({
+                          title: 'Delete attachment?',
+                          message: `"${att.file_name}" will be removed from this invoice.`,
+                          confirmLabel: 'Delete attachment',
+                          variant: 'danger',
+                        });
+                        if (!ok) return;
                         try {
                           await deleteAttachment(editInvoice!.id, att.id);
                           setExistingAttachments(prev => prev.filter(a => a.id !== att.id));

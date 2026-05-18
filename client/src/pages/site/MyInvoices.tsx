@@ -16,6 +16,7 @@ import SiteBulkPayModal from '../../components/shared/SiteBulkPayModal';
 import { getAllBalances } from '../../api/pettyCash';
 import { PettyCashBalance } from '../../types/pettyCash';
 import { useToast } from '../../context/ToastContext';
+import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { normaliseSearch, highlight, amountMatchesSearch } from '../../utils/searchHighlight';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
@@ -511,6 +512,7 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
   // Treat prefillFrom like editInvoice for initial values, but still create (not update) on save.
   const seed: Invoice | null = editInvoice ?? prefillFrom ?? null;
   const { notify } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
 
@@ -784,6 +786,7 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-6 mb-6">
+      {confirmDialog}
       <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
         <div className="text-base font-medium text-gray-900">
           {isEdit ? 'Edit Invoice' : isDuplicate ? 'Duplicate Invoice' : 'New Invoice Entry'}
@@ -1200,7 +1203,13 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
                       <a href={`${fullUrl}${fullUrl.includes('?') ? '&' : '?'}download=1`} className="px-2 py-1 text-xs text-green-600 hover:bg-green-50 rounded">Download</a>
                       <button type="button" onClick={() => { navigator.clipboard.writeText(fullUrl); alert('Link copied'); }} className="px-2 py-1 text-xs text-purple-600 hover:bg-purple-50 rounded">Share</button>
                       <button type="button" onClick={async () => {
-                        if (!confirm(`Delete ${att.file_name}?`)) return;
+                        const ok = await confirm({
+                          title: 'Delete attachment?',
+                          message: `"${att.file_name}" will be removed from this invoice.`,
+                          confirmLabel: 'Delete attachment',
+                          variant: 'danger',
+                        });
+                        if (!ok) return;
                         try {
                           await deleteAttachment(editInvoice!.id, att.id);
                           setExistingAttachments(prev => prev.filter(a => a.id !== att.id));

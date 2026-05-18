@@ -2,6 +2,7 @@ import { useState, useRef, ChangeEvent } from 'react';
 import { apiFetch, getApiToken } from '../../api/client';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../hooks/useAuth';
+import { useConfirm } from '../ui/ConfirmDialog';
 import { formatINR, formatDate } from '../../utils/formatters';
 
 // ── Response shapes ─────────────────────────────────────────────────────────
@@ -20,12 +21,16 @@ interface DuplicateRow {
 
 interface SkippedRow { row: number; reason: string; }
 
+interface UnknownSite { name: string; rowCount: number; }
+
 interface PreviewResult {
   mode: 'preview';
   total: number;
   toImport: number;
   duplicates: DuplicateRow[];
   skipped: SkippedRow[];
+  unknownSites?: UnknownSite[];
+  canonicalSites?: string[];
 }
 
 interface CommitResult {
@@ -59,6 +64,9 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
   // Invoice flow state
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [commitResult, setCommitResult] = useState<CommitResult | null>(null);
+  // Per-unknown-site remap chosen in the preview step. Key = original CSV site
+  // name; value = canonical site name to rewrite it to, or '' to keep as-is.
+  const [siteRemap, setSiteRemap] = useState<Record<string, string>>({});
 
   // Vendor flow state
   const [vendorResult, setVendorResult] = useState<LegacyResult | null>(null);
@@ -68,6 +76,7 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
 
   const fileRef = useRef<HTMLInputElement>(null);
   const { notify } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { user } = useAuth();
   const allowedSites = user?.sites && user.sites.length > 0
     ? user.sites
@@ -80,6 +89,7 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
     setCommitResult(null);
     setVendorResult(null);
     setErrorMsg(null);
+    setSiteRemap({});
   }
 
   function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
@@ -89,6 +99,7 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
       setCommitResult(null);
       setVendorResult(null);
       setErrorMsg(null);
+      setSiteRemap({});
     }
   }
 
@@ -135,6 +146,15 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
       const fd = new FormData();
       fd.append('file', file);
       fd.append('mode', 'commit');
+      // Only send entries where the user picked a canonical target;
+      // blank selections mean "keep as-is".
+      const remapToSend: Record<string, string> = {};
+      for (const [k, v] of Object.entries(siteRemap)) {
+        if (v) remapToSend[k] = v;
+      }
+      if (Object.keys(remapToSend).length > 0) {
+        fd.append('siteRemap', JSON.stringify(remapToSend));
+      }
       const res = await apiFetch<CommitResult>('/import/invoices', { method: 'POST', body: fd });
       setCommitResult(res);
       if (res.imported > 0) notify(`Imported ${res.imported} invoices`);
@@ -172,6 +192,7 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      {confirmDialog}
       <div className="bg-white rounded-xl shadow-lg w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <div className="text-base font-medium text-gray-900">Bulk Import from CSV</div>
@@ -248,6 +269,37 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
                 Total rows: {preview.total} · Will import: <strong>{preview.toImport}</strong> · Duplicates flagged: <strong>{preview.duplicates.length}</strong> · Skipped: {preview.skipped.length}
               </div>
             </div>
+
+            {preview.unknownSites && preview.unknownSites.length > 0 && preview.canonicalSites && (
+              <div className="p-3 rounded-lg bg-orange-50 border border-orange-200 text-sm">
+                <div className="font-medium text-orange-900 mb-1">
+                  {preview.unknownSites.length} site name{preview.unknownSites.length > 1 ? 's don’t' : ' doesn’t'} match a known project
+                </div>
+                <div className="text-xs text-orange-800 mb-2">
+                  Pick the project each one belongs to, or leave it as-is to keep it as a new site.
+                </div>
+                <div className="space-y-2">
+                  {preview.unknownSites.map(us => (
+                    <div key={us.name} className="flex items-center gap-2 bg-white rounded border border-orange-200 px-3 py-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-medium text-gray-900 truncate">"{us.name}"</div>
+                        <div className="text-[11px] text-gray-500">{us.rowCount} row{us.rowCount === 1 ? '' : 's'}</div>
+                      </div>
+                      <select
+                        value={siteRemap[us.name] ?? ''}
+                        onChange={e => setSiteRemap(r => ({ ...r, [us.name]: e.target.value }))}
+                        className="text-xs border border-gray-200 rounded px-2 py-1.5 bg-white"
+                      >
+                        <option value="">Keep as-is (new project)</option>
+                        {preview.canonicalSites!.map(s => (
+                          <option key={s} value={s}>Map to {s}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {preview.duplicates.length > 0 && (
               <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm">
@@ -353,7 +405,13 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
           <button
             onClick={async () => {
               const clearType = importType === 'invoices' ? 'invoices' : 'vendors';
-              if (!confirm(`Delete ALL ${clearType}? This cannot be undone.`)) return;
+              const ok = await confirm({
+                title: `Delete ALL ${clearType}?`,
+                message: 'This is irreversible and will wipe every row from the table. Use only for fresh imports.',
+                confirmLabel: `Yes, delete all ${clearType}`,
+                variant: 'danger',
+              });
+              if (!ok) return;
               setClearing(true);
               try {
                 const res = await apiFetch<{ message: string; deleted: number }>(`/import/clear/${clearType}`, { method: 'DELETE' });

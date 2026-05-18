@@ -21,10 +21,12 @@ import { CreditNote } from '../../types/creditNote';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useConfirm } from '../../components/ui/ConfirmDialog';
 
 export default function CreditNotes() {
   const { user } = useAuth();
   const { notify } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const role = user?.role;
   const isSite = role === 'site';
 
@@ -59,7 +61,13 @@ export default function CreditNotes() {
   }, [load]);
 
   async function handleDelete(cn: CreditNote) {
-    if (!confirm(`Delete credit note #${cn.cn_no}? Allocations will be reversed.`)) return;
+    const ok = await confirm({
+      title: `Delete credit note #${cn.cn_no}?`,
+      message: 'All allocations made from this credit note will be reversed.',
+      confirmLabel: 'Delete credit note',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await deleteCreditNote(cn.id);
       notify('Credit note deleted');
@@ -71,6 +79,7 @@ export default function CreditNotes() {
 
   return (
     <AppShell>
+      {confirmDialog}
       <div
         ref={stickyHeaderRef}
         className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-2 mb-4"
@@ -598,6 +607,7 @@ function CreditNoteDetail({
   onChanged: () => void;
 }) {
   const { notify } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [attachments, setAttachments] = useState<CreditNoteAttachment[]>([]);
   const [newAllocInvoice, setNewAllocInvoice] = useState('');
   const [newAllocAmount, setNewAllocAmount] = useState('');
@@ -631,7 +641,13 @@ function CreditNoteDetail({
   }
 
   async function handleRemoveAllocation(allocId: string) {
-    if (!confirm('Remove this allocation?')) return;
+    const ok = await confirm({
+      title: 'Remove this allocation?',
+      message: 'The credit applied to this invoice will be released back to the credit note balance.',
+      confirmLabel: 'Remove allocation',
+      variant: 'warning',
+    });
+    if (!ok) return;
     try {
       await removeAllocation(cn.id, allocId);
       notify('Allocation removed');
@@ -655,7 +671,13 @@ function CreditNoteDetail({
   }
 
   async function handleDeleteAttachment(id: string, name: string) {
-    if (!confirm(`Delete ${name}?`)) return;
+    const ok = await confirm({
+      title: 'Delete attachment?',
+      message: `"${name}" will be removed from this credit note.`,
+      confirmLabel: 'Delete attachment',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await deleteCreditNoteAttachment(cn.id, id);
       loadAttachments();
@@ -668,6 +690,7 @@ function CreditNoteDetail({
 
   return (
     <div className="grid md:grid-cols-2 gap-4">
+      {confirmDialog}
       <div>
         <div className="text-xs font-medium text-gray-600 mb-2">Allocations</div>
         {cn.allocations.length === 0 ? (

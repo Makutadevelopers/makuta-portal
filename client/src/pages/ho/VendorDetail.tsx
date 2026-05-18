@@ -9,6 +9,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../context/ToastContext';
 import AppShell from '../../components/layout/AppShell';
 import ActionsMenu from '../../components/shared/ActionsMenu';
+import { useConfirm } from '../../components/ui/ConfirmDialog';
 import PaymentModal from '../../components/shared/PaymentModal';
 
 type StatusFilter = 'All' | 'Paid' | 'Partial' | 'Not Paid';
@@ -32,6 +33,7 @@ export default function VendorDetail() {
   const [payInvoice, setPayInvoice] = useState<VendorDetailInvoice | null>(null);
   const { user } = useAuth();
   const { notify } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const isHO = user?.role === 'ho';
 
   const reload = useCallback(() => {
@@ -136,7 +138,13 @@ export default function VendorDetail() {
   }
 
   async function handleDelete(invId: string, invoiceNo: string | null) {
-    if (!confirm(`Delete invoice ${invoiceNo ? `#${invoiceNo}` : ''}? It will move to the bin and can be restored from there.`)) return;
+    const ok = await confirm({
+      title: `Delete invoice${invoiceNo ? ` #${invoiceNo}` : ''}?`,
+      message: 'It will move to the Bin and can be restored from there within 30 days.',
+      confirmLabel: 'Move to bin',
+      variant: 'danger',
+    });
+    if (!ok) return;
     setDeletingId(invId);
     try {
       await deleteInvoice(invId);
@@ -177,6 +185,7 @@ export default function VendorDetail() {
 
   return (
     <AppShell>
+      {confirmDialog}
       <div className="max-w-[1100px]">
         {/* Header */}
         <div className="flex items-start justify-between mb-5 flex-wrap gap-3">

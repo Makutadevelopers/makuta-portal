@@ -6,6 +6,7 @@ import AppShell from '../../components/layout/AppShell';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useConfirm } from '../../components/ui/ConfirmDialog';
 
 interface BinInvoice extends Invoice {
   deleted_by_name: string | null;
@@ -15,6 +16,7 @@ export default function Bin() {
   const [invoices, setInvoices] = useState<BinInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const { notify } = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { user } = useAuth();
   const canPermanentDelete = user?.role === 'mgmt';
   const canRestore = user?.role === 'ho';
@@ -42,7 +44,13 @@ export default function Bin() {
   }
 
   async function handlePermanentDelete(inv: BinInvoice) {
-    if (!confirm(`Permanently delete invoice #${inv.invoice_no}? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Permanently delete invoice #${inv.invoice_no}?`,
+      message: 'This is irreversible — the invoice will be erased from the database, not just hidden.',
+      confirmLabel: 'Permanently delete',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       await permanentDeleteInvoice(inv.id);
       notify('Invoice permanently deleted');
@@ -53,7 +61,13 @@ export default function Bin() {
   }
 
   async function handlePurge() {
-    if (!confirm('Permanently delete all invoices in bin older than 30 days?')) return;
+    const ok = await confirm({
+      title: 'Purge old invoices?',
+      message: 'Permanently delete every invoice in the Bin older than 30 days. This is irreversible.',
+      confirmLabel: 'Purge old invoices',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
       const result = await purgeBin();
       notify(`Purged ${result.purged} old invoices`);
@@ -72,6 +86,7 @@ export default function Bin() {
 
   return (
     <AppShell>
+      {confirmDialog}
       <div
         ref={stickyHeaderRef}
         className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-2 mb-4"
