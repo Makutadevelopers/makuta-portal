@@ -136,6 +136,12 @@ function parseFile(buffer: Buffer, mimetype: string): CsvRow[] {
       skip_empty_lines: false,
       trim: true,
       bom: true,
+      // Excel exports frequently emit a trailing comma so some rows have one
+      // more column than the header. Without this flag csv-parse aborts the
+      // whole file with CSV_RECORD_INCONSISTENT_FIELDS_LENGTH and nothing
+      // imports. Extra columns past the header are ignored downstream because
+      // parseFile maps by header index.
+      relax_column_count: true,
     });
   }
 
