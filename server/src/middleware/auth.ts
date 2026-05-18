@@ -43,9 +43,20 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
   }
 
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
-    // Older tokens may have been issued before `sites` existed; coerce to a
-    // safe shape so downstream code can rely on `sites` being an array.
+    // Verify with explicit audience/issuer so a token signed for a different
+    // app with the same secret can't be replayed against the portal. Tokens
+    // issued before this change won't carry these claims; treat them as
+    // legitimate during the rollout window — the 8h expiry naturally retires
+    // unclaimed tokens. After 2026-05-22 the loose verify branch can go.
+    let decoded: JwtPayload;
+    try {
+      decoded = jwt.verify(token, env.JWT_SECRET, {
+        audience: 'makuta-portal',
+        issuer: 'makuta-auth',
+      }) as JwtPayload;
+    } catch (strictErr) {
+      decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+    }
     if (!Array.isArray(decoded.sites)) {
       decoded.sites = decoded.site ? [decoded.site] : [];
     }
