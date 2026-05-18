@@ -327,7 +327,7 @@ const COMMON_SUFFIXES = [
   'pvt', 'ltd', 'limited', 'private', 'enterprises', 'traders', 'india',
 ];
 
-function normalizeVendorName(raw: string): string {
+export function normalizeVendorName(raw: string): string {
   let name = raw.toLowerCase().trim();
   for (const suffix of COMMON_SUFFIXES) {
     // Remove suffix with optional preceding dot/space

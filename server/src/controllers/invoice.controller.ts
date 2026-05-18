@@ -16,6 +16,7 @@ import { deleteInvoiceFilesFromDisk } from './attachment.controller';
 import { userHasSite } from '../middleware/auth';
 import { normaliseSiteName } from '../utils/sites';
 import { paymentStatusCase } from '../services/payment.service';
+import { normalizeVendorName } from '../services/vendor.service';
 
 // ISO date YYYY-MM-DD (strict — rejects "banana", "2026/04/01", partial dates, etc.)
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
@@ -203,6 +204,57 @@ export async function createInvoice(req: Request, res: Response, next: NextFunct
       return;
     }
 
+    // Cross-vendor duplicate check: the same invoice number under a vendor
+    // whose normalised name matches this one (different spellings or suffix
+    // variants — e.g. "ABC Pvt Ltd" vs "ABC Limited"). Catches the case
+    // where the same physical bill is about to be entered under a second
+    // vendor record before the dedup alert is acted on.
+    if (data.invoice_no) {
+      const normTarget = normalizeVendorName(data.vendor_name);
+      if (normTarget) {
+        const candidates = await query<{
+          invoice_id: string;
+          existing_invoice_no: string | null;
+          existing_invoice_date: string;
+          existing_invoice_amount: string;
+          existing_vendor_id: string | null;
+          existing_vendor_name: string;
+        }>(
+          `SELECT i.id AS invoice_id,
+                  i.invoice_no AS existing_invoice_no,
+                  i.invoice_date AS existing_invoice_date,
+                  i.invoice_amount AS existing_invoice_amount,
+                  i.vendor_id AS existing_vendor_id,
+                  COALESCE(v.name, i.vendor_name) AS existing_vendor_name
+           FROM invoices i
+           LEFT JOIN vendors v ON v.id = i.vendor_id
+           WHERE LOWER(TRIM(i.invoice_no)) = LOWER(TRIM($1))
+             AND i.deleted_at IS NULL
+             AND i.vendor_id IS DISTINCT FROM $2`,
+          [data.invoice_no, data.vendor_id]
+        );
+        const crossMatch = candidates.find(
+          c => normalizeVendorName(c.existing_vendor_name) === normTarget
+        );
+        if (crossMatch) {
+          res.status(409).json({
+            error: 'Conflict',
+            code: 'duplicate_invoice_cross_vendor',
+            message: `Invoice #${data.invoice_no} already exists under "${crossMatch.existing_vendor_name}", which appears to be the same vendor as "${data.vendor_name}". Merge the vendors first, or check the invoice number.`,
+            existing: {
+              id: crossMatch.invoice_id,
+              invoice_no: crossMatch.existing_invoice_no,
+              invoice_date: crossMatch.existing_invoice_date,
+              invoice_amount: crossMatch.existing_invoice_amount,
+              vendor_id: crossMatch.existing_vendor_id,
+              vendor_name: crossMatch.existing_vendor_name,
+            },
+          });
+          return;
+        }
+      }
+    }
+
     // Generate internal tracking number
     const seqResult = await queryOne<{ nextval: string }>("SELECT nextval('invoice_internal_seq')");
     const internalNo = `MKT-${String(seqResult!.nextval).padStart(5, '0')}`;
@@ -365,6 +417,47 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
             existing: { id: collision.id, invoice_no: collision.invoice_no },
           });
           return;
+        }
+
+        // Cross-vendor check (same logic as create): block if the same
+        // invoice_no exists under a vendor whose normalised name matches.
+        const normTarget = normalizeVendorName(finalVendorName);
+        if (normTarget) {
+          const candidates = await query<{
+            invoice_id: string;
+            existing_invoice_no: string | null;
+            existing_vendor_id: string | null;
+            existing_vendor_name: string;
+          }>(
+            `SELECT i.id AS invoice_id,
+                    i.invoice_no AS existing_invoice_no,
+                    i.vendor_id AS existing_vendor_id,
+                    COALESCE(v.name, i.vendor_name) AS existing_vendor_name
+             FROM invoices i
+             LEFT JOIN vendors v ON v.id = i.vendor_id
+             WHERE i.id <> $1
+               AND LOWER(TRIM(i.invoice_no)) = LOWER(TRIM($2))
+               AND i.deleted_at IS NULL
+               AND i.vendor_id IS DISTINCT FROM $3`,
+            [id, finalInvoiceNo, finalVendorId]
+          );
+          const crossMatch = candidates.find(
+            c => normalizeVendorName(c.existing_vendor_name) === normTarget
+          );
+          if (crossMatch) {
+            res.status(409).json({
+              error: 'Conflict',
+              code: 'duplicate_invoice_cross_vendor',
+              message: `Invoice #${finalInvoiceNo} already exists under "${crossMatch.existing_vendor_name}", which appears to be the same vendor as "${finalVendorName}". Merge the vendors first, or check the invoice number.`,
+              existing: {
+                id: crossMatch.invoice_id,
+                invoice_no: crossMatch.existing_invoice_no,
+                vendor_id: crossMatch.existing_vendor_id,
+                vendor_name: crossMatch.existing_vendor_name,
+              },
+            });
+            return;
+          }
         }
       }
     }
