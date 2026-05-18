@@ -21,7 +21,7 @@ const TERM_OPTIONS = [7, 10, 14, 15, 21, 30, 45, 60, 75, 90];
 
 export default function VendorMaster() {
   const { vendors, loading, refresh } = useVendors();
-  const { invoices } = useInvoices();
+  const { invoices, refresh: refreshInvoices } = useInvoices();
   const { user } = useAuth();
   const isSite = user?.role === 'site';
   const canManage = (v: Vendor) => !isSite || v.created_by === user?.id;
@@ -114,6 +114,7 @@ export default function VendorMaster() {
       notify(`Restored "${m.removed_vendor_name}"`);
       loadMerges();
       refresh();
+      refreshInvoices();
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Revert failed', 'error');
     } finally {
@@ -195,7 +196,7 @@ export default function VendorMaster() {
             notify(recat > 0 ? `Vendor added · ${recat} invoice${recat === 1 ? '' : 's'} recategorised` : 'Vendor added');
             refresh();
           }}
-          onMerged={() => { setShowForm(false); setInitialName(''); notify('Vendors merged'); refresh(); }}
+          onMerged={() => { setShowForm(false); setInitialName(''); notify('Vendors merged'); refresh(); refreshInvoices(); }}
         />
       )}
 
@@ -242,6 +243,7 @@ export default function VendorMaster() {
               : '';
             notify(`Merged "${removedName}" into "${keptName}"${suffix}`);
             refresh();
+            refreshInvoices();
             loadMerges();
           }}
           onError={msg => notify(msg, 'error')}
@@ -351,7 +353,7 @@ export default function VendorMaster() {
                               notify(recat > 0 ? `Vendor updated · ${recat} invoice${recat === 1 ? '' : 's'} recategorised` : 'Vendor updated');
                               refresh();
                             }}
-                            onMerged={() => { setExpandedEditId(null); notify('Vendors merged'); refresh(); }}
+                            onMerged={() => { setExpandedEditId(null); notify('Vendors merged'); refresh(); refreshInvoices(); }}
                           />
                         </td>
                       </tr>
