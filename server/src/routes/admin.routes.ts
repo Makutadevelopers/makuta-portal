@@ -27,7 +27,11 @@ router.get('/import-audit', requireRole(['ho']), async (_req: Request, res: Resp
         COUNT(*) FILTER (WHERE p.payment_ref LIKE 'IMPORT-%')                                  AS f5_synthetic_ref,
         COUNT(*) FILTER (WHERE p.payment_type = 'Import')                                      AS f6_invalid_type,
         COUNT(*) FILTER (WHERE p.payment_type ~ '\\d')                                          AS f7_type_has_digits,
-        COUNT(*) FILTER (WHERE p.payment_date = DATE '2001-01-01')                              AS f8_paydate_epoch_sentinel
+        COUNT(*) FILTER (WHERE p.payment_date = DATE '2001-01-01')                              AS f8_paydate_epoch_sentinel,
+        COUNT(*) FILTER (
+          WHERE p.payment_date = DATE '2001-01-01'
+            AND p.payment_ref ~ '^\\s*\\d{1,2}[/\\-.\\s]\\d{1,2}[/\\-.\\s]\\d{2,4}\\s*$'
+        )                                                                                       AS f8b_paydate_numeric_ref
       FROM payments p
       JOIN invoices i ON i.id = p.invoice_id
       WHERE p.batch_id IS NOT NULL
