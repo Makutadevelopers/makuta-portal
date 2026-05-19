@@ -29,10 +29,12 @@ const createInvoiceSchema = z.object({
   // Free-text vendor names are no longer accepted from the manual form.
   vendor_id: z.string().uuid('Pick a vendor from Vendor Master, or create a new one'),
   vendor_name: z.string().min(1, 'Vendor name is required').max(500, 'Vendor name too long'),
-  // M1: invoice_no is optional — imports and contractor work orders often have no number.
-  // The DB column is nullable (migration 010). We still enforce max length when present.
-  invoice_no: z.string().max(100, 'Invoice number too long').nullable().optional().or(z.literal(''))
-    .transform(v => (v && v.trim() ? v.trim() : null)),
+  // invoice_no is required at the API boundary — every entry must carry a
+  // vendor-supplied invoice number. The DB column is nullable for the sake of
+  // historical rows imported before this rule existed (migration 010); new
+  // rows go through this schema and cannot be saved blank. Both the HO and
+  // site forms already enforce this client-side; this aligns the server.
+  invoice_no: z.string().trim().min(1, 'Invoice number is required').max(100, 'Invoice number too long'),
   po_number: z.string().max(200).nullable().optional(),
   purpose: z.string().min(1, 'Purpose is required').max(100),
   site: z.string().min(1, 'Site is required').max(100),

@@ -339,6 +339,13 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
     return { skip: true, reason: 'empty row' };
   }
 
+  // Invoice number is mandatory at the data-entry boundary — every entry must
+  // carry a vendor-supplied number. Matches the schema rule in
+  // invoice.controller.ts createInvoiceSchema and the client-side form check.
+  if (!invoiceNo.trim()) {
+    return { skip: true, reason: 'missing Invoice no — every row must have a vendor invoice number' };
+  }
+
   // M4: reject negative or non-numeric amounts
   const amountRaw = parseFloat(amountStr.replace(/[₹,\s]/g, '') || '0');
   if (isNaN(amountRaw) || amountRaw < 0) {
@@ -769,6 +776,25 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
           ]
         );
 
+        // Per-invoice audit row so the invoice's Activity Log shows where
+        // this row came from. The batch-level audit (logged once at the end
+        // of the loop) has no invoice_id and therefore doesn't surface in
+        // getInvoiceHistory's WHERE invoice_id = $1 filter.
+        if (insertedInvoice) {
+          await logAudit({
+            userId: req.user!.id,
+            action: `Imported via bulk batch ${batchId.slice(0, 8)} (row ${r.rowNum})`,
+            invoiceId: insertedInvoice.id,
+            metadata: {
+              source: 'bulk-import',
+              batch_id: batchId,
+              source_row: r.rowNum,
+              invoice_no: r.invoiceNo || null,
+              amount: r.amount,
+            },
+          });
+        }
+
         // Auto-create payment + bank transaction for Paid / Partial invoices.
         // For Paid: paidAmount defaults to invoice amount in the normalizer.
         // For Partial: paidAmount is the user-supplied part-payment.
@@ -983,6 +1009,14 @@ export async function importPayments(req: Request, res: Response, next: NextFunc
           continue;
         }
 
+        // Invoice number is mandatory at the data-entry boundary; see the
+        // matching check in normalizeInvoiceRow and createInvoiceSchema.
+        if (!invoiceNo.trim()) {
+          errors.push(`Row ${rowNum}: missing Invoice no — every row must have a vendor invoice number`);
+          skipped++;
+          continue;
+        }
+
         const amount = parseFloat(String(amountStr).replace(/[₹,\s]/g, '') || '0');
         if (isNaN(amount) || amount <= 0) {
           skipped++;
@@ -1041,6 +1075,24 @@ export async function importPayments(req: Request, res: Response, next: NextFunc
             ]
           );
           invoicesCreated++;
+
+          // Per-invoice audit row so the Activity Log shows this came from
+          // the payments importer (mirrors the per-invoice audit added to
+          // the invoice importer; see importInvoices above).
+          if (invoice) {
+            await logAudit({
+              userId: req.user!.id,
+              action: `Imported via bulk payments batch ${batchId.slice(0, 8)} (row ${rowNum})`,
+              invoiceId: invoice.id,
+              metadata: {
+                source: 'bulk-import-payments',
+                batch_id: batchId,
+                source_row: rowNum,
+                invoice_no: invoiceNo || null,
+                amount,
+              },
+            });
+          }
         }
 
         if (!invoice) {
