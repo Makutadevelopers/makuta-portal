@@ -3,10 +3,15 @@
 //
 // Business rules (effective payable = invoice_amount − sum(credit note allocations);
 // each payment can also withhold TDS, which counts toward settlement):
-// - sum(payments.amount + payments.tds_amount) ≥ effective_payable → 'Paid'
+// - sum(payments.amount + payments.tds_amount) ≥ effective_payable − ₹1 → 'Paid'
 // - sum(payments.amount + payments.tds_amount) > 0
 //     OR sum(CN allocations) > 0 (but effective not met) → 'Partial'
 // - nothing → 'Not Paid'
+//
+// The ₹1 tolerance absorbs paisa-level shortfalls that arise from GST
+// rounding (e.g. invoice_amount = ₹1,576,798.60, payment = ₹1,576,798.50).
+// Indian site accounting doesn't track paisa, so a ≤ ₹1 underpayment is
+// effectively settled. Anything larger is a real partial payment.
 
 import { query, queryOne } from '../db/query';
 
@@ -27,6 +32,7 @@ export function paymentStatusCase(alias: string): string {
     WHEN (SELECT COALESCE(SUM(amount + tds_amount), 0) FROM payments WHERE invoice_id = ${alias}.id)
          >= ${alias}.invoice_amount
             - (SELECT COALESCE(SUM(allocated_amount), 0) FROM credit_note_allocations WHERE invoice_id = ${alias}.id)
+            - 1
       THEN 'Paid'
     WHEN (SELECT COALESCE(SUM(amount + tds_amount), 0) FROM payments WHERE invoice_id = ${alias}.id) > 0
       OR (SELECT COALESCE(SUM(allocated_amount), 0) FROM credit_note_allocations WHERE invoice_id = ${alias}.id) > 0

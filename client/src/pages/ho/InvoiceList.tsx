@@ -957,7 +957,10 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
   const totalCash = payments.reduce((s, p) => s + Number(p.amount), 0);
   const totalTds = payments.reduce((s, p) => s + Number(p.tds_amount ?? 0), 0);
   const totalPaid = totalCash + totalTds;
-  const balance = Number(invoice.invoice_amount) - totalPaid;
+  const rawBalance = Number(invoice.invoice_amount) - totalPaid;
+  // Paisa shortfalls (≤ ₹1) are GST rounding noise, not real balance —
+  // match the server's payment_status tolerance (see payment.service.ts).
+  const balance = rawBalance <= 1 ? 0 : rawBalance;
   const hasAnyTds = totalTds > 0;
 
   return (
