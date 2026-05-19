@@ -26,7 +26,8 @@ router.get('/import-audit', requireRole(['ho']), async (_req: Request, res: Resp
         COUNT(*) FILTER (WHERE p.payment_date = i.invoice_date)                                AS f1c_paydate_eq_invdate,
         COUNT(*) FILTER (WHERE p.payment_ref LIKE 'IMPORT-%')                                  AS f5_synthetic_ref,
         COUNT(*) FILTER (WHERE p.payment_type = 'Import')                                      AS f6_invalid_type,
-        COUNT(*) FILTER (WHERE p.payment_type ~ '\\d')                                          AS f7_type_has_digits
+        COUNT(*) FILTER (WHERE p.payment_type ~ '\\d')                                          AS f7_type_has_digits,
+        COUNT(*) FILTER (WHERE p.payment_date = DATE '2001-01-01')                              AS f8_paydate_epoch_sentinel
       FROM payments p
       JOIN invoices i ON i.id = p.invoice_id
       WHERE p.batch_id IS NOT NULL
@@ -95,6 +96,30 @@ router.get('/import-audit', requireRole(['ho']), async (_req: Request, res: Resp
       LIMIT 50
     `);
 
+    const d6_f8_count = await query<{ count: string }>(`
+      SELECT COUNT(*)::text AS count
+      FROM payments
+      WHERE payment_date = DATE '2001-01-01'
+        AND payment_ref ~ '^\\s*\\d{1,2}[-/\\s][A-Za-z]{3}[-/\\s]\\d{2,4}\\s*$'
+    `);
+
+    const d6_f8_sample = await query(`
+      SELECT
+        p.id, i.invoice_no, i.vendor_name, i.site, p.amount,
+        i.invoice_date,
+        p.payment_date AS stored_payment_date,
+        p.payment_ref  AS suspect_real_date,
+        p.bank         AS suspect_payment_month,
+        p.payment_type,
+        p.batch_id
+      FROM payments p
+      JOIN invoices i ON i.id = p.invoice_id
+      WHERE p.payment_date = DATE '2001-01-01'
+        AND p.payment_ref ~ '^\\s*\\d{1,2}[-/\\s][A-Za-z]{3}[-/\\s]\\d{2,4}\\s*$'
+      ORDER BY p.batch_id, p.created_at
+      LIMIT 25
+    `);
+
     res.json({
       generated_at: new Date().toISOString(),
       d1_per_batch_fingerprint: d1,
@@ -105,6 +130,10 @@ router.get('/import-audit', requireRole(['ho']), async (_req: Request, res: Resp
       d3_synthetic_ref_batches: d3,
       d4_day1_clusters: d4,
       d5_bank_transactions: d5,
+      d6_f8_epoch_sentinel_rows: {
+        total_count: d6_f8_count[0]?.count ?? '0',
+        sample: d6_f8_sample,
+      },
     });
   } catch (err) {
     next(err);
