@@ -1074,9 +1074,28 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
   const invoiceAmount = Number(invoice.invoice_amount);
   const headroom = invoiceAmount - otherPaid;
 
+  // Some legacy rows have payment_type like "Chq 000968" (type+ref smushed
+   // by an old import bug — see server diagnostics F7). The dropdown can't
+   // match that value, so editing the payment would silently re-save the
+   // corrupted string. Strip to the leading token and map known aliases.
+  const normalizePaymentType = (raw: string): string => {
+    const prefix = (raw ?? '').trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+    const alias: Record<string, string> = {
+      chq: 'Cheque', cheque: 'Cheque',
+      neft: 'NEFT', rtgs: 'RTGS', imps: 'IMPS', upi: 'UPI', cash: 'Cash',
+    };
+    return alias[prefix] ?? raw;
+  };
+  const initialPaymentType = normalizePaymentType(payment.payment_type);
+  const looksCorrupted = initialPaymentType !== payment.payment_type;
+  const initialPaymentRef = payment.payment_ref ??
+    (looksCorrupted
+      ? (payment.payment_type.trim().split(/\s+/).slice(1).join(' ').trim() || '')
+      : '');
+
   const [amount, setAmount] = useState(String(payment.amount));
-  const [paymentType, setPaymentType] = useState(payment.payment_type);
-  const [paymentRef, setPaymentRef] = useState(payment.payment_ref ?? '');
+  const [paymentType, setPaymentType] = useState(initialPaymentType);
+  const [paymentRef, setPaymentRef] = useState(initialPaymentRef);
   const [paymentDate, setPaymentDate] = useState(String(payment.payment_date).slice(0, 10));
   const [bank, setBank] = useState(payment.bank ?? '');
   const [tdsPct, setTdsPct] = useState(String(payment.tds_pct ?? 0));
