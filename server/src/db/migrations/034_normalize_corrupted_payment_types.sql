@@ -17,15 +17,17 @@
 -- ─────────────────────────────────────────────────────────────────────────
 -- 1. Snapshot
 -- ─────────────────────────────────────────────────────────────────────────
+-- NOTE: payments has no updated_at column (verified against 004_create_payments.sql).
+-- The snapshot table's updated_at column stays nullable for forward compatibility.
 INSERT INTO payments_repair_snapshot (
   repair_tag, payment_id, invoice_id, amount, payment_type, payment_ref,
-  payment_date, bank, payment_month, batch_id, bank_txn_id, created_at, updated_at
+  payment_date, bank, payment_month, batch_id, bank_txn_id, created_at
 )
 SELECT
   '034_F7_type_has_digits',
   p.id, p.invoice_id, p.amount, p.payment_type, p.payment_ref,
   p.payment_date, p.bank, p.payment_month, p.batch_id, p.bank_txn_id,
-  p.created_at, p.updated_at
+  p.created_at
 FROM payments p
 WHERE p.payment_type ~ '\d';
 
@@ -52,8 +54,7 @@ SET
                    WHEN 'cash'   THEN 'Cash'
                    ELSE p.payment_type    -- leave unfamiliar prefixes for manual review
                  END,
-  payment_ref  = COALESCE(NULLIF(btrim(p.payment_ref), ''), parsed.extracted_ref),
-  updated_at   = NOW()
+  payment_ref  = COALESCE(NULLIF(btrim(p.payment_ref), ''), parsed.extracted_ref)
 FROM parsed
 WHERE p.id = parsed.id
   AND parsed.type_prefix IN ('chq', 'cheque', 'neft', 'rtgs', 'imps', 'upi', 'cash');
