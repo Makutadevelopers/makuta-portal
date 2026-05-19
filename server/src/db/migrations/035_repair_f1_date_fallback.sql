@@ -74,23 +74,18 @@ WHERE p.id = parsed.id;
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- 3. Parallel repair for bank_transactions where the same bug fired.
---    bank_transactions only exists for newer imports (post-migration 015),
---    so most F1 rows have no bank_txn_id and this is a defensive no-op
---    for them. Rows that do match get their txn_date corrected from the
---    txn_ref string the same way.
+--    Only matches rows whose txn_ref is itself a date-pattern string —
+--    a previous version used OR with the bank-month pattern, which let
+--    rows with non-date txn_refs like "1143" through and crashed
+--    to_date(). Strict AND-equivalent (single regex on txn_ref) is safe.
+--    bank_transactions.txn_ref is NOT NULL, so we leave the bogus
+--    date-string ref in place; HO can clean it via Bank Reconciliation.
 -- ─────────────────────────────────────────────────────────────────────────
--- bank_transactions.txn_ref is NOT NULL, so we leave the (currently bogus)
--- date-string ref in place rather than crash the migration. HO can clean
--- the ref via the Bank Reconciliation UI after dates are correct.
 UPDATE bank_transactions bt
 SET
-  txn_date = COALESCE(
-    to_date(regexp_replace(trim(bt.txn_ref), '[/\s]', '-', 'g'), 'DD-Mon-YY'),
-    bt.txn_date
-  ),
+  txn_date = to_date(regexp_replace(trim(bt.txn_ref), '[/\s]', '-', 'g'), 'DD-Mon-YY'),
   bank     = NULL
-WHERE bt.txn_ref ~ '^\s*\d{1,2}[-/\s][A-Za-z]{3}[-/\s]\d{2,4}\s*$'
-   OR bt.bank    ~ '^\s*[A-Za-z]{3,}[- ]?\d{2,4}\s*$';
+WHERE bt.txn_ref ~ '^\s*\d{1,2}[-/\s][A-Za-z]{3}[-/\s]\d{2,4}\s*$';
 
 -- NOTE: invoices.payment_status / total_paid / days_past_due are
 -- denormalised views computed from the payments rows we just edited. They
