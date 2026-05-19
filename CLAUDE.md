@@ -39,6 +39,39 @@ invoices. Head Office processes payments. MD views executive dashboards.
 - No approval workflow, no receipts required, no close-out — float rolls
   forward indefinitely.
 
+## Bulk invoice import
+- CSV/XLSX importer at `POST /api/import/invoices` (preview → commit).
+  Header is read by name; unrecognised columns surface as a yellow
+  warning in the preview UI, and missing required columns
+  (Invoice date, Vendor Name, Invoice amount, Site Location) hard-stop
+  the upload with a 400.
+- Payment Status column accepts `Paid`, `Partial`, `Not Paid`. For `Paid`
+  and `Partial`, the importer auto-writes a `payments` row (and a
+  `bank_transactions` row for Cheque/NEFT/RTGS) so `payment_status`
+  recomputes from real data — never trust the CSV's status label alone.
+- `Paid Amount` column is **mandatory for Partial** (must be `> 0` and
+  `< Invoice amount`); for `Paid` it's optional and defaults to the
+  full invoice amount; ignored for `Not Paid`.
+- Importer is **strict-by-default** since 2026-05-19. Bad rows reject in
+  preview, never silently coerce. Specifically:
+  - `parseDate` only accepts canonical patterns (YYYY-MM-DD, DD-MM-YYYY,
+    DD-MMM-YY/YYYY, Excel serial). No JS `new Date(val)` fallback.
+  - Paid/Partial rows missing/unparseable Payment Date → rejected.
+  - Payment Type validated against `Cash | Cheque | NEFT | RTGS | IMPS | UPI`.
+  - Payment Date before Invoice date → rejected (impossible business state).
+- Full column spec and AI-conversion prompt live in
+  [INVOICE_BULK_UPLOAD_PROMPT.md](INVOICE_BULK_UPLOAD_PROMPT.md).
+
+### Repair tooling (historic corruption from old importer)
+The importer used to silently fall back to `invoice_date` /
+`'2001-01-01'` / `'Import'` when source cells were unparseable. Migrations
+033-036 cleaned up 200+ corrupted payment rows; pre-repair values are
+preserved in `payments_repair_snapshot` (tags `034_F7_type_has_digits`,
+`035_F1_date_fallback`, `036_F8_epoch_sentinel`) for rollback. A
+diagnostic `GET /api/admin/import-audit` (HO-only, temporary) returns
+the current corruption fingerprint; raw queries in
+`server/src/db/diagnostics/2026-05-19_import_corruption_audit.sql`.
+
 ## Tech stack
 - **Production URL**: `https://invoice.makutadevelopers.com` (everything
   served from AWS — no Vercel, no split hosts).
@@ -88,14 +121,17 @@ Static (run anywhere):
 - npm run lint         — ESLint across the entire repo
 - npm run build        — production build of client + server
 
-Deployment (run on EC2 box `52.3.199.149`, `/opt/makuta-portal`):
-- ./infra/prod/deploy.sh                — pull, rebuild api+web images, restart containers, run migrations
-- ./infra/prod/deploy.sh --no-build     — restart containers only (no rebuild)
-- ./infra/prod/deploy.sh --migrate-only — apply pending migrations to RDS
-
-**A merge to `main` does NOT auto-deploy** — both the React SPA and the
-Express API are baked into Docker images on the EC2 box, so every
-client OR server change requires `deploy.sh` to be re-run on the host.
+Deployment:
+- **Push to `main` IS the deploy.** `.github/workflows/deploy-prod.yml`
+  triggers on every push, SSHes into the EC2 box, runs `git pull` and
+  `./infra/prod/deploy.sh`, then probes `/api/health`. Typical run takes
+  2–3 minutes. Track with `gh run list --workflow=deploy-prod.yml` and
+  re-run from the Actions tab via `workflow_dispatch` if needed.
+- Manual run on EC2 box (`52.3.199.149`, `/opt/makuta-portal`) — only if
+  the GitHub Action is unavailable or you need a build-skipping variant:
+  - ./infra/prod/deploy.sh                — pull, rebuild api+web images, restart containers, run migrations
+  - ./infra/prod/deploy.sh --no-build     — restart containers only (no rebuild)
+  - ./infra/prod/deploy.sh --migrate-only — apply pending migrations to RDS
 
 ## Sites
 Nirvana, Taranga, Horizon, Green Wood Villas, Aruna Arcade, Office
