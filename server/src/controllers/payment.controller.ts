@@ -289,6 +289,7 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
                payment_type = $2,
                payment_ref = $3,
                payment_date = $4,
+               payment_month = DATE_TRUNC('month', $4::date)::date,
                bank = $5,
                tds_pct = $6,
                tds_amount = $7
