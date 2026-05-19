@@ -386,7 +386,7 @@ export default function MyInvoices() {
                     );
                   })()}
                 </th>
-                {['#', 'Int. No', 'Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Amount', 'Status', 'Actions'].map(h => (
+                {['#', 'Int. No', 'Date', 'Paid Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Amount', 'Status', 'Actions'].map(h => (
                   <th
                     key={h}
                     className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}
@@ -411,6 +411,9 @@ export default function MyInvoices() {
                   <td className="px-4 py-3 text-gray-400">{inv.sl_no}</td>
                   <td className="px-4 py-3 text-xs font-mono text-gray-500">{inv.internal_no ?? '—'}</td>
                   <td className="px-4 py-3 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-gray-600">
+                    {inv.last_paid_date ? formatDate(inv.last_paid_date) : <span className="text-gray-300">—</span>}
+                  </td>
                   <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={inv.vendor_name}>{highlight(inv.vendor_name, search)}</td>
                   <td className="px-4 py-3">{highlight(inv.invoice_no, search)}</td>
                   <td className="px-4 py-3 text-gray-500 max-w-[140px] truncate" title={inv.po_number ?? ''}>{inv.po_number ? highlight(inv.po_number, search) : '—'}</td>
@@ -471,7 +474,7 @@ export default function MyInvoices() {
                 </tr>
                 {expandedEditId === inv.id && (
                   <tr className="bg-gray-50/60 border-t border-gray-100">
-                    <td colSpan={11} className="px-4 py-4">
+                    <td colSpan={12} className="px-4 py-4">
                       <InvoiceForm
                         key={`edit-${inv.id}`}
                         allowedSites={user?.sites && user.sites.length > 0 ? user.sites : (user?.site ? [user.site] : [])}
@@ -486,7 +489,7 @@ export default function MyInvoices() {
                 </Fragment>
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={11} className="px-4 py-10 text-center text-gray-400 text-sm">No invoices match your filters.</td></tr>
+                <tr><td colSpan={12} className="px-4 py-10 text-center text-gray-400 text-sm">No invoices match your filters.</td></tr>
               )}
             </tbody>
           </table>

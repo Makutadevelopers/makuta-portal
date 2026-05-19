@@ -43,6 +43,9 @@ export interface Invoice {
   attachment_count?: number;
   allocated_credits?: number;
   effective_payable?: number;
+  // Date of the most recent payment (MAX over payments.payment_date).
+  // Null when the invoice has no payments yet — i.e. Not Paid.
+  last_paid_date?: string | null;
   deleted_at?: string | null;
   deleted_by?: string | null;
 }

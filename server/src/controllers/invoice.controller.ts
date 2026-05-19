@@ -78,7 +78,8 @@ const SITE_PROJECTION = `
 // #1 cause of slow invoice-list responses once row counts grew.
 const AGG_JOINS = `
   LEFT JOIN (
-    SELECT invoice_id, SUM(amount + tds_amount) AS paid_sum
+    SELECT invoice_id, SUM(amount + tds_amount) AS paid_sum,
+           MAX(payment_date) AS last_paid_date
     FROM payments
     GROUP BY invoice_id
   ) ps  ON ps.invoice_id  = inv.id
@@ -99,7 +100,8 @@ const AGG_JOINS = `
 const AGG_FIELDS = `
   COALESCE(cna.cn_sum, 0)::NUMERIC(14,2) AS allocated_credits,
   (inv.invoice_amount - COALESCE(cna.cn_sum, 0))::NUMERIC(14,2) AS effective_payable,
-  COALESCE(att.cnt, 0) AS attachment_count
+  COALESCE(att.cnt, 0) AS attachment_count,
+  ps.last_paid_date
 `;
 
 interface InvoiceRow {

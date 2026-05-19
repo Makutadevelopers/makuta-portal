@@ -610,7 +610,7 @@ export default function InvoiceList() {
                     className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
                     title="Select all draft invoices" />
                 </th>
-                {['Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Site', 'Amount', 'Balance', 'Days', 'Status', 'Docs', 'Actions'].map(h => (
+                {['Date', 'Paid Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Site', 'Amount', 'Balance', 'Days', 'Status', 'Docs', 'Actions'].map(h => (
                   <th
                     key={h}
                     className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' || h === 'Balance' ? 'text-right' : 'text-left'}`}
@@ -640,6 +640,9 @@ export default function InvoiceList() {
                         />
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-gray-600">
+                        {inv.last_paid_date ? formatDate(inv.last_paid_date) : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={inv.vendor_name}>{highlight(inv.vendor_name, search)}</td>
                       <td className="px-4 py-3">{highlight(inv.invoice_no, search)}</td>
                       <td className="px-4 py-3 text-gray-500 max-w-[120px] truncate" title={inv.po_number ?? ''}>{inv.po_number ? highlight(inv.po_number, search) : '—'}</td>
