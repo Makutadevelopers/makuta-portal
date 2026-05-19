@@ -177,7 +177,10 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
   const from = (req.query.from as string) || '';        // YYYY-MM-DD
   const to = (req.query.to as string) || '';            // YYYY-MM-DD
   const sortRaw = (req.query.sort as string) || 'created_at';
-  const sortBy = sortRaw === 'invoice_date' ? 'invoice_date' : 'created_at';
+  const sortBy: 'invoice_date' | 'created_at' | 'last_paid_date' =
+    sortRaw === 'invoice_date' ? 'invoice_date'
+    : sortRaw === 'last_paid_date' ? 'last_paid_date'
+    : 'created_at';
 
   const conds: string[] = ['i.deleted_at IS NULL'];
   const params: unknown[] = [];
@@ -199,8 +202,9 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
     }
   }
 
-  const orderBy = sortBy === 'invoice_date'
-    ? 'i.invoice_date DESC, i.sl_no DESC'
+  const orderBy =
+    sortBy === 'invoice_date' ? 'i.invoice_date DESC, i.sl_no DESC'
+    : sortBy === 'last_paid_date' ? 'p.last_paid_date DESC NULLS LAST, i.created_at DESC'
     : 'i.created_at DESC';
 
   const rows = await query<InvoiceExportRow>(
@@ -232,7 +236,9 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
        u.email                                        AS created_by_email
      FROM invoices i
      LEFT JOIN (
-       SELECT invoice_id, SUM(amount + tds_amount) AS total_paid
+       SELECT invoice_id,
+              SUM(amount + tds_amount) AS total_paid,
+              MAX(payment_date)        AS last_paid_date
        FROM payments
        GROUP BY invoice_id
      ) p ON p.invoice_id = i.id

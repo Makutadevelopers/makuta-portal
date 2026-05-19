@@ -45,7 +45,7 @@ export default function InvoiceList() {
   const [timeline, setTimeline] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [sortBy, setSortBy] = useState<'invoice_date' | 'created_at'>('created_at');
+  const [sortBy, setSortBy] = useState<'invoice_date' | 'created_at' | 'last_paid_date'>('created_at');
   const [expandedEditId, setExpandedEditId] = useState<string | null>(null);
 
   // Sync search from URL query param
@@ -151,6 +151,9 @@ export default function InvoiceList() {
           ? ''
           : d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
       }
+      if (sortBy === 'last_paid_date') {
+        return (i.last_paid_date || '').slice(0, 10);
+      }
       return (i.invoice_date || '').slice(0, 10);
     };
     const result = invoices.filter(i => {
@@ -185,6 +188,18 @@ export default function InvoiceList() {
     });
     if (sortBy === 'created_at') {
       result.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    } else if (sortBy === 'last_paid_date') {
+      // Paid rows first (newest paid_date first); unpaid rows fall to the bottom,
+      // then break ties by created_at desc so the ordering is stable.
+      result.sort((a, b) => {
+        const ap = (a.last_paid_date || '').slice(0, 10);
+        const bp = (b.last_paid_date || '').slice(0, 10);
+        if (ap && !bp) return -1;
+        if (!ap && bp) return 1;
+        const cmp = bp.localeCompare(ap);
+        if (cmp !== 0) return cmp;
+        return (b.created_at || '').localeCompare(a.created_at || '');
+      });
     } else {
       result.sort((a, b) => {
         const cmp = (b.invoice_date || '').localeCompare(a.invoice_date || '');
@@ -439,11 +454,12 @@ export default function InvoiceList() {
         />
         <input type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-        <select value={sortBy} onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at')}
+        <select value={sortBy} onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at' | 'last_paid_date')}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
           title="Sort order">
           <option value="created_at">Latest added first</option>
           <option value="invoice_date">Latest invoice date first</option>
+          <option value="last_paid_date">Latest paid date first</option>
         </select>
         <div className="ml-auto flex items-center gap-3">
           <button

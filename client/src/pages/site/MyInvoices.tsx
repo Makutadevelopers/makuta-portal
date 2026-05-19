@@ -29,7 +29,7 @@ export default function MyInvoices() {
   const [search, setSearch] = useState('');
   const [fPurpose, setFPurpose] = useState('All');
   const [fMonth, setFMonth] = useState('');
-  const [sortBy, setSortBy] = useState<'invoice_date' | 'created_at'>('invoice_date');
+  const [sortBy, setSortBy] = useState<'invoice_date' | 'created_at' | 'last_paid_date'>('invoice_date');
   const [showForm, setShowForm] = useState(false);
   const [expandedEditId, setExpandedEditId] = useState<string | null>(null);
   const [showImport, setShowImport] = useState(false);
@@ -132,6 +132,17 @@ export default function MyInvoices() {
     // back-dated entries entered today still rise above older same-day rows.
     if (sortBy === 'created_at') {
       result.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    } else if (sortBy === 'last_paid_date') {
+      // Paid rows first (newest paid date first); unpaid rows drop to the bottom.
+      result.sort((a, b) => {
+        const ap = (a.last_paid_date || '').slice(0, 10);
+        const bp = (b.last_paid_date || '').slice(0, 10);
+        if (ap && !bp) return -1;
+        if (!ap && bp) return 1;
+        const cmp = bp.localeCompare(ap);
+        if (cmp !== 0) return cmp;
+        return (b.created_at || '').localeCompare(a.created_at || '');
+      });
     } else {
       result.sort((a, b) => {
         const cmp = (b.invoice_date || '').localeCompare(a.invoice_date || '');
@@ -300,12 +311,13 @@ export default function MyInvoices() {
         )}
         <select
           value={sortBy}
-          onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at')}
+          onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at' | 'last_paid_date')}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
           title="Sort order"
         >
           <option value="invoice_date">Latest invoice date first</option>
           <option value="created_at">Latest added first</option>
+          <option value="last_paid_date">Latest paid date first</option>
         </select>
         <span className="text-xs text-gray-400 ml-auto">{filtered.length} records</span>
       </div>
