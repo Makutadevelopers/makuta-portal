@@ -3,7 +3,7 @@ import { createPayment, getPayments } from '../../api/payments';
 import { getInvoiceCreditSuggestions, addAllocation } from '../../api/creditNotes';
 import { InvoiceCreditSuggestions } from '../../types/creditNote';
 import { Payment } from '../../types/payment';
-import { formatINR, formatDate } from '../../utils/formatters';
+import { formatINR, formatINRPaisa, formatDate } from '../../utils/formatters';
 import { PAYMENT_TYPES } from '../../utils/constants';
 import BankSelect from './BankSelect';
 
@@ -103,7 +103,7 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
           <div>
             <div className="text-base font-medium text-gray-900">Record Payment</div>
             <div className="text-xs text-gray-500 mt-0.5">
-              {invoice.vendor_name} · #{invoice.invoice_no} · Balance {formatINR(balance)}
+              {invoice.vendor_name} · #{invoice.invoice_no} · Balance {formatINRPaisa(balance)}
             </div>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">&#10005;</button>
@@ -173,7 +173,7 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
           <div className="sm:col-span-2">
             <label className="block text-xs text-gray-500 mb-1">Cash Paid (₹)</label>
             {mode === 'full' ? (
-              <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 font-medium">{formatINR(Math.max(0, balance - tdsAmount))}</div>
+              <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 font-medium">{formatINRPaisa(Math.max(0, balance - tdsAmount))}</div>
             ) : (
               <input type="number" value={amount} onChange={e => setAmount(e.target.value)} min="0" max={balance}
                 className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
@@ -211,7 +211,7 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
             </div>
           </div>
         )}
-        {isOverpay && <div className="text-xs text-red-600 -mt-2 mb-3">Cash + TDS exceeds outstanding balance of {formatINR(balance)}</div>}
+        {isOverpay && <div className="text-xs text-red-600 -mt-2 mb-3">Cash + TDS exceeds outstanding balance of {formatINRPaisa(balance)}</div>}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>

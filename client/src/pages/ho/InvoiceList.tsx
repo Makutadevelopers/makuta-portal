@@ -11,7 +11,7 @@ import { bulkPayInvoices } from '../../api/reconciliation';
 import { getInvoiceCreditSuggestions, addAllocation } from '../../api/creditNotes';
 import { InvoiceCreditSuggestions } from '../../types/creditNote';
 import { createVendor } from '../../api/vendors';
-import { formatINR, formatDate } from '../../utils/formatters';
+import { formatINR, formatINRPaisa, formatDate } from '../../utils/formatters';
 import { SITES, PAYMENT_TYPES } from '../../utils/constants';
 import CategorySelect from '../../components/shared/CategorySelect';
 import BankSelect from '../../components/shared/BankSelect';
@@ -1088,7 +1088,7 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
   async function handleSubmit() {
     if (settlement <= 0) { notify('Amount or TDS must be greater than 0'); return; }
     if (overHeadroom) {
-      notify(`Cash + TDS exceeds invoice headroom of ${formatINR(headroom)}`);
+      notify(`Cash + TDS exceeds invoice headroom of ${formatINRPaisa(headroom)}`);
       return;
     }
     if (numAmount > 0 && paymentType !== 'Cash' && !paymentRef.trim()) {
@@ -1121,7 +1121,7 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
           <div>
             <div className="text-base font-medium text-gray-900">Edit Payment</div>
             <div className="text-xs text-gray-500 mt-0.5">
-              Headroom available: <span className="font-medium">{formatINR(headroom)}</span>
+              Headroom available: <span className="font-medium">{formatINRPaisa(headroom)}</span>
             </div>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">&#10005;</button>
