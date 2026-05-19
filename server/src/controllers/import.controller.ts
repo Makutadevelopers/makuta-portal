@@ -73,18 +73,31 @@ function parseDate(raw: string): string | null {
     return `${ymd[1]}-${String(ymd[2]).padStart(2, '0')}-${String(ymd[3]).padStart(2, '0')}`;
   }
 
-  // "Jan 2026", "January 2026", etc.
-  const monthYear = new Date(val + ' 1');
-  if (!isNaN(monthYear.getTime()) && monthYear.getFullYear() > 2000) {
-    return monthYear.toISOString().split('T')[0];
+  // DD-MMM-YYYY or DD-MMM-YY (e.g. "03-Jul-24", "21 Mar 2025"). This format
+  // is common in Indian accounting spreadsheets and was previously parsed by
+  // the JS Date fallback below — but that fallback also accepted garbage
+  // like "Apr-26" and "Mon-YY"-shaped strings, which is the root cause of
+  // the F1/F8 corruption fixed in migrations 035 + 036. So we now match the
+  // pattern explicitly and reject anything else.
+  const dMy = val.match(/^(\d{1,2})[- /]([A-Za-z]{3,9})[- /](\d{2,4})$/);
+  if (dMy) {
+    const day = parseInt(dMy[1], 10);
+    const monKey = dMy[2].slice(0, 3).toLowerCase();
+    const monthNames: Record<string, string> = {
+      jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+      jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+    };
+    const mon = monthNames[monKey];
+    if (mon && day >= 1 && day <= 31) {
+      let year = parseInt(dMy[3], 10);
+      if (year < 100) year += year < 50 ? 2000 : 1900;
+      return `${year}-${mon}-${String(day).padStart(2, '0')}`;
+    }
   }
 
-  // Last resort: let JS parse it
-  const fallback = new Date(val);
-  if (!isNaN(fallback.getTime()) && fallback.getFullYear() > 2000) {
-    return fallback.toISOString().split('T')[0];
-  }
-
+  // Deliberately no permissive fallback. Strings the canonical patterns
+  // don't match are returned as null — the caller is responsible for
+  // surfacing that as a row-level error in the preview screen.
   return null;
 }
 
@@ -116,8 +129,14 @@ function parseMonthColumn(raw: string): string | null {
 /** Known header columns to detect the real header row */
 const KNOWN_HEADERS = ['Sl.No', 'Invoice date', 'Vendor Name', 'Invoice no', 'Invoice amount'];
 
-/** Parse CSV or XLSX buffer into rows with string values */
-function parseFile(buffer: Buffer, mimetype: string): CsvRow[] {
+/**
+ * Parse CSV or XLSX buffer into rows with string values, plus the header
+ * names we recognised — the preview screen reports unrecognised/missing
+ * headers so the uploader can fix column mis-naming (the upstream cause
+ * of F1/F8 corruption was the importer reading values from columns whose
+ * header didn't match what it was looking up).
+ */
+function parseFile(buffer: Buffer, mimetype: string): { rows: CsvRow[]; headers: string[] } {
   const isExcel = mimetype.includes('spreadsheet') ||
     mimetype.includes('excel') ||
     mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
@@ -183,7 +202,72 @@ function parseFile(buffer: Buffer, mimetype: string): CsvRow[] {
     result.push(obj);
   }
 
-  return result;
+  return { rows: result, headers: headers.filter(h => h.length > 0) };
+}
+
+/**
+ * Header set the invoice importer knows how to consume (matches the
+ * synonym lookups in normalizeInvoiceRow). Used by the preview screen
+ * to flag unrecognised columns in the uploaded file so the user can
+ * rename them before commit, instead of the importer silently dropping
+ * the value.
+ */
+const RECOGNISED_INVOICE_HEADERS = new Set([
+  // invoice identity
+  'sl.no', 'slno', 'serial', 'serial no',
+  'month',
+  'invoice date', 'invoice_date', 'date',
+  'vendor name', 'vendor_name', 'vendor',
+  'invoice no', 'invoice_no', 'invoice number',
+  'po number', 'po_number', 'po no',
+  'head', 'category', 'purpose',
+  'site location', 'site', 'site_location',
+  // money
+  'invoice amount', 'invoice_amount', 'amount',
+  'base amount', 'base_amount', 'taxable value', 'taxable value (₹)',
+  'cgst %', 'cgst', 'cgst_pct', 'cgst pct',
+  'sgst %', 'sgst', 'sgst_pct', 'sgst pct',
+  'igst %', 'igst', 'igst_pct', 'igst pct',
+  'additional charge', 'additional_charge',
+  'additional charge cgst %', 'add charge cgst %', 'additional_charge_cgst_pct',
+  'additional charge sgst %', 'add charge sgst %', 'additional_charge_sgst_pct',
+  'additional charge igst %', 'add charge igst %', 'additional_charge_igst_pct',
+  'additional charge reason', 'add charge reason', 'additional_charge_reason',
+  'remarks',
+  // payment
+  'payment status', 'payment_status', 'status',
+  'paid amount', 'paid_amount', 'amount paid',
+  'pending days',
+  'payment type', 'payment_type', 'pay type', 'type',
+  'payment details', 'payment_details', 'cheque no', 'txn id', 'reference', 'payment ref',
+  'payment date', 'payment_date',
+  'bank',
+  'payment month', 'payment_month',
+]);
+
+/** Canonical core headers that must be present for the import to mean anything. */
+const REQUIRED_INVOICE_HEADERS = ['Invoice date', 'Vendor Name', 'Invoice amount', 'Site Location'];
+
+interface HeaderReport {
+  recognised: string[];
+  unrecognised: string[];
+  missing_required: string[];
+}
+
+function analyseHeaders(headers: string[]): HeaderReport {
+  const recognised: string[] = [];
+  const unrecognised: string[] = [];
+  for (const h of headers) {
+    if (!h) continue;
+    if (RECOGNISED_INVOICE_HEADERS.has(h.toLowerCase().trim())) {
+      recognised.push(h);
+    } else {
+      unrecognised.push(h);
+    }
+  }
+  const lowerSet = new Set(headers.map(h => h.toLowerCase().trim()));
+  const missing_required = REQUIRED_INVOICE_HEADERS.filter(req => !lowerSet.has(req.toLowerCase()));
+  return { recognised, unrecognised, missing_required };
 }
 
 /**
@@ -359,6 +443,17 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
     if (matchedType !== 'Cash' && !paymentRef.trim()) {
       return { skip: true, reason: `${matchedType} payment requires Payment Details (cheque no or UTR)` };
     }
+    // Sanity: a payment can't have happened before the invoice it settles.
+    // Earlier silent-fallback bugs sometimes put payment_date == invoice_date
+    // or anchored to a 2001-01-01 sentinel — both of which were plausible-
+    // looking but wrong. Reject any row that violates the basic temporal
+    // ordering so the uploader sees the issue in preview.
+    if (parsedInvoiceDate && parsedPaymentDate && parsedPaymentDate < parsedInvoiceDate) {
+      return {
+        skip: true,
+        reason: `Payment Date ${parsedPaymentDate} is before Invoice date ${parsedInvoiceDate}`,
+      };
+    }
   }
 
   return {
@@ -464,9 +559,22 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
       return;
     }
 
-    const records = parseFile(file.buffer, file.mimetype);
+    const { rows: records, headers } = parseFile(file.buffer, file.mimetype);
     if (records.length === 0) {
       res.status(400).json({ error: 'Bad Request', message: 'File is empty' });
+      return;
+    }
+
+    const headerReport = analyseHeaders(headers);
+    // Hard-stop the upload if a core column is missing — without one of these
+    // we can't produce a usable invoice. We do this even on preview so the
+    // uploader sees the problem before staring at thousands of skipped rows.
+    if (headerReport.missing_required.length > 0) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: `File is missing required column(s): ${headerReport.missing_required.join(', ')}`,
+        headers: headerReport,
+      });
       return;
     }
 
@@ -573,6 +681,7 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
         skipped: skippedRows,
         unknownSites,
         canonicalSites: CANONICAL_SITES,
+        headers: headerReport,
       });
       return;
     }
@@ -775,7 +884,7 @@ export async function importVendors(req: Request, res: Response, next: NextFunct
       return;
     }
 
-    const records = parseFile(file.buffer, file.mimetype);
+    const { rows: records } = parseFile(file.buffer, file.mimetype);
 
     let imported = 0;
     let skipped = 0;
@@ -825,7 +934,7 @@ export async function importPayments(req: Request, res: Response, next: NextFunc
       return;
     }
 
-    const records = parseFile(file.buffer, file.mimetype);
+    const { rows: records } = parseFile(file.buffer, file.mimetype);
 
     let imported = 0;
     let skipped = 0;

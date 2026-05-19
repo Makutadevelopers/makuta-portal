@@ -23,6 +23,12 @@ interface SkippedRow { row: number; reason: string; }
 
 interface UnknownSite { name: string; rowCount: number; }
 
+interface HeaderReport {
+  recognised: string[];
+  unrecognised: string[];
+  missing_required: string[];
+}
+
 interface PreviewResult {
   mode: 'preview';
   total: number;
@@ -31,6 +37,7 @@ interface PreviewResult {
   skipped: SkippedRow[];
   unknownSites?: UnknownSite[];
   canonicalSites?: string[];
+  headers?: HeaderReport;
 }
 
 interface CommitResult {
@@ -269,6 +276,22 @@ export default function BulkImportModal({ onClose, onDone }: { onClose: () => vo
                 Total rows: {preview.total} · Will import: <strong>{preview.toImport}</strong> · Duplicates flagged: <strong>{preview.duplicates.length}</strong> · Skipped: {preview.skipped.length}
               </div>
             </div>
+
+            {preview.headers && preview.headers.unrecognised.length > 0 && (
+              <div className="p-3 rounded-lg bg-yellow-50 border border-yellow-200 text-sm">
+                <div className="font-medium text-yellow-900 mb-1">
+                  {preview.headers.unrecognised.length} column{preview.headers.unrecognised.length > 1 ? 's were' : ' was'} not recognised
+                </div>
+                <div className="text-xs text-yellow-800 mb-2">
+                  These columns will be ignored on import. Rename them in your spreadsheet to a known column (Invoice date, Vendor Name, Payment Date, etc.) if they hold data you need:
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {preview.headers.unrecognised.map(h => (
+                    <span key={h} className="inline-block bg-white border border-yellow-300 text-yellow-900 text-xs rounded px-2 py-0.5">{h}</span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {preview.unknownSites && preview.unknownSites.length > 0 && preview.canonicalSites && (
               <div className="p-3 rounded-lg bg-orange-50 border border-orange-200 text-sm">
