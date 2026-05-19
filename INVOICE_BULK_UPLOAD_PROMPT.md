@@ -24,7 +24,7 @@ Every data row must have exactly 25 commas (26 cells). Leave a cell empty (`,,`)
 | 2 | Month | yes | Accounting month as `Mon-YYYY` → e.g. `May-2025`, `Apr-2026`. Usually = month of Invoice date |
 | 3 | Invoice date | yes | **`YYYY-MM-DD`** preferred. Importer also accepts `DD-MM-YYYY`, `DD/MM/YYYY` |
 | 4 | Vendor Name | yes | Verbatim from invoice. If unreadable, use `<Category> Misc` (e.g. `Cement Misc`, `Hardware Misc`) and a synthetic invoice no like `CEM-0001` |
-| 5 | Invoice no | recommended | The vendor's invoice number, verbatim. Leave blank only if truly absent |
+| 5 | Invoice no | **yes** | The vendor's invoice number, verbatim. Never leave blank — the importer rejects rows without one. If the source doc truly has no number, use a synthetic value like `CEM-0001`, `HW-0001`, `MSC-0001` (see "Missing invoice number" under "What to do when the source is messy" below) |
 | 6 | PO Number | optional | Purchase / work-order number if printed on the invoice |
 | 7 | Head | yes | One of the allowed categories below |
 | 8 | Site Location | yes | One of: `Nirvana`, `Taranga`, `Horizon`, `Green Wood Villas`, `Aruna Arcade`, `Office` |
@@ -123,7 +123,7 @@ Every data row must have exactly 25 commas (26 cells). Leave a cell empty (`,,`)
 
 ## What to do when the source is messy
 
-- **Missing invoice number** → leave blank. Importer will dedupe by vendor+amount+date.
+- **Missing invoice number** → never leave blank (importer rejects). Generate a synthetic value: `<Head-prefix>-<NNNN>` (e.g. `CEM-0001`, `HW-0001`, `MSC-0001`). Increment the suffix per category to stay unique within the file. Dedupe still works by vendor+amount+date when the synthetic number doesn't already exist.
 - **Missing vendor name** → use `<Head> Misc` plus a synthetic invoice number (`HW-0001`, `OFC-0001`, `MSC-0001`). Increment the suffix per category to stay unique.
 - **One invoice, multiple line items** → one CSV row per invoice, not per line item. Sum line totals into Invoice amount.
 - **Page totals / subtotals in the source** → skip them, only emit rows for real invoices.
@@ -139,11 +139,12 @@ Every data row must have exactly 25 commas (26 cells). Leave a cell empty (`,,`)
 2. Every data row has exactly 25 commas.
 3. Every Site Location is in the allowed list.
 4. Every Head is in the allowed list.
-5. No `₹`, `Rs.`, or thousand-commas inside numeric cells.
-6. Dates are `YYYY-MM-DD` (or unambiguous `DD-MM-YYYY`).
-7. Any row with an Additional Charge > 0 has an Additional Charge Reason.
-8. Any row with `Payment Status = Partial` has a `Paid Amount` > 0 and < Invoice amount.
-9. Sl.No is 1..N with no gaps.
+5. **Every row has an Invoice no (real or synthetic) — never blank.**
+6. No `₹`, `Rs.`, or thousand-commas inside numeric cells.
+7. Dates are `YYYY-MM-DD` (or unambiguous `DD-MM-YYYY`).
+8. Any row with an Additional Charge > 0 has an Additional Charge Reason.
+9. Any row with `Payment Status = Partial` has a `Paid Amount` > 0 and < Invoice amount.
+10. Sl.No is 1..N with no gaps.
 
 If any row violates a rule and you can't fix it, **omit that row** and add a single line after the CSV block: `# skipped: <row description> — <reason>`.
 

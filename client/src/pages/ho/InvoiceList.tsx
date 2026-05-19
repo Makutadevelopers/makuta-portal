@@ -46,6 +46,7 @@ export default function InvoiceList() {
   const [fStatus, setFStatus] = useState('All');
   const [fPurpose, setFPurpose] = useState('All');
   const [fMonth, setFMonth] = useState('');
+  const [fMissingInvNo, setFMissingInvNo] = useState(false);
   const [timeline, setTimeline] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -164,6 +165,7 @@ export default function InvoiceList() {
       if (fSite !== 'All' && i.site !== fSite) return false;
       if (fStatus !== 'All' && i.payment_status !== fStatus) return false;
       if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
+      if (fMissingInvNo && (i.invoice_no ?? '').trim() !== '') return false;
       if (range) {
         const cmp = dateForRange(i);
         if (range.from && cmp < range.from) return false;
@@ -218,7 +220,15 @@ export default function InvoiceList() {
       });
     }
     return result;
-  }, [invoices, fSite, fStatus, fPurpose, fMonth, search, timeline, dateFrom, dateTo, sortBy]);
+  }, [invoices, fSite, fStatus, fPurpose, fMonth, fMissingInvNo, search, timeline, dateFrom, dateTo, sortBy]);
+
+  // Count of historical rows still missing an invoice number — surfaced as a
+  // toggle chip in the filter row so HO can work through them. New entries
+  // can't be created without one (server-side createInvoiceSchema enforces it).
+  const missingInvNoCount = useMemo(
+    () => invoices.filter(i => !(i.invoice_no ?? '').trim()).length,
+    [invoices],
+  );
 
   // The row checkbox drives two flows: bulk actions (finalize/pay) AND
   // Export. Bulk-action handlers below already re-filter the selection to
@@ -412,7 +422,8 @@ export default function InvoiceList() {
               (fPurpose !== 'All' ? 1 : 0) +
               (search ? 1 : 0) +
               (timeline !== 'all' ? 1 : 0) +
-              (fMonth ? 1 : 0)
+              (fMonth ? 1 : 0) +
+              (fMissingInvNo ? 1 : 0)
             }
           />
           <button onClick={() => { setEditInv(null); setExpandedEditId(null); setShowBatchForm(false); setShowForm(true); }}
@@ -482,6 +493,20 @@ export default function InvoiceList() {
           <option value="last_paid_date">Latest paid date first</option>
         </select>
         <div className="ml-auto flex items-center gap-3">
+          {missingInvNoCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setFMissingInvNo(v => !v)}
+              title="Historical rows imported before invoice_no became mandatory. Click to filter; edit each row to enter the real number."
+              className={`text-xs px-2 py-1 rounded-full border transition-colors ${
+                fMissingInvNo
+                  ? 'bg-amber-100 border-amber-300 text-amber-800 hover:bg-amber-200'
+                  : 'border-amber-200 text-amber-700 hover:bg-amber-50'
+              }`}
+            >
+              Missing inv. no · {missingInvNoCount}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleRecomputeStatuses}
