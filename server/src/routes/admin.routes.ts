@@ -124,6 +124,47 @@ router.get('/import-audit', requireRole(['ho']), async (_req: Request, res: Resp
       LIMIT 25
     `);
 
+    // D7 — Did migration 031 (batch 90209c92 timezone date-shift) actually
+    // get applied on this RDS? The migration file is untracked locally and
+    // doesn't appear in schema_migrations from today's deploy logs, but it
+    // may have been run manually. We probe by reading the 4 reference
+    // invoices the migration comment lists (CSV-known expected dates). If
+    // they match the post-fix expected date, the migration is effectively
+    // applied. If they match (expected − 1 day), the migration is still
+    // pending and 1,181 invoices are off by one day.
+    const d7_migration_031 = await query<{
+      invoice_no: string;
+      invoice_date: string;
+      expected_after_fix: string;
+      status: string;
+    }>(`
+      SELECT
+        invoice_no,
+        invoice_date,
+        expected.expected_after_fix,
+        CASE
+          WHEN invoice_date = expected.expected_after_fix THEN 'fixed'
+          WHEN invoice_date = expected.expected_after_fix - INTERVAL '1 day' THEN 'pending'
+          ELSE 'unexpected'
+        END AS status
+      FROM invoices
+      JOIN (VALUES
+        ('SCMP25059012', DATE '2026-02-12'),
+        ('SCMP25059015', DATE '2026-02-12'),
+        ('SCMP25060488', DATE '2026-02-19'),
+        ('SCMP25060831', DATE '2026-02-20')
+      ) AS expected(invoice_no, expected_after_fix)
+        USING (invoice_no)
+    `);
+
+    // Batch-wide count so we know the blast radius if the migration is
+    // still pending (the migration comment claims ~1,181 invoices).
+    const d7_batch_count = await query<{ count: string }>(`
+      SELECT COUNT(*)::text AS count
+      FROM invoices
+      WHERE batch_id = '90209c92-5c25-4ddc-8cd1-e01e36ff9610'
+    `);
+
     res.json({
       generated_at: new Date().toISOString(),
       d1_per_batch_fingerprint: d1,
@@ -137,6 +178,10 @@ router.get('/import-audit', requireRole(['ho']), async (_req: Request, res: Resp
       d6_f8_epoch_sentinel_rows: {
         total_count: d6_f8_count[0]?.count ?? '0',
         sample: d6_f8_sample,
+      },
+      d7_migration_031_status: {
+        batch_size: d7_batch_count[0]?.count ?? '0',
+        reference_invoices: d7_migration_031,
       },
     });
   } catch (err) {
