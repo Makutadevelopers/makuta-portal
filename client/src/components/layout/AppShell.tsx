@@ -6,7 +6,6 @@ import { sendTempPassword } from '../../api/users';
 import { useToast } from '../../context/ToastContext';
 import { useConfirm } from '../ui/ConfirmDialog';
 import { getPendingCount } from '../../utils/offlineSync';
-import CalculatorWidget from '../shared/CalculatorWidget';
 
 const HO_TABS = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -333,9 +332,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Content */}
       <main className="p-4 sm:p-6">{children}</main>
-
-      {/* Floating calculator (hidden for MD inside the widget itself) */}
-      <CalculatorWidget />
     </div>
   );
 }
