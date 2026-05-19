@@ -26,54 +26,15 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // All /api/* traffic goes straight to the network. Caching mutable
+        // resources (invoices, payments, vendors, cashflow, aging) under
+        // NetworkFirst caused stale reads to surface after edits whenever
+        // the post-mutation refetch hit a transient network blip — the SW
+        // would fall back to the pre-edit cache, leaving the UI showing
+        // old values until the next successful fetch.
         runtimeCaching: [
           {
-            urlPattern: /^https?:\/\/.*\/api\/invoices/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'invoices-cache',
-              expiration: { maxEntries: 50, maxAgeSeconds: 3600 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: /^https?:\/\/.*\/api\/vendors/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'vendors-cache',
-              expiration: { maxEntries: 50, maxAgeSeconds: 3600 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: /^https?:\/\/.*\/api\/cashflow/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'cashflow-cache',
-              expiration: { maxEntries: 10, maxAgeSeconds: 3600 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: /^https?:\/\/.*\/api\/aging/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'aging-cache',
-              expiration: { maxEntries: 10, maxAgeSeconds: 3600 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: /^https?:\/\/.*\/api\/reconciliation/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'reconciliation-cache',
-              expiration: { maxEntries: 10, maxAgeSeconds: 3600 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: /^https?:\/\/.*\/api\/auth/,
+            urlPattern: /^https?:\/\/.*\/api\//,
             handler: 'NetworkOnly',
           },
         ],
