@@ -192,9 +192,21 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
     if (site !== 'All')     { conds.push(`i.site = $${p++}`);            params.push(site); }
     if (status !== 'All')   { conds.push(`i.payment_status = $${p++}`);  params.push(status); }
     if (category !== 'All') { conds.push(`i.purpose = $${p++}`);         params.push(category); }
-    if (month)              { conds.push(`TO_CHAR(i.month, 'YYYY-MM') = $${p++}`); params.push(month); }
-    if (from)               { conds.push(`i.invoice_date >= $${p++}`);   params.push(from); }
-    if (to)                 { conds.push(`i.invoice_date <= $${p++}`);   params.push(to); }
+    // Date filters follow the active sort axis so the export matches the
+    // on-screen filtered view (e.g. "paid in April 2026" when sorted by paid
+    // date). created_at is a UTC timestamp; cast it to IST date for parity
+    // with the client's en-CA / Asia/Kolkata formatting.
+    const monthExpr =
+      sortBy === 'last_paid_date' ? `TO_CHAR(p.last_paid_date, 'YYYY-MM')`
+      : sortBy === 'created_at'   ? `TO_CHAR((i.created_at AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM')`
+      : `TO_CHAR(i.month, 'YYYY-MM')`;
+    const dayExpr =
+      sortBy === 'last_paid_date' ? `p.last_paid_date`
+      : sortBy === 'created_at'   ? `(i.created_at AT TIME ZONE 'Asia/Kolkata')::date`
+      : `i.invoice_date`;
+    if (month)              { conds.push(`${monthExpr} = $${p++}`);      params.push(month); }
+    if (from)               { conds.push(`${dayExpr} >= $${p++}`);       params.push(from); }
+    if (to)                 { conds.push(`${dayExpr} <= $${p++}`);       params.push(to); }
     if (search) {
       conds.push(`(LOWER(i.vendor_name) LIKE $${p} OR LOWER(i.invoice_no) LIKE $${p} OR LOWER(COALESCE(i.po_number, '')) LIKE $${p})`);
       params.push(`%${search.toLowerCase()}%`);

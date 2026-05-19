@@ -105,9 +105,21 @@ export default function MyInvoices() {
     const result = invoices.filter(i => {
       if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
       if (fMonth) {
-        // Match against the invoice's month bucket — same field HO uses.
-        const invMonth = (i.month || i.invoice_date || '').slice(0, 7);
-        if (invMonth !== fMonth) return false;
+        // Month picker follows the active sort axis — invoice month when
+        // sorted by invoice_date, paid month when sorted by last_paid_date,
+        // created month when sorted by created_at.
+        let cmpMonth: string;
+        if (sortBy === 'last_paid_date') {
+          cmpMonth = (i.last_paid_date || '').slice(0, 7);
+        } else if (sortBy === 'created_at') {
+          const ts = i.created_at;
+          cmpMonth = ts
+            ? new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 7)
+            : '';
+        } else {
+          cmpMonth = (i.month || i.invoice_date || '').slice(0, 7);
+        }
+        if (cmpMonth !== fMonth) return false;
       }
       if (search) {
         const q = normaliseSearch(search);
@@ -298,7 +310,11 @@ export default function MyInvoices() {
           value={fMonth}
           onChange={e => setFMonth(e.target.value)}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200"
-          title="Filter by month"
+          title={
+            sortBy === 'last_paid_date' ? 'Filter by paid month'
+            : sortBy === 'created_at' ? 'Filter by added month'
+            : 'Filter by invoice month'
+          }
         />
         {fMonth && (
           <button
