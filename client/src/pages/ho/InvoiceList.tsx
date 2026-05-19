@@ -4,7 +4,7 @@ import { downloadAuthenticated } from '../../api/client';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { useVendors } from '../../hooks/useVendors';
-import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, bulkDeleteInvoices, getInvoiceHistory, AuditLogEntry, createInvoice, updateInvoice, deleteInvoice as deleteInvoiceApi, recomputeInvoiceStatuses } from '../../api/invoices';
+import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, bulkDeleteInvoices, getInvoiceHistory, AuditLogEntry, createInvoice, createInvoiceBatch, updateInvoice, deleteInvoice as deleteInvoiceApi, recomputeInvoiceStatuses } from '../../api/invoices';
 import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
 import { createPayment, getPayments, updatePayment } from '../../api/payments';
 import { bulkPayInvoices } from '../../api/reconciliation';
@@ -26,6 +26,9 @@ import PaymentModal from '../../components/shared/PaymentModal';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../context/ToastContext';
 import { normaliseSearch, highlight, amountMatchesSearch } from '../../utils/searchHighlight';
+import { computeInvoiceTotal } from '../../utils/invoiceMath';
+import { CreateInvoiceData } from '../../types/invoice';
+import { Vendor } from '../../types/vendor';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 export default function InvoiceList() {
@@ -35,6 +38,7 @@ export default function InvoiceList() {
   const [searchParams] = useSearchParams();
 
   const [showForm, setShowForm] = useState(false);
+  const [showBatchForm, setShowBatchForm] = useState(false);
   const [editInv, setEditInv] = useState<Invoice | null>(null);
 
   const [search, setSearch] = useState(searchParams.get('search') ?? '');
@@ -411,9 +415,14 @@ export default function InvoiceList() {
               (fMonth ? 1 : 0)
             }
           />
-          <button onClick={() => { setEditInv(null); setExpandedEditId(null); setShowForm(true); }}
+          <button onClick={() => { setEditInv(null); setExpandedEditId(null); setShowBatchForm(false); setShowForm(true); }}
             className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
             + New Invoice
+          </button>
+          <button onClick={() => { setEditInv(null); setExpandedEditId(null); setShowForm(false); setShowBatchForm(true); }}
+            title="Add multiple invoices against one vendor in one go"
+            className="px-4 py-2 border border-[#1a3c5e] text-[#1a3c5e] text-sm font-medium rounded-lg hover:bg-[#1a3c5e]/5">
+            + Add Many
           </button>
         </div>
       </div>
@@ -546,6 +555,19 @@ export default function InvoiceList() {
           editInvoice={null}
           onCancel={() => { setShowForm(false); }}
           onSaved={() => { setShowForm(false); notify('Invoice added'); refresh(); }}
+        />
+      )}
+
+      {/* Batch Invoice Form (above table) */}
+      {showBatchForm && (
+        <HOInvoiceBatchForm
+          vendors={vendors}
+          onCancel={() => setShowBatchForm(false)}
+          onSaved={(created) => {
+            notify(`${created} invoice${created === 1 ? '' : 's'} added`);
+            refresh();
+            setShowBatchForm(false);
+          }}
         />
       )}
 
@@ -1217,7 +1239,6 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
 }
 
 // ── HO Invoice Form ────────────────────────────────────────────────────────
-interface Vendor { id: string; name: string; payment_terms: number; category: string | null; }
 
 function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   vendors: Vendor[];
@@ -1772,6 +1793,640 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
             {saving ? 'Saving...' : uploading ? 'Uploading files...' : 'Save Invoice'}
           </button>
           <button type="button" onClick={onCancel} className="px-5 py-2.5 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ── HO Batch Invoice Form ──────────────────────────────────────────────────
+// Add many invoices against ONE vendor in a single submit. Vendor + Site are
+// locked at the top; everything else is per row. Save-valid-rows semantics:
+// rows that fail server-side dedup stay editable, rows that succeed are
+// marked saved and excluded from re-submit.
+
+type BatchRowStatus = 'idle' | 'saving' | 'saved' | 'failed';
+
+interface BatchRow {
+  id: string;
+  invoiceDate: string;
+  month: string;
+  invoiceNo: string;
+  poNumber: string;
+  purpose: string;
+  baseAmount: string;
+  cgstPct: string;
+  sgstPct: string;
+  igstPct: string;
+  addlChargeOn: boolean;
+  addlCharge: string;
+  addlGstOn: boolean;
+  addlCgstPct: string;
+  addlSgstPct: string;
+  addlIgstPct: string;
+  addlReason: string;
+  remarks: string;
+  pendingFiles: File[];
+  status: BatchRowStatus;
+  error: string | null;
+  invoiceId: string | null;
+}
+
+function makeBatchRow(): BatchRow {
+  const today = new Date().toISOString().split('T')[0];
+  return {
+    id: (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? crypto.randomUUID() : `r-${Date.now()}-${Math.random()}`,
+    invoiceDate: today,
+    month: `${today.slice(0, 7)}-01`,
+    invoiceNo: '',
+    poNumber: '',
+    purpose: '',
+    baseAmount: '',
+    cgstPct: '',
+    sgstPct: '',
+    igstPct: '',
+    addlChargeOn: false,
+    addlCharge: '',
+    addlGstOn: false,
+    addlCgstPct: '',
+    addlSgstPct: '',
+    addlIgstPct: '',
+    addlReason: '',
+    remarks: '',
+    pendingFiles: [],
+    status: 'idle',
+    error: null,
+    invoiceId: null,
+  };
+}
+
+function HOInvoiceBatchForm({ vendors, onCancel, onSaved }: {
+  vendors: Vendor[];
+  onCancel: () => void;
+  onSaved: (createdCount: number) => void;
+}) {
+  const { notify } = useToast();
+
+  const [localVendors, setLocalVendors] = useState<Vendor[]>(vendors);
+  useEffect(() => { setLocalVendors(vendors); }, [vendors]);
+
+  const [vendorId, setVendorId] = useState('');
+  const [vendorName, setVendorName] = useState('');
+  const [vendorSearch, setVendorSearch] = useState('');
+  const [pendingNewVendorName, setPendingNewVendorName] = useState<string | null>(null);
+  const [masterCategory, setMasterCategory] = useState('');
+  const [site, setSite] = useState('Nirvana');
+
+  const [rows, setRows] = useState<BatchRow[]>([makeBatchRow()]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const selectedVendor = localVendors.find(v => v.id === vendorId);
+  const vendorCategory = selectedVendor?.category || (pendingNewVendorName ? masterCategory : '');
+  const categoryLocked = !!vendorCategory;
+
+  // Whenever the vendor's locked category changes, snap every row's purpose
+  // to it so the user can't submit a stale value.
+  useEffect(() => {
+    if (!categoryLocked) return;
+    setRows(prev => prev.map(r =>
+      r.status === 'saved' || r.purpose === vendorCategory ? r : { ...r, purpose: vendorCategory }
+    ));
+  }, [categoryLocked, vendorCategory]);
+
+  function handleVendorPick(id: string) {
+    setVendorId(id);
+    setPendingNewVendorName(null);
+    setMasterCategory('');
+    const v = localVendors.find(x => x.id === id);
+    if (v) setVendorName(v.name);
+  }
+
+  function handleStageNewVendor(name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setPendingNewVendorName(trimmed);
+    setVendorName(trimmed);
+    setVendorId('');
+    setVendorSearch('');
+  }
+
+  function clearVendor() {
+    setVendorId('');
+    setVendorName('');
+    setPendingNewVendorName(null);
+    setMasterCategory('');
+  }
+
+  function updateRow(id: string, patch: Partial<BatchRow>) {
+    setRows(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  }
+
+  function updateRowDate(id: string, d: string) {
+    updateRow(id, {
+      invoiceDate: d,
+      month: d.length >= 7 ? `${d.slice(0, 7)}-01` : `${new Date().toISOString().slice(0, 7)}-01`,
+    });
+  }
+
+  function addRow() {
+    setRows(prev => [...prev, { ...makeBatchRow(), purpose: categoryLocked ? vendorCategory : '' }]);
+  }
+
+  function removeRow(id: string) {
+    setRows(prev => prev.length === 1 ? prev : prev.filter(r => r.id !== id));
+  }
+
+  // Editable (idle or failed) rows are the ones that get submitted.
+  const editableRows = rows.filter(r => r.status === 'idle' || r.status === 'failed');
+  const savedCount = rows.filter(r => r.status === 'saved').length;
+  const grandTotal = editableRows.reduce((s, r) => s + computeInvoiceTotal({
+    baseAmount: Number(r.baseAmount) || 0,
+    cgstPct: Number(r.cgstPct) || 0,
+    sgstPct: Number(r.sgstPct) || 0,
+    igstPct: Number(r.igstPct) || 0,
+    addlChargeOn: r.addlChargeOn,
+    addlCharge: Number(r.addlCharge) || 0,
+    addlGstOn: r.addlGstOn,
+    addlCgstPct: Number(r.addlCgstPct) || 0,
+    addlSgstPct: Number(r.addlSgstPct) || 0,
+    addlIgstPct: Number(r.addlIgstPct) || 0,
+  }).total, 0);
+
+  function rowTotal(r: BatchRow): number {
+    return computeInvoiceTotal({
+      baseAmount: Number(r.baseAmount) || 0,
+      cgstPct: Number(r.cgstPct) || 0,
+      sgstPct: Number(r.sgstPct) || 0,
+      igstPct: Number(r.igstPct) || 0,
+      addlChargeOn: r.addlChargeOn,
+      addlCharge: Number(r.addlCharge) || 0,
+      addlGstOn: r.addlGstOn,
+      addlCgstPct: Number(r.addlCgstPct) || 0,
+      addlSgstPct: Number(r.addlSgstPct) || 0,
+      addlIgstPct: Number(r.addlIgstPct) || 0,
+    }).total;
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+
+    if (!vendorId && !pendingNewVendorName) {
+      setError('Pick a vendor from the dropdown, or click "+ Add as new vendor".');
+      return;
+    }
+    if (pendingNewVendorName && !masterCategory) {
+      setError('Pick a master category for the new vendor.');
+      return;
+    }
+    if (editableRows.length === 0) {
+      setError('Add at least one invoice row to save.');
+      return;
+    }
+
+    // Per-row client-side validation
+    const rowErrors: { id: string; msg: string }[] = [];
+    const seenInvoiceNos = new Set<string>();
+    for (const r of editableRows) {
+      const total = rowTotal(r);
+      if (!r.invoiceNo.trim()) { rowErrors.push({ id: r.id, msg: 'Invoice number is required' }); continue; }
+      const lower = r.invoiceNo.trim().toLowerCase();
+      if (seenInvoiceNos.has(lower)) { rowErrors.push({ id: r.id, msg: `Duplicate invoice no "${r.invoiceNo}" in this batch` }); continue; }
+      seenInvoiceNos.add(lower);
+      if (Number(r.baseAmount) <= 0) { rowErrors.push({ id: r.id, msg: 'Enter a valid base amount' }); continue; }
+      if (total <= 0) { rowErrors.push({ id: r.id, msg: 'Total must be greater than zero' }); continue; }
+      if (!r.purpose) { rowErrors.push({ id: r.id, msg: 'Pick a category' }); continue; }
+      if (r.addlChargeOn && Number(r.addlCharge) > 0 && !r.addlReason.trim()) {
+        rowErrors.push({ id: r.id, msg: 'Reason required when additional charge is entered' });
+        continue;
+      }
+    }
+    if (rowErrors.length > 0) {
+      setRows(prev => prev.map(r => {
+        const e = rowErrors.find(re => re.id === r.id);
+        return e ? { ...r, status: 'failed' as BatchRowStatus, error: e.msg } : r;
+      }));
+      setError(`Fix ${rowErrors.length} row${rowErrors.length === 1 ? '' : 's'} before saving.`);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      // Deferred vendor create — uses the master category picked above.
+      let finalVendorId = vendorId;
+      let finalVendorName = vendorName;
+      if (pendingNewVendorName) {
+        try {
+          const created = await createVendor({
+            name: pendingNewVendorName,
+            payment_terms: 30,
+            category: masterCategory,
+          });
+          setLocalVendors(prev => [...prev, created]);
+          finalVendorId = created.id;
+          finalVendorName = created.name;
+          setVendorId(created.id);
+          setVendorName(created.name);
+          setPendingNewVendorName(null);
+          notify(`Vendor "${created.name}" created (30-day terms)`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to create vendor';
+          setError(msg);
+          setSubmitting(false);
+          return;
+        }
+      }
+
+      // Mark every editable row as saving so the UI reflects in-flight state.
+      setRows(prev => prev.map(r => editableRows.find(e => e.id === r.id) ? { ...r, status: 'saving' as BatchRowStatus, error: null } : r));
+
+      const payload = editableRows.map<CreateInvoiceData>(r => {
+        const breakdown = computeInvoiceTotal({
+          baseAmount: Number(r.baseAmount) || 0,
+          cgstPct: Number(r.cgstPct) || 0,
+          sgstPct: Number(r.sgstPct) || 0,
+          igstPct: Number(r.igstPct) || 0,
+          addlChargeOn: r.addlChargeOn,
+          addlCharge: Number(r.addlCharge) || 0,
+          addlGstOn: r.addlGstOn,
+          addlCgstPct: Number(r.addlCgstPct) || 0,
+          addlSgstPct: Number(r.addlSgstPct) || 0,
+          addlIgstPct: Number(r.addlIgstPct) || 0,
+        });
+        return {
+          month: r.month,
+          invoice_date: r.invoiceDate,
+          vendor_id: finalVendorId,
+          vendor_name: finalVendorName,
+          invoice_no: r.invoiceNo.trim(),
+          po_number: r.poNumber.trim() || null,
+          purpose: r.purpose,
+          site,
+          invoice_amount: breakdown.total,
+          base_amount: breakdown.baseNum,
+          cgst_pct: Number(r.cgstPct) || 0,
+          sgst_pct: Number(r.sgstPct) || 0,
+          igst_pct: Number(r.igstPct) || 0,
+          additional_charge: breakdown.addlChargeNum,
+          additional_charge_cgst_pct: r.addlChargeOn && r.addlGstOn ? Number(r.addlCgstPct) || 0 : 0,
+          additional_charge_sgst_pct: r.addlChargeOn && r.addlGstOn ? Number(r.addlSgstPct) || 0 : 0,
+          additional_charge_igst_pct: r.addlChargeOn && r.addlGstOn ? Number(r.addlIgstPct) || 0 : 0,
+          additional_charge_reason: breakdown.addlChargeNum > 0 ? r.addlReason.trim() : null,
+          remarks: r.remarks.trim() || null,
+        };
+      });
+
+      const resp = await createInvoiceBatch({
+        vendor_id: finalVendorId,
+        vendor_name: finalVendorName,
+        site,
+        invoices: payload,
+      });
+
+      // Walk the per-row results and update local state. The server returns
+      // results in the same order as `editableRows`, so result.index maps
+      // straight to editableRows[index].
+      const updatedRows: BatchRow[] = [];
+      const uploads: Array<{ invoiceId: string; files: File[] }> = [];
+      for (const r of rows) {
+        if (r.status !== 'saving') { updatedRows.push(r); continue; }
+        const editableIdx = editableRows.findIndex(er => er.id === r.id);
+        const res = resp.results.find(x => x.index === editableIdx);
+        if (!res) {
+          updatedRows.push({ ...r, status: 'failed', error: 'No result returned for this row' });
+          continue;
+        }
+        if (res.ok && res.invoice_id) {
+          updatedRows.push({ ...r, status: 'saved', invoiceId: res.invoice_id, error: null });
+          if (r.pendingFiles.length > 0) {
+            uploads.push({ invoiceId: res.invoice_id, files: r.pendingFiles });
+          }
+        } else {
+          updatedRows.push({ ...r, status: 'failed', error: res.error?.message || 'Failed' });
+        }
+      }
+      setRows(updatedRows);
+
+      // Upload attachments for the rows that saved. Serial keeps it simple
+      // and matches the single-form behavior.
+      for (const u of uploads) {
+        for (const f of u.files) {
+          try { await uploadAttachment(u.invoiceId, f); } catch { /* surface? not blocking */ }
+        }
+      }
+      // Clear pending files for rows that uploaded successfully so a
+      // re-submit of remaining failed rows doesn't re-upload them.
+      setRows(prev => prev.map(r => r.status === 'saved' ? { ...r, pendingFiles: [] } : r));
+
+      if (resp.failed === 0) {
+        onSaved(resp.created);
+      } else {
+        notify(`Created ${resp.created} · ${resp.failed} failed — fix and re-submit`);
+      }
+    } catch (err) {
+      // Server-side schema-level failure (e.g. payload shape). Roll the
+      // saving rows back to failed so the user can retry.
+      const msg = err instanceof Error ? err.message : 'Batch save failed';
+      setError(msg);
+      setRows(prev => prev.map(r => r.status === 'saving' ? { ...r, status: 'failed' as BatchRowStatus, error: msg } : r));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 p-6 mb-6">
+      <div className="text-base font-medium text-gray-900 mb-5">Add Many Invoices · One Vendor</div>
+      {error && <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg text-sm">{error}</div>}
+
+      <form onSubmit={handleSubmit}>
+        {/* Header — vendor + site + (master category for new vendor) */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+          <div className="sm:col-span-2">
+            <label className="block text-xs text-gray-500 mb-1">
+              Vendor *
+              {vendorId && selectedVendor && (
+                <span className="text-green-600 ml-2">&#10003; {selectedVendor.name} · {selectedVendor.payment_terms}-day terms</span>
+              )}
+              {pendingNewVendorName && (
+                <span className="text-amber-600 ml-2">
+                  New vendor &ldquo;{pendingNewVendorName}&rdquo; — will be created on Save
+                  <button type="button" onClick={clearVendor} className="ml-2 text-gray-400 hover:text-gray-600 underline">clear</button>
+                </span>
+              )}
+            </label>
+            <div className="relative">
+              <input value={vendorSearch}
+                onChange={e => { setVendorSearch(e.target.value); setVendorId(''); }}
+                placeholder={vendorName || 'Type to search vendor...'}
+                onFocus={() => setVendorSearch(vendorSearch || vendorName)}
+                onBlur={() => setTimeout(() => setVendorSearch(''), 200)}
+                disabled={savedCount > 0}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-gray-50" />
+              {vendorSearch && (
+                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {localVendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase())).map(v => (
+                    <div key={v.id}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => { handleVendorPick(v.id); setVendorSearch(''); }}
+                      className="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between">
+                      <span className="text-sm text-gray-900">{v.name}</span>
+                      <span className="text-xs text-gray-400">{v.category} · {v.payment_terms}d</span>
+                    </div>
+                  ))}
+                  {localVendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase())).length === 0 && (
+                    <div className="px-3 py-2">
+                      <div className="text-xs text-gray-400 mb-1">No matching vendor found</div>
+                      <button type="button" onMouseDown={e => e.preventDefault()}
+                        onClick={() => handleStageNewVendor(vendorSearch)}
+                        className="text-xs text-blue-600 hover:underline">
+                        + Add &ldquo;{vendorSearch.trim()}&rdquo; as new vendor (saved with these invoices)
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Site *</label>
+            <select value={site} onChange={e => setSite(e.target.value)}
+              disabled={savedCount > 0}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-gray-50">
+              {SITES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          {pendingNewVendorName && (
+            <div className="sm:col-span-3">
+              <label className="block text-xs text-gray-500 mb-1">Master Category for new vendor *</label>
+              <CategorySelect
+                value={masterCategory}
+                onChange={setMasterCategory}
+                placeholder="Select category"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-200"
+              />
+              <div className="text-xs text-gray-400 mt-1">All rows will be filed under this category.</div>
+            </div>
+          )}
+        </div>
+
+        {/* Rows */}
+        <div className="space-y-3 mb-4">
+          {rows.map((r, idx) => {
+            const total = rowTotal(r);
+            const isSaved = r.status === 'saved';
+            const isSaving = r.status === 'saving';
+            const isFailed = r.status === 'failed';
+            return (
+              <div key={r.id}
+                className={`border rounded-lg p-4 ${
+                  isSaved ? 'border-green-200 bg-green-50/40'
+                  : isFailed ? 'border-red-200 bg-red-50/30'
+                  : 'border-gray-200 bg-white'
+                }`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-gray-500">Row {idx + 1}</span>
+                    {isSaved && <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded">&#10003; Saved</span>}
+                    {isSaving && <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">Saving…</span>}
+                    {isFailed && r.error && <span className="text-xs text-red-700">{r.error}</span>}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium text-gray-700">{formatINR(total)}</span>
+                    <button type="button" onClick={() => removeRow(r.id)}
+                      disabled={isSaved || rows.length === 1}
+                      className="text-gray-400 hover:text-red-600 disabled:opacity-30 disabled:cursor-not-allowed text-sm">
+                      &#10005;
+                    </button>
+                  </div>
+                </div>
+
+                <fieldset disabled={isSaved || isSaving} className="space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Invoice Date</label>
+                      <input type="date" value={r.invoiceDate} onChange={e => updateRowDate(r.id, e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Invoice No *</label>
+                      <input value={r.invoiceNo} onChange={e => updateRow(r.id, { invoiceNo: e.target.value })}
+                        placeholder="Invoice number"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">PO Number</label>
+                      <input value={r.poNumber} onChange={e => updateRow(r.id, { poNumber: e.target.value })}
+                        placeholder="PO reference"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">
+                        Category
+                        {categoryLocked && <span className="text-gray-400 ml-1">· locked</span>}
+                      </label>
+                      {categoryLocked ? (
+                        <select value={r.purpose} disabled
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-600">
+                          <option>{vendorCategory}</option>
+                        </select>
+                      ) : (
+                        <CategorySelect
+                          value={r.purpose}
+                          onChange={v => updateRow(r.id, { purpose: v })}
+                          placeholder="Select"
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white"
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Base Amount *</label>
+                      <input type="number" step="0.01" min="0" value={r.baseAmount}
+                        onChange={e => updateRow(r.id, { baseAmount: e.target.value })}
+                        placeholder="0.00"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">CGST %</label>
+                      <input type="number" step="0.01" min="0" max="100" value={r.cgstPct}
+                        onChange={e => updateRow(r.id, { cgstPct: e.target.value })}
+                        placeholder="0"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">SGST %</label>
+                      <input type="number" step="0.01" min="0" max="100" value={r.sgstPct}
+                        onChange={e => updateRow(r.id, { sgstPct: e.target.value })}
+                        placeholder="0"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">IGST %</label>
+                      <input type="number" step="0.01" min="0" max="100" value={r.igstPct}
+                        onChange={e => updateRow(r.id, { igstPct: e.target.value })}
+                        placeholder="0"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                    </div>
+                  </div>
+
+                  {/* Additional charge toggle */}
+                  <div>
+                    <label className="inline-flex items-center text-xs text-gray-600 gap-2">
+                      <input type="checkbox" checked={r.addlChargeOn}
+                        onChange={e => updateRow(r.id, { addlChargeOn: e.target.checked })} />
+                      Additional charge (transport, loading, round-off…)
+                    </label>
+                    {r.addlChargeOn && (
+                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Amount</label>
+                          <input type="number" step="0.01" min="0" value={r.addlCharge}
+                            onChange={e => updateRow(r.id, { addlCharge: e.target.value })}
+                            placeholder="0.00"
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs text-gray-500 mb-1">Reason *</label>
+                          <input value={r.addlReason}
+                            onChange={e => updateRow(r.id, { addlReason: e.target.value })}
+                            placeholder="e.g. Transport, Loading"
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                        </div>
+                        <div>
+                          <label className="inline-flex items-center text-xs text-gray-600 gap-2 mt-6">
+                            <input type="checkbox" checked={r.addlGstOn}
+                              onChange={e => updateRow(r.id, { addlGstOn: e.target.checked })} />
+                            GST on charge
+                          </label>
+                        </div>
+                        {r.addlGstOn && (
+                          <>
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">CGST %</label>
+                              <input type="number" step="0.01" min="0" max="100" value={r.addlCgstPct}
+                                onChange={e => updateRow(r.id, { addlCgstPct: e.target.value })}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">SGST %</label>
+                              <input type="number" step="0.01" min="0" max="100" value={r.addlSgstPct}
+                                onChange={e => updateRow(r.id, { addlSgstPct: e.target.value })}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">IGST %</label>
+                              <input type="number" step="0.01" min="0" max="100" value={r.addlIgstPct}
+                                onChange={e => updateRow(r.id, { addlIgstPct: e.target.value })}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Remarks</label>
+                      <input value={r.remarks} onChange={e => updateRow(r.id, { remarks: e.target.value })}
+                        placeholder="Notes"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Attachments ({r.pendingFiles.length})</label>
+                      <input type="file" multiple
+                        onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                          const files = Array.from(e.target.files ?? []);
+                          updateRow(r.id, { pendingFiles: [...r.pendingFiles, ...files] });
+                          e.target.value = '';
+                        }}
+                        className="w-full text-xs text-gray-600" />
+                      {r.pendingFiles.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {r.pendingFiles.map((f, fi) => (
+                            <span key={fi} className="text-xs bg-gray-100 px-2 py-0.5 rounded inline-flex items-center gap-1">
+                              {f.name}
+                              <button type="button"
+                                onClick={() => updateRow(r.id, { pendingFiles: r.pendingFiles.filter((_, j) => j !== fi) })}
+                                className="text-gray-400 hover:text-red-600">&#10005;</button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </fieldset>
+              </div>
+            );
+          })}
+        </div>
+
+        <button type="button" onClick={addRow}
+          className="text-sm text-[#1a3c5e] hover:underline mb-5">
+          + Add another invoice
+        </button>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+          <div className="text-sm text-gray-600">
+            <span className="font-medium text-gray-900">{editableRows.length}</span> to save
+            {savedCount > 0 && <span className="text-green-700 ml-3">{savedCount} already saved</span>}
+            <span className="text-gray-500 ml-3">· Total {formatINR(grandTotal)}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={onCancel}
+              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">
+              {savedCount > 0 ? 'Close' : 'Cancel'}
+            </button>
+            <button type="submit" disabled={submitting || editableRows.length === 0}
+              className="px-5 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d] disabled:opacity-50 disabled:cursor-not-allowed">
+              {submitting ? 'Saving…' : `Save ${editableRows.length} invoice${editableRows.length === 1 ? '' : 's'}`}
+            </button>
+          </div>
         </div>
       </form>
     </div>

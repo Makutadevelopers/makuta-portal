@@ -13,7 +13,7 @@ import { query, queryOne, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
 import { notifyInvoicePushed, notifyInvoiceDeleted } from '../services/email.service';
 import { deleteInvoiceFilesFromDisk } from './attachment.controller';
-import { userHasSite } from '../middleware/auth';
+import { userHasSite, JwtPayload } from '../middleware/auth';
 import { normaliseSiteName } from '../utils/sites';
 import { paymentStatusCase } from '../services/payment.service';
 import { normalizeVendorName } from '../services/vendor.service';
@@ -153,189 +153,259 @@ export async function getInvoices(req: Request, res: Response, next: NextFunctio
   }
 }
 
+// Per-row insert pipeline shared by createInvoice (single) and
+// createInvoiceBatch (many). Runs site canonicalisation, vendor-master
+// lookup, category-match, dedup checks, INSERT, and audit log. Returns a
+// discriminated result so the batch handler can record per-row failures
+// without throwing.
+type InsertInvoiceData = z.infer<typeof createInvoiceSchema>;
+type InsertResult =
+  | { ok: true; invoice: InvoiceRow }
+  | { ok: false; status: number; code?: string; message: string; existing?: unknown };
+
+async function insertSingleInvoice(
+  raw: InsertInvoiceData,
+  user: { id: string; role: 'ho' | 'site' | 'mgmt'; sites?: string[]; site?: string | null },
+): Promise<InsertResult> {
+  const data = { ...raw };
+
+  data.site = normaliseSiteName(data.site);
+
+  if (user.role === 'site' && !userHasSite(user as JwtPayload, data.site)) {
+    return { ok: false, status: 403, message: 'You can only create invoices for sites you are assigned to' };
+  }
+
+  const masterVendor = await queryOne<{ id: string; name: string; category: string | null }>(
+    'SELECT id, name, category FROM vendors WHERE id = $1',
+    [data.vendor_id]
+  );
+  if (!masterVendor) {
+    return { ok: false, status: 400, message: 'Selected vendor is not in Vendor Master' };
+  }
+  data.vendor_name = masterVendor.name;
+
+  if (masterVendor.category && masterVendor.category.trim()) {
+    const expected = masterVendor.category.trim().toLowerCase();
+    const actual = data.purpose.trim().toLowerCase();
+    if (expected !== actual) {
+      return {
+        ok: false,
+        status: 400,
+        code: 'category_mismatch',
+        message: `Category "${data.purpose}" does not match vendor "${masterVendor.name}" (Vendor Master: "${masterVendor.category}")`,
+      };
+    }
+  }
+
+  const duplicate = data.invoice_no
+    ? await queryOne<{ id: string; invoice_no: string | null; invoice_date: string; invoice_amount: string }>(
+        `SELECT id, invoice_no, invoice_date, invoice_amount FROM invoices
+         WHERE LOWER(TRIM(invoice_no)) = LOWER(TRIM($1))
+           AND (vendor_id = $2 OR (vendor_id IS NULL AND LOWER(TRIM(vendor_name)) = LOWER(TRIM($3))))
+           AND deleted_at IS NULL`,
+        [data.invoice_no, data.vendor_id, data.vendor_name]
+      )
+    : await queryOne<{ id: string; invoice_no: string | null; invoice_date: string; invoice_amount: string }>(
+        `SELECT id, invoice_no, invoice_date, invoice_amount FROM invoices
+         WHERE invoice_no IS NULL
+           AND (vendor_id = $1 OR (vendor_id IS NULL AND LOWER(TRIM(vendor_name)) = LOWER(TRIM($2))))
+           AND invoice_amount = $3
+           AND invoice_date = $4
+           AND deleted_at IS NULL`,
+        [data.vendor_id, data.vendor_name, data.invoice_amount, data.invoice_date]
+      );
+  if (duplicate) {
+    return {
+      ok: false,
+      status: 409,
+      code: 'duplicate_invoice',
+      message: data.invoice_no
+        ? `Invoice #${data.invoice_no} already exists for vendor "${data.vendor_name}". Each invoice number must be unique per vendor.`
+        : `An invoice for vendor "${data.vendor_name}" with the same date and amount already exists.`,
+      existing: {
+        id: duplicate.id,
+        invoice_no: duplicate.invoice_no,
+        invoice_date: duplicate.invoice_date,
+        invoice_amount: duplicate.invoice_amount,
+      },
+    };
+  }
+
+  if (data.invoice_no) {
+    const normTarget = normalizeVendorName(data.vendor_name);
+    if (normTarget) {
+      const candidates = await query<{
+        invoice_id: string;
+        existing_invoice_no: string | null;
+        existing_invoice_date: string;
+        existing_invoice_amount: string;
+        existing_vendor_id: string | null;
+        existing_vendor_name: string;
+      }>(
+        `SELECT i.id AS invoice_id,
+                i.invoice_no AS existing_invoice_no,
+                i.invoice_date AS existing_invoice_date,
+                i.invoice_amount AS existing_invoice_amount,
+                i.vendor_id AS existing_vendor_id,
+                COALESCE(v.name, i.vendor_name) AS existing_vendor_name
+         FROM invoices i
+         LEFT JOIN vendors v ON v.id = i.vendor_id
+         WHERE LOWER(TRIM(i.invoice_no)) = LOWER(TRIM($1))
+           AND i.deleted_at IS NULL
+           AND i.vendor_id IS DISTINCT FROM $2`,
+        [data.invoice_no, data.vendor_id]
+      );
+      const crossMatch = candidates.find(
+        c => normalizeVendorName(c.existing_vendor_name) === normTarget
+      );
+      if (crossMatch) {
+        return {
+          ok: false,
+          status: 409,
+          code: 'duplicate_invoice_cross_vendor',
+          message: `Invoice #${data.invoice_no} already exists under "${crossMatch.existing_vendor_name}", which appears to be the same vendor as "${data.vendor_name}". Merge the vendors first, or check the invoice number.`,
+          existing: {
+            id: crossMatch.invoice_id,
+            invoice_no: crossMatch.existing_invoice_no,
+            invoice_date: crossMatch.existing_invoice_date,
+            invoice_amount: crossMatch.existing_invoice_amount,
+            vendor_id: crossMatch.existing_vendor_id,
+            vendor_name: crossMatch.existing_vendor_name,
+          },
+        };
+      }
+    }
+  }
+
+  const baseAmount = data.base_amount ?? data.invoice_amount;
+  const cgstPct = data.cgst_pct ?? 0;
+  const sgstPct = data.sgst_pct ?? 0;
+  const igstPct = data.igst_pct ?? 0;
+  const addlCharge = data.additional_charge ?? 0;
+  const addlCgstPct = data.additional_charge_cgst_pct ?? 0;
+  const addlSgstPct = data.additional_charge_sgst_pct ?? 0;
+  const addlIgstPct = data.additional_charge_igst_pct ?? 0;
+  const addlReason = data.additional_charge_reason?.trim() || null;
+
+  if (addlCharge > 0 && !addlReason) {
+    return { ok: false, status: 400, message: 'Reason is required when additional charge is entered' };
+  }
+
+  const seqResult = await queryOne<{ nextval: string }>("SELECT nextval('invoice_internal_seq')");
+  const internalNo = `MKT-${String(seqResult!.nextval).padStart(5, '0')}`;
+
+  const invoice = await queryOne<InvoiceRow>(
+    `INSERT INTO invoices (
+      month, invoice_date, vendor_id, vendor_name, invoice_no, po_number,
+      purpose, site, invoice_amount, base_amount, cgst_pct, sgst_pct, igst_pct,
+      additional_charge, additional_charge_cgst_pct, additional_charge_sgst_pct,
+      additional_charge_igst_pct, additional_charge_reason,
+      remarks, created_by, internal_no
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+              $14, $15, $16, $17, $18, $19, $20, $21)
+    RETURNING *`,
+    [
+      data.month, data.invoice_date, data.vendor_id, data.vendor_name,
+      data.invoice_no, data.po_number ?? null, data.purpose, data.site,
+      data.invoice_amount, baseAmount, cgstPct, sgstPct, igstPct,
+      addlCharge, addlCgstPct, addlSgstPct, addlIgstPct, addlReason,
+      data.remarks ?? null, user.id, internalNo,
+    ]
+  );
+
+  await logAudit({
+    userId: user.id,
+    action: `Created invoice #${data.invoice_no} — ${data.vendor_name} ₹${Number(data.invoice_amount).toLocaleString('en-IN')}`,
+    invoiceId: invoice?.id,
+  });
+
+  return { ok: true, invoice: invoice! };
+}
+
 export async function createInvoice(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const data = createInvoiceSchema.parse(req.body);
-    const { role, id: userId } = req.user!;
-
-    // Snap site name to canonical capitalisation so "Nirvana" and "nirvana"
-    // can't both end up in the invoices table.
-    data.site = normaliseSiteName(data.site);
-
-    // Site accountants can only create invoices for sites they're assigned to.
-    if (role === 'site' && !userHasSite(req.user, data.site)) {
-      res.status(403).json({ error: 'Forbidden', message: 'You can only create invoices for sites you are assigned to' });
+    const result = await insertSingleInvoice(data, req.user!);
+    if (!result.ok) {
+      res.status(result.status).json({
+        error: result.status === 409 ? 'Conflict' : result.status === 403 ? 'Forbidden' : 'Bad Request',
+        ...(result.code ? { code: result.code } : {}),
+        message: result.message,
+        ...(result.existing ? { existing: result.existing } : {}),
+      });
       return;
     }
+    res.status(201).json(result.invoice);
+  } catch (err) {
+    next(err);
+  }
+}
 
-    // Vendor must exist in Vendor Master. Pull the canonical name from the master row
-    // so the denormalized invoice.vendor_name can never drift from vendors.name.
-    const masterVendor = await queryOne<{ id: string; name: string; category: string | null }>(
-      'SELECT id, name, category FROM vendors WHERE id = $1',
-      [data.vendor_id]
+const batchInvoiceSchema = z.object({
+  vendor_id: z.string().uuid('Pick a vendor from Vendor Master'),
+  vendor_name: z.string().min(1).max(500),
+  site: z.string().min(1).max(100),
+  invoices: z.array(createInvoiceSchema).min(1, 'Add at least one invoice').max(100, 'Batch limited to 100 invoices'),
+});
+
+export async function createInvoiceBatch(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const body = batchInvoiceSchema.parse(req.body);
+    const user = req.user!;
+
+    const masterVendor = await queryOne<{ id: string; name: string }>(
+      'SELECT id, name FROM vendors WHERE id = $1',
+      [body.vendor_id]
     );
     if (!masterVendor) {
       res.status(400).json({ error: 'Bad Request', message: 'Selected vendor is not in Vendor Master' });
       return;
     }
-    data.vendor_name = masterVendor.name;
 
-    // Material category must match the vendor's category in Vendor Master.
-    // Vendors with a null/blank category are treated as legacy and skip the check.
-    if (masterVendor.category && masterVendor.category.trim()) {
-      const expected = masterVendor.category.trim().toLowerCase();
-      const actual = data.purpose.trim().toLowerCase();
-      if (expected !== actual) {
-        res.status(400).json({
-          error: 'Bad Request',
-          code: 'category_mismatch',
-          message: `Category "${data.purpose}" does not match vendor "${masterVendor.name}" (Vendor Master: "${masterVendor.category}")`,
+    const site = normaliseSiteName(body.site);
+
+    const results: Array<{
+      index: number;
+      ok: boolean;
+      invoice_id?: string;
+      error?: { code?: string; message: string; existing?: unknown };
+    }> = [];
+
+    let created = 0;
+    let failed = 0;
+
+    for (let i = 0; i < body.invoices.length; i++) {
+      const row = body.invoices[i];
+      const forced: InsertInvoiceData = {
+        ...row,
+        vendor_id: masterVendor.id,
+        vendor_name: masterVendor.name,
+        site,
+      };
+      const result = await insertSingleInvoice(forced, user);
+      if (result.ok) {
+        created++;
+        results.push({ index: i, ok: true, invoice_id: String(result.invoice.id) });
+      } else {
+        failed++;
+        results.push({
+          index: i,
+          ok: false,
+          error: {
+            ...(result.code ? { code: result.code } : {}),
+            message: result.message,
+            ...(result.existing ? { existing: result.existing } : {}),
+          },
         });
-        return;
       }
     }
-
-    // Strict per-vendor invoice number uniqueness — one vendor cannot have two
-    // invoices with the same invoice_no. Match by vendor_id first (canonical),
-    // and fall back to case-insensitive vendor_name to also catch legacy rows
-    // whose vendor_id was never linked. When invoice_no is blank, fall back to
-    // (vendor + amount + date) — the same heuristic the bulk import uses.
-    // No override path: the client cannot force-create a duplicate.
-    const duplicate = data.invoice_no
-      ? await queryOne<{ id: string; invoice_no: string | null; invoice_date: string; invoice_amount: string }>(
-          `SELECT id, invoice_no, invoice_date, invoice_amount FROM invoices
-           WHERE LOWER(TRIM(invoice_no)) = LOWER(TRIM($1))
-             AND (vendor_id = $2 OR (vendor_id IS NULL AND LOWER(TRIM(vendor_name)) = LOWER(TRIM($3))))
-             AND deleted_at IS NULL`,
-          [data.invoice_no, data.vendor_id, data.vendor_name]
-        )
-      : await queryOne<{ id: string; invoice_no: string | null; invoice_date: string; invoice_amount: string }>(
-          `SELECT id, invoice_no, invoice_date, invoice_amount FROM invoices
-           WHERE invoice_no IS NULL
-             AND (vendor_id = $1 OR (vendor_id IS NULL AND LOWER(TRIM(vendor_name)) = LOWER(TRIM($2))))
-             AND invoice_amount = $3
-             AND invoice_date = $4
-             AND deleted_at IS NULL`,
-          [data.vendor_id, data.vendor_name, data.invoice_amount, data.invoice_date]
-        );
-    if (duplicate) {
-      res.status(409).json({
-        error: 'Conflict',
-        code: 'duplicate_invoice',
-        message: data.invoice_no
-          ? `Invoice #${data.invoice_no} already exists for vendor "${data.vendor_name}". Each invoice number must be unique per vendor.`
-          : `An invoice for vendor "${data.vendor_name}" with the same date and amount already exists.`,
-        existing: {
-          id: duplicate.id,
-          invoice_no: duplicate.invoice_no,
-          invoice_date: duplicate.invoice_date,
-          invoice_amount: duplicate.invoice_amount,
-        },
-      });
-      return;
-    }
-
-    // Cross-vendor duplicate check: the same invoice number under a vendor
-    // whose normalised name matches this one (different spellings or suffix
-    // variants — e.g. "ABC Pvt Ltd" vs "ABC Limited"). Catches the case
-    // where the same physical bill is about to be entered under a second
-    // vendor record before the dedup alert is acted on.
-    if (data.invoice_no) {
-      const normTarget = normalizeVendorName(data.vendor_name);
-      if (normTarget) {
-        const candidates = await query<{
-          invoice_id: string;
-          existing_invoice_no: string | null;
-          existing_invoice_date: string;
-          existing_invoice_amount: string;
-          existing_vendor_id: string | null;
-          existing_vendor_name: string;
-        }>(
-          `SELECT i.id AS invoice_id,
-                  i.invoice_no AS existing_invoice_no,
-                  i.invoice_date AS existing_invoice_date,
-                  i.invoice_amount AS existing_invoice_amount,
-                  i.vendor_id AS existing_vendor_id,
-                  COALESCE(v.name, i.vendor_name) AS existing_vendor_name
-           FROM invoices i
-           LEFT JOIN vendors v ON v.id = i.vendor_id
-           WHERE LOWER(TRIM(i.invoice_no)) = LOWER(TRIM($1))
-             AND i.deleted_at IS NULL
-             AND i.vendor_id IS DISTINCT FROM $2`,
-          [data.invoice_no, data.vendor_id]
-        );
-        const crossMatch = candidates.find(
-          c => normalizeVendorName(c.existing_vendor_name) === normTarget
-        );
-        if (crossMatch) {
-          res.status(409).json({
-            error: 'Conflict',
-            code: 'duplicate_invoice_cross_vendor',
-            message: `Invoice #${data.invoice_no} already exists under "${crossMatch.existing_vendor_name}", which appears to be the same vendor as "${data.vendor_name}". Merge the vendors first, or check the invoice number.`,
-            existing: {
-              id: crossMatch.invoice_id,
-              invoice_no: crossMatch.existing_invoice_no,
-              invoice_date: crossMatch.existing_invoice_date,
-              invoice_amount: crossMatch.existing_invoice_amount,
-              vendor_id: crossMatch.existing_vendor_id,
-              vendor_name: crossMatch.existing_vendor_name,
-            },
-          });
-          return;
-        }
-      }
-    }
-
-    // Generate internal tracking number
-    const seqResult = await queryOne<{ nextval: string }>("SELECT nextval('invoice_internal_seq')");
-    const internalNo = `MKT-${String(seqResult!.nextval).padStart(5, '0')}`;
-
-    // Default the tax split when the caller didn't supply one (legacy/import paths)
-    const baseAmount = data.base_amount ?? data.invoice_amount;
-    const cgstPct = data.cgst_pct ?? 0;
-    const sgstPct = data.sgst_pct ?? 0;
-    const igstPct = data.igst_pct ?? 0;
-    const addlCharge = data.additional_charge ?? 0;
-    const addlCgstPct = data.additional_charge_cgst_pct ?? 0;
-    const addlSgstPct = data.additional_charge_sgst_pct ?? 0;
-    const addlIgstPct = data.additional_charge_igst_pct ?? 0;
-    const addlReason = data.additional_charge_reason?.trim() || null;
-
-    // Reason is mandatory when additional charge > 0 (agreed business rule)
-    if (addlCharge > 0 && !addlReason) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'Reason is required when additional charge is entered',
-      });
-      return;
-    }
-
-    const invoice = await queryOne<InvoiceRow>(
-      `INSERT INTO invoices (
-        month, invoice_date, vendor_id, vendor_name, invoice_no, po_number,
-        purpose, site, invoice_amount, base_amount, cgst_pct, sgst_pct, igst_pct,
-        additional_charge, additional_charge_cgst_pct, additional_charge_sgst_pct,
-        additional_charge_igst_pct, additional_charge_reason,
-        remarks, created_by, internal_no
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                $14, $15, $16, $17, $18, $19, $20, $21)
-      RETURNING *`,
-      [
-        data.month, data.invoice_date, data.vendor_id, data.vendor_name,
-        data.invoice_no, data.po_number ?? null, data.purpose, data.site,
-        data.invoice_amount, baseAmount, cgstPct, sgstPct, igstPct,
-        addlCharge, addlCgstPct, addlSgstPct, addlIgstPct, addlReason,
-        data.remarks ?? null, userId, internalNo,
-      ]
-    );
 
     await logAudit({
-      userId,
-      action: `Created invoice #${data.invoice_no} — ${data.vendor_name} ₹${Number(data.invoice_amount).toLocaleString('en-IN')}`,
-      invoiceId: invoice?.id,
+      userId: user.id,
+      action: `Batch-created ${created}/${body.invoices.length} invoices for ${masterVendor.name}${failed ? ` — ${failed} failed` : ''}`,
     });
 
-    res.status(201).json(invoice);
+    res.status(200).json({ created, failed, results });
   } catch (err) {
     next(err);
   }

@@ -12,6 +12,31 @@ export function createInvoice(data: CreateInvoiceData): Promise<Invoice> {
   });
 }
 
+export interface BatchInvoiceResult {
+  index: number;
+  ok: boolean;
+  invoice_id?: string;
+  error?: { code?: string; message: string; existing?: unknown };
+}
+
+export interface BatchInvoiceResponse {
+  created: number;
+  failed: number;
+  results: BatchInvoiceResult[];
+}
+
+export function createInvoiceBatch(body: {
+  vendor_id: string;
+  vendor_name: string;
+  site: string;
+  invoices: CreateInvoiceData[];
+}): Promise<BatchInvoiceResponse> {
+  return apiFetch<BatchInvoiceResponse>('/invoices/batch', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export function updateInvoice(id: string, data: Partial<CreateInvoiceData>): Promise<Invoice> {
   return apiFetch<Invoice>(`/invoices/${id}`, {
     method: 'PATCH',

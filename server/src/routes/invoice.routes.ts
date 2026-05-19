@@ -8,6 +8,7 @@ import { requireRole } from '../middleware/rbac';
 import {
   getInvoices,
   createInvoice,
+  createInvoiceBatch,
   updateInvoice,
   pushInvoice,
   bulkPushInvoices,
@@ -33,6 +34,7 @@ router.post('/bin/purge', requireRole(['mgmt']), purgeOldBinInvoices);
 router.post('/bin/:id/restore', requireRole(['ho']), restoreInvoice);
 router.delete('/bin/:id', requireRole(['mgmt']), permanentDeleteInvoice);
 router.post('/', requireRole(['ho', 'site']), createInvoice);
+router.post('/batch', requireRole(['ho']), createInvoiceBatch);
 router.post('/bulk-finalize', requireRole(['ho']), bulkPushInvoices);
 router.post('/bulk-delete', requireRole(['ho']), bulkDeleteInvoices);
 router.post('/recompute-statuses', requireRole(['ho']), recomputeAllStatuses);
