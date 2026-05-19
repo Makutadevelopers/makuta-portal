@@ -332,6 +332,35 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
     }
   }
 
+  // Validate payment metadata for Paid/Partial rows. Previously a missing or
+  // unparseable Payment Date silently inherited the invoice_date, and a
+  // missing Payment Type was silently stored as the literal string "Import".
+  // Both produced data that looked plausible in reports but was wrong, so we
+  // now reject these rows up-front in the preview rather than coercing them.
+  const ALLOWED_PAYMENT_TYPES = ['Cash', 'Cheque', 'NEFT', 'RTGS', 'IMPS', 'UPI'];
+  let normalizedPaymentType = paymentType.trim();
+  if (normalizedStatus === 'paid' || normalizedStatus === 'partial') {
+    if (!paymentDateRaw.trim()) {
+      return { skip: true, reason: `${paymentStatus} row is missing Payment Date` };
+    }
+    if (!parsedPaymentDate) {
+      return { skip: true, reason: `unparseable Payment Date "${paymentDateRaw}"` };
+    }
+    if (!normalizedPaymentType) {
+      return { skip: true, reason: `${paymentStatus} row is missing Payment Type (Cash/Cheque/NEFT/RTGS/IMPS/UPI)` };
+    }
+    const matchedType = ALLOWED_PAYMENT_TYPES.find(t => t.toLowerCase() === normalizedPaymentType.toLowerCase());
+    if (!matchedType) {
+      return { skip: true, reason: `invalid Payment Type "${paymentType}" — expected one of ${ALLOWED_PAYMENT_TYPES.join(', ')}` };
+    }
+    normalizedPaymentType = matchedType;
+    // Non-Cash payments need a reference (cheque no / UTR) so bank
+    // reconciliation has something to match against.
+    if (matchedType !== 'Cash' && !paymentRef.trim()) {
+      return { skip: true, reason: `${matchedType} payment requires Payment Details (cheque no or UTR)` };
+    }
+  }
+
   return {
     rowNum,
     month: monthDate,
@@ -354,11 +383,11 @@ function normalizeInvoiceRow(row: CsvRow, rowNum: number): NormalizedRow | { ski
     remarks,
     paymentStatus,
     paidAmount,
-    paymentType,
+    paymentType: normalizedPaymentType,
     paymentRef,
     paymentDate: parsedPaymentDate,
     paymentBank,
-    paymentMonth: parsedPaymentMonth || monthDate,
+    paymentMonth: parsedPaymentMonth || (parsedPaymentDate ? `${parsedPaymentDate.slice(0, 7)}-01` : monthDate),
   };
 }
 
@@ -654,6 +683,13 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
                 [r.paidAmount, bankTxnId]
               );
             } else {
+              if (!r.paymentDate) {
+                // Defensive: normalizeInvoiceRow rejects Paid/Partial rows
+                // without a parseable Payment Date, so we should never reach
+                // this branch — but if we do, fail loudly rather than silently
+                // backdating the bank transaction to the invoice date.
+                throw new Error('payment_date is required for bank transactions');
+              }
               const newTxn = await queryOne<{ id: string }>(
                 `INSERT INTO bank_transactions (txn_type, txn_ref, txn_amount, txn_date, bank, remarks, created_by)
                  VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
@@ -661,7 +697,7 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
                   r.paymentType,
                   r.paymentRef,
                   r.paidAmount,
-                  r.paymentDate || r.invoiceDate,
+                  r.paymentDate,
                   r.paymentBank || '',
                   `Imported batch ${batchId.slice(0, 8)}`,
                   req.user!.id,
@@ -671,15 +707,18 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
             }
           }
 
+          if (!r.paymentDate || !r.paymentType) {
+            throw new Error('payment_date and payment_type are required for Paid/Partial rows');
+          }
           await queryOne(
             `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, payment_month, bank_txn_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
             [
               insertedInvoice.id,
               r.paidAmount,
-              r.paymentType || 'Import',
-              r.paymentRef || `IMPORT-${batchId.slice(0, 8)}`,
-              r.paymentDate || r.invoiceDate,
+              r.paymentType,
+              r.paymentRef || null,
+              r.paymentDate,
               r.paymentBank || null,
               req.user!.id,
               r.paymentMonth,
@@ -818,13 +857,16 @@ export async function importPayments(req: Request, res: Response, next: NextFunc
         const purpose = row['purpose'] || row['Purpose'] || row['Head'] || row['Category'] || '';
         const site = normaliseSiteName(row['site'] || row['Site'] || row['Site Location'] || '');
 
-        // Parse dates robustly
-        const paymentDate = parseDate(rawPaymentDate) || parseDate(rawInvoiceDate) || new Date().toISOString().split('T')[0];
+        // Parse dates strictly — previously a missing or unparseable Payment
+        // Date silently fell back to the invoice_date (and then to today),
+        // which corrupted aging/cashflow for any row whose source spreadsheet
+        // had a misaligned Payment Date column. We now reject those rows.
+        const paymentDate = parseDate(rawPaymentDate);
         const invoiceDate = parseDate(rawInvoiceDate) || paymentDate;
         // Use the Month column as-is (accounting month), fall back to invoice_date month
         const parsedMonth = parseMonthColumn(rawMonth);
         const monthDate = parsedMonth
-          || (invoiceDate ? `${invoiceDate.slice(0, 7)}-01` : invoiceDate);
+          || (invoiceDate ? `${invoiceDate.slice(0, 7)}-01` : null);
 
         // Skip completely empty rows
         if (!invoiceNo && !vendorName && !amountStr.replace(/[₹,\s0]/g, '')) {
@@ -834,6 +876,12 @@ export async function importPayments(req: Request, res: Response, next: NextFunc
 
         const amount = parseFloat(String(amountStr).replace(/[₹,\s]/g, '') || '0');
         if (isNaN(amount) || amount <= 0) {
+          skipped++;
+          continue;
+        }
+
+        if (!invoiceDate || !monthDate) {
+          errors.push(`Row ${rowNum}: could not parse Invoice date "${rawInvoiceDate}" or Payment Date "${rawPaymentDate}"`);
           skipped++;
           continue;
         }
@@ -894,6 +942,26 @@ export async function importPayments(req: Request, res: Response, next: NextFunc
 
         // Only insert a payment record if row has actual payment data
         if (hasPaymentData) {
+          if (!paymentDate) {
+            errors.push(`Row ${rowNum}: Payment Date is required and could not be parsed from "${rawPaymentDate}"`);
+            skipped++;
+            continue;
+          }
+          const ALLOWED_PAYMENT_TYPES = ['Cash', 'Cheque', 'NEFT', 'RTGS', 'IMPS', 'UPI'];
+          const matchedType = paymentType
+            ? ALLOWED_PAYMENT_TYPES.find(t => t.toLowerCase() === paymentType.trim().toLowerCase())
+            : undefined;
+          if (paymentType && !matchedType) {
+            errors.push(`Row ${rowNum}: invalid Payment Type "${paymentType}" — expected one of ${ALLOWED_PAYMENT_TYPES.join(', ')}`);
+            skipped++;
+            continue;
+          }
+          if (!matchedType) {
+            errors.push(`Row ${rowNum}: Payment Type is required (Cash/Cheque/NEFT/RTGS/IMPS/UPI)`);
+            skipped++;
+            continue;
+          }
+
           // Duplicate payment check: same invoice, amount, date, and ref
           const existingPayment = await queryOne<{ id: string }>(
             `SELECT id FROM payments WHERE invoice_id = $1 AND amount = $2 AND payment_date = $3
@@ -908,8 +976,8 @@ export async function importPayments(req: Request, res: Response, next: NextFunc
           await queryOne(
             `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, batch_id, payment_month)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [invoice.id, amount, paymentType || 'NEFT', paymentRef || null, paymentDate, bank || null, req.user!.id, batchId,
-             parseMonthColumn(rawPaymentMonth) || monthDate]
+            [invoice.id, amount, matchedType, paymentRef || null, paymentDate, bank || null, req.user!.id, batchId,
+             parseMonthColumn(rawPaymentMonth) || `${paymentDate.slice(0, 7)}-01`]
           );
 
           // Recompute status (accounting for CN allocations)

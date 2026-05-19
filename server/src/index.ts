@@ -29,6 +29,7 @@ import creditNoteRoutes from './routes/credit-note.routes';
 import creditNoteAttachmentRoutes from './routes/credit-note-attachment.routes';
 import categoriesRoutes from './routes/categories.routes';
 import banksRoutes from './routes/banks.routes';
+import adminRoutes from './routes/admin.routes';
 import cron from 'node-cron';
 
 console.log('Imported routes:', { authRoutes, vendorRoutes });
@@ -106,6 +107,7 @@ app.use('/api/credit-notes/:id/attachments', creditNoteAttachmentRoutes);
 app.use('/api/credit-notes', creditNoteRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/banks', banksRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/cron', cronRoutes);
 
 // Error handler (must be after all routes)
