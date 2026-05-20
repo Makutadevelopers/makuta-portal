@@ -67,8 +67,10 @@ export default function VendorMaster() {
   // double-counted. Invoices with no vendor_id are "unmastered" — they're
   // surfaced in the banner below, not aggregated into any master here.
   const vendorStats = new Map<string, number>();
+  const vendorInvoiceCount = new Map<string, number>();
   for (const inv of invoices) {
     if (!inv.vendor_id) continue;
+    vendorInvoiceCount.set(inv.vendor_id, (vendorInvoiceCount.get(inv.vendor_id) ?? 0) + 1);
     const bal = Number(inv.balance ?? 0);
     if (bal > 0) {
       vendorStats.set(inv.vendor_id, (vendorStats.get(inv.vendor_id) ?? 0) + bal);
@@ -230,10 +232,10 @@ export default function VendorMaster() {
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
-                {['Vendor Name', 'Category', 'Terms', 'GSTIN', 'Contact', 'Phone', 'Email', 'Notes', ''].map(h => (
+                {['Vendor Name', 'Category', 'Terms', 'Invoices', 'Outstanding', ''].map(h => (
                   <th
                     key={h}
-                    className={`px-4 py-2.5 font-medium text-gray-500 bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Terms' ? 'text-center' : 'text-left'}`}
+                    className={`px-4 py-2.5 font-medium text-gray-500 bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Terms' ? 'text-center' : h === 'Invoices' || h === 'Outstanding' ? 'text-right' : 'text-left'}`}
                   >
                     {h}
                   </th>
@@ -243,15 +245,13 @@ export default function VendorMaster() {
             <tbody>
               {filtered.map(v => {
                 const outstanding = vendorStats.get(v.id);
+                const invoiceCount = vendorInvoiceCount.get(v.id) ?? 0;
                 const isExpanded = expandedEditId === v.id;
                 return (
                   <Fragment key={v.id}>
                     <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${isExpanded ? 'bg-blue-50/40' : ''}`}>
                       <td className="px-4 py-3">
                         <Link to={`/vendors/${v.id}`} className="font-medium text-blue-700 hover:underline">{highlight(v.name, search)}</Link>
-                        {outstanding && outstanding > 0 && (
-                          <div className="text-[11px] text-red-500 mt-0.5">{formatINR(outstanding)} outstanding</div>
-                        )}
                       </td>
                       <td className="px-4 py-3 text-gray-600">{v.category ?? <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-center">
@@ -281,11 +281,14 @@ export default function VendorMaster() {
                           </button>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600">{v.gstin ?? <span className="text-gray-300 font-sans">—</span>}</td>
-                      <td className="px-4 py-3 text-gray-700">{v.contact_name ?? <span className="text-gray-300">—</span>}</td>
-                      <td className="px-4 py-3 text-gray-600">{v.phone ?? <span className="text-gray-300">—</span>}</td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">{v.email ?? <span className="text-gray-300">—</span>}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs max-w-[140px] truncate" title={v.notes ?? ''}>{v.notes || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-gray-700">
+                        {invoiceCount > 0 ? invoiceCount : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums">
+                        {outstanding && outstanding > 0
+                          ? <span className="font-medium text-red-600">{formatINR(outstanding)}</span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-4 py-3">
                         {/* Visual hierarchy: Edit is the primary row action
                             (most frequent), Merge is secondary, Delete is
@@ -330,7 +333,7 @@ export default function VendorMaster() {
                     </tr>
                     {isExpanded && (
                       <tr className="border-t border-blue-100 bg-blue-50/30">
-                        <td colSpan={9} className="px-2 py-4">
+                        <td colSpan={6} className="px-2 py-4">
                           <VendorForm
                             key={`edit-${v.id}`}
                             vendor={v}
@@ -350,7 +353,7 @@ export default function VendorMaster() {
                 );
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400 text-sm">No vendors found.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400 text-sm">No vendors found.</td></tr>
               )}
             </tbody>
           </table>
