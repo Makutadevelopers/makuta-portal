@@ -246,10 +246,10 @@ router.get('/import-audit', requireRole(['ho']), async (_req: Request, res: Resp
       LIMIT 40`);
 
     const p7_flagged_bank_values = await query(`
-      SELECT bank, COUNT(*) AS cnt
-      FROM payments
+      SELECT p.bank, COUNT(*) AS cnt
+      FROM payments p
       WHERE ${BANK_MONTH}
-      GROUP BY bank ORDER BY cnt DESC LIMIT 40`);
+      GROUP BY p.bank ORDER BY cnt DESC LIMIT 40`);
 
     res.json({
       generated_at: new Date().toISOString(),
