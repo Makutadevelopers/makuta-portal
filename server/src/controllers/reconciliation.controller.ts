@@ -215,13 +215,20 @@ export async function listReconciliation(req: Request, res: Response, next: Next
       const allocations = allocMap[t.id] ?? [];
       const allocatedTotal = Number(t.allocated_total);
       const txnAmount = Number(t.txn_amount);
+      // Cheque vs allocated can differ by a few paise because the old importer
+      // wrote paise-rounded payment splits. Treat anything under ₹1 as tallied —
+      // the same tolerance bulkPay() enforces when a cheque is created. Without
+      // this, a ₹0.40 rounding gap surfaced as "Mismatch" even though the page
+      // (which displays whole rupees) showed the balance as ₹0.
+      const rawBalance = Number((txnAmount - allocatedTotal).toFixed(2));
+      const balance = Object.is(rawBalance, -0) ? 0 : rawBalance;
       return {
         ...t,
         txn_amount: txnAmount,
         allocated_total: allocatedTotal,
         allocation_count: Number(t.allocation_count),
-        balance: Number((txnAmount - allocatedTotal).toFixed(2)),
-        tally_ok: Math.abs(txnAmount - allocatedTotal) < 0.01,
+        balance,
+        tally_ok: Math.abs(rawBalance) < 1,
         allocations: allocations.map(a => ({
           ...a,
           invoice_amount: Number(a.invoice_amount),

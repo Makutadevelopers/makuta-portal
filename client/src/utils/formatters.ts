@@ -19,7 +19,9 @@ const inrPaisaFormatter = new Intl.NumberFormat('en-IN', {
 
 /** Format a number as ₹X,XX,XXX (en-IN locale, rounded to nearest rupee). */
 export function formatINR(value: number): string {
-  return inrFormatter.format(Math.round(value));
+  const rounded = Math.round(value);
+  // Math.round(-0.4) yields -0, which Intl renders as "-₹0". Normalise to 0.
+  return inrFormatter.format(rounded === 0 ? 0 : rounded);
 }
 
 /** Format with paisa preserved — only for line-item/breakdown contexts. */
