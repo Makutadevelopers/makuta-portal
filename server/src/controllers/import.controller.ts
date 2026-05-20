@@ -1279,9 +1279,16 @@ export async function undoBatchImport(req: Request, res: Response, next: NextFun
   try {
     const { batchId } = req.params;
 
-    // Count what will be deleted
+    // Count what will be deleted. Payments come from two import paths: the
+    // payments-only importer stamps batch_id, but the invoice importer creates
+    // payments tied to the batch's invoices via invoice_id and leaves batch_id
+    // NULL — count both, or the audit/response under-reports (it logged
+    // "0 payments" while silently orphaning their bank_transactions).
     const paymentCount = await queryOne<{ count: string }>(
-      "SELECT COUNT(*)::TEXT AS count FROM payments WHERE batch_id = $1", [batchId]
+      `SELECT COUNT(*)::TEXT AS count FROM payments
+       WHERE batch_id = $1
+          OR invoice_id IN (SELECT id FROM invoices WHERE batch_id = $1)`,
+      [batchId]
     );
     const invoiceCount = await queryOne<{ count: string }>(
       "SELECT COUNT(*)::TEXT AS count FROM invoices WHERE batch_id = $1", [batchId]
@@ -1306,14 +1313,24 @@ export async function undoBatchImport(req: Request, res: Response, next: NextFun
     // invoices from a DIFFERENT batch (e.g. a payments-only import targeting
     // existing invoices), which would otherwise stay stuck on a stale status.
     const affectedRows = await query<{ invoice_id: string; bank_txn_id: string | null }>(
-      'SELECT DISTINCT invoice_id, bank_txn_id FROM payments WHERE batch_id = $1',
+      `SELECT DISTINCT invoice_id, bank_txn_id FROM payments
+       WHERE batch_id = $1
+          OR invoice_id IN (SELECT id FROM invoices WHERE batch_id = $1)`,
       [batchId]
     );
     const affectedInvoiceIds = Array.from(new Set(affectedRows.map(r => r.invoice_id)));
     const affectedBankTxnIds = Array.from(new Set(affectedRows.map(r => r.bank_txn_id).filter((v): v is string => v !== null)));
 
-    // Delete in order: payments → attachments → invoices → vendors
-    await query('DELETE FROM payments WHERE batch_id = $1', [batchId]);
+    // Delete in order: payments → attachments → invoices → vendors.
+    // Cover both payment sources (batch_id OR linked to a batch invoice) so the
+    // bank_transactions prune below sees them gone and can drop the now-orphaned
+    // cheque/NEFT rows the import created.
+    await query(
+      `DELETE FROM payments
+       WHERE batch_id = $1
+          OR invoice_id IN (SELECT id FROM invoices WHERE batch_id = $1)`,
+      [batchId]
+    );
     await query('DELETE FROM attachments WHERE invoice_id IN (SELECT id FROM invoices WHERE batch_id = $1)', [batchId]);
     await query('DELETE FROM invoices WHERE batch_id = $1', [batchId]);
     await query('DELETE FROM vendors WHERE batch_id = $1', [batchId]);
@@ -1335,6 +1352,19 @@ export async function undoBatchImport(req: Request, res: Response, next: NextFun
         `DELETE FROM bank_transactions
          WHERE id = ANY($1)
            AND NOT EXISTS (SELECT 1 FROM payments WHERE bank_txn_id = bank_transactions.id)`,
+        [affectedBankTxnIds]
+      );
+
+      // Re-sum any affected cheque that survived the prune (it still has
+      // payments from another batch). The importer's "reuse existing cheque"
+      // path inflated txn_amount by this batch's paidAmount; undo it so the
+      // tally invariant (txn_amount == Σ linked payments) holds.
+      await query(
+        `UPDATE bank_transactions bt
+         SET txn_amount = s.total
+         FROM (SELECT bank_txn_id AS id, SUM(amount) AS total
+               FROM payments WHERE bank_txn_id = ANY($1) GROUP BY bank_txn_id) s
+         WHERE bt.id = s.id`,
         [affectedBankTxnIds]
       );
     }
