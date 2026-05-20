@@ -106,6 +106,16 @@ const AGG_FIELDS = `
   ps.last_paid_date
 `;
 
+// Outstanding balance (invoice_amount − cash paid − TDS withheld). Identical
+// to the expression baked into SITE_PROJECTION. The ho/mgmt branches select
+// inv.* (which can't contain this computed column), so it must be added
+// explicitly there or inv.balance comes back undefined — which silently broke
+// the Vendor Master Outstanding column. Can't fold into AGG_FIELDS: site rows
+// already get balance via SITE_PROJECTION and would collide on the name.
+const HO_BALANCE_FIELD = `
+  (inv.invoice_amount - COALESCE(ps.paid_sum, 0))::NUMERIC(14,2) AS balance
+`;
+
 interface InvoiceRow {
   id: string;
   [key: string]: unknown;
@@ -140,7 +150,7 @@ export async function getInvoices(req: Request, res: Response, next: NextFunctio
     } else {
       // ho + mgmt: all invoices, full data
       const invoices = await query<InvoiceRow>(
-        `SELECT inv.*, ${AGG_FIELDS}
+        `SELECT inv.*, ${HO_BALANCE_FIELD}, ${AGG_FIELDS}
          FROM invoices inv
          ${AGG_JOINS}
          WHERE inv.deleted_at IS NULL
@@ -178,7 +188,7 @@ export async function getInvoiceById(req: Request, res: Response, next: NextFunc
       );
     } else {
       invoice = await queryOne<InvoiceRow>(
-        `SELECT inv.*, ${AGG_FIELDS}
+        `SELECT inv.*, ${HO_BALANCE_FIELD}, ${AGG_FIELDS}
          FROM invoices inv
          ${AGG_JOINS}
          WHERE inv.id = $1 AND inv.deleted_at IS NULL`,
