@@ -12,6 +12,7 @@ import Dashboard from './pages/ho/Dashboard';
 import InvoiceList from './pages/ho/InvoiceList';
 import PaymentAging from './pages/ho/PaymentAging';
 import CashflowPage from './pages/ho/CashflowPage';
+import Analytics from './pages/ho/Analytics';
 import VendorMaster from './pages/ho/VendorMaster';
 import VendorDetail from './pages/ho/VendorDetail';
 import BankMaster from './pages/ho/BankMaster';
@@ -78,6 +79,7 @@ export default function AppRouter() {
         <Route path="/invoices" element={<ProtectedRoute allowed={['ho']}><InvoiceList /></ProtectedRoute>} />
         <Route path="/payment-aging" element={<ProtectedRoute allowed={['ho']}><PaymentAging /></ProtectedRoute>} />
         <Route path="/cashflow" element={<ProtectedRoute allowed={['ho']}><CashflowPage /></ProtectedRoute>} />
+        <Route path="/analytics" element={<ProtectedRoute allowed={['ho', 'mgmt']}><Analytics /></ProtectedRoute>} />
         <Route path="/vendors" element={<ProtectedRoute allowed={['ho', 'site']}><VendorMaster /></ProtectedRoute>} />
         <Route path="/vendors/:id" element={<ProtectedRoute allowed={['ho', 'mgmt', 'site']}><VendorDetail /></ProtectedRoute>} />
         <Route path="/audit" element={<ProtectedRoute allowed={['ho', 'mgmt']}><AuditTrail /></ProtectedRoute>} />
