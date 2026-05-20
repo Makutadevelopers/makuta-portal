@@ -40,25 +40,31 @@ WHERE p.bank_txn_id IS NULL
 ON CONFLICT (payment_id) DO NOTHING;
 
 -- 1. Create a bank_transactions row for each orphan group that has no existing
---    matching cheque (same type + ref + bank + date).
+--    matching cheque (same type + ref + bank + date). The group is materialised
+--    in a CTE first so the existence check references plain output columns —
+--    a correlated subquery in HAVING cannot see the btrim(payment_ref) grouping
+--    expression (Postgres error 42803).
+WITH orphan_grp AS (
+  SELECT p.payment_type            AS txn_type,
+         btrim(p.payment_ref)      AS txn_ref,
+         p.bank                    AS bank,
+         p.payment_date            AS txn_date,
+         SUM(p.amount)             AS total,
+         (ARRAY_AGG(p.recorded_by))[1] AS created_by
+  FROM payments p
+  JOIN payments_bank_txn_backfill_043 b ON b.payment_id = p.id
+  WHERE p.bank_txn_id IS NULL
+  GROUP BY p.payment_type, btrim(p.payment_ref), p.bank, p.payment_date
+)
 INSERT INTO bank_transactions (txn_type, txn_ref, txn_amount, txn_date, bank, remarks, created_by)
-SELECT p.payment_type,
-       btrim(p.payment_ref),
-       SUM(p.amount),
-       p.payment_date,
-       p.bank,
-       'Backfill 043',
-       (ARRAY_AGG(p.recorded_by))[1]
-FROM payments p
-JOIN payments_bank_txn_backfill_043 b ON b.payment_id = p.id
-WHERE p.bank_txn_id IS NULL
-GROUP BY p.payment_type, btrim(p.payment_ref), p.bank, p.payment_date
-HAVING NOT EXISTS (
+SELECT g.txn_type, g.txn_ref, g.total, g.txn_date, g.bank, 'Backfill 043', g.created_by
+FROM orphan_grp g
+WHERE NOT EXISTS (
   SELECT 1 FROM bank_transactions bt
-  WHERE bt.txn_type = p.payment_type
-    AND bt.txn_ref  = btrim(p.payment_ref)
-    AND bt.bank IS NOT DISTINCT FROM p.bank
-    AND bt.txn_date = p.payment_date
+  WHERE bt.txn_type = g.txn_type
+    AND bt.txn_ref  = g.txn_ref
+    AND bt.bank IS NOT DISTINCT FROM g.bank
+    AND bt.txn_date = g.txn_date
 );
 
 -- 2. Link every orphan payment to its matching cheque (existing or just made).
