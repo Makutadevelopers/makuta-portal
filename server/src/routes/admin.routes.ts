@@ -165,8 +165,70 @@ router.get('/import-audit', requireRole(['ho']), async (_req: Request, res: Resp
       WHERE batch_id = '90209c92-5c25-4ddc-8cd1-e01e36ff9610'
     `);
 
+    // ── Payment-level column-shift counts (d1 misses these because the main
+    //    import path never sets payments.batch_id, and d2 requires
+    //    payment_date = invoice_date). Measure ref/bank/type directly. ──────
+    const VALID_METHODS = `('cash','cheque','neft','rtgs','imps','upi')`;
+    const REF_DATE = `(p.payment_ref ~ '^\\s*\\d{1,2}[-/][A-Za-z]{3}[-/]\\d{2,4}\\s*$'
+                       OR p.payment_ref ~ '^\\s*\\d{1,2}[-/]\\d{1,2}[-/]\\d{2,4}\\s*$'
+                       OR p.payment_ref ~ '^\\s*\\d{4}-\\d{2}-\\d{2}\\s*$')`;
+    const BANK_MONTH = `(p.bank ~ '^\\s*[A-Za-z]{3,}[- ]?\\d{2,4}\\s*$')`;
+    const TYPE_BAD = `(lower(trim(COALESCE(p.payment_type,''))) NOT IN ${VALID_METHODS})`;
+
+    const p1_payment_fingerprint = await query(`
+      SELECT
+        COUNT(*)                                  AS total_payments,
+        COUNT(*) FILTER (WHERE ${REF_DATE})       AS ref_is_date,
+        COUNT(*) FILTER (WHERE ${BANK_MONTH})     AS bank_is_month,
+        COUNT(*) FILTER (WHERE ${TYPE_BAD})       AS type_not_a_method,
+        COUNT(*) FILTER (WHERE lower(COALESCE(p.payment_type,'')) <> 'cash'
+                            AND NULLIF(trim(p.payment_ref), '') IS NULL) AS bank_no_ref,
+        COUNT(*) FILTER (WHERE ${REF_DATE} OR ${BANK_MONTH} OR ${TYPE_BAD}) AS any_shift
+      FROM payments p`);
+
+    const p2_payment_by_batch = await query(`
+      SELECT i.batch_id,
+        COUNT(*)                              AS payments,
+        COUNT(*) FILTER (WHERE ${REF_DATE})   AS ref_is_date,
+        COUNT(*) FILTER (WHERE ${BANK_MONTH}) AS bank_is_month,
+        COUNT(*) FILTER (WHERE ${TYPE_BAD})   AS type_not_a_method,
+        MIN(p.created_at)::date               AS first_created
+      FROM payments p JOIN invoices i ON i.id = p.invoice_id
+      GROUP BY i.batch_id
+      HAVING COUNT(*) FILTER (WHERE ${REF_DATE} OR ${BANK_MONTH} OR ${TYPE_BAD}) > 0
+      ORDER BY ref_is_date DESC`);
+
+    const p3_bank_txn_fingerprint = await query(`
+      SELECT
+        COUNT(*)                                                                    AS total_txns,
+        COUNT(*) FILTER (WHERE lower(trim(COALESCE(txn_type,''))) NOT IN ${VALID_METHODS}) AS type_not_a_method,
+        COUNT(*) FILTER (WHERE txn_ref ~ '^\\s*\\d{1,2}[-/][A-Za-z]{3}[-/]\\d{2,4}\\s*$'
+                            OR txn_ref ~ '^\\s*\\d{1,2}[-/]\\d{1,2}[-/]\\d{2,4}\\s*$') AS ref_is_date,
+        COUNT(*) FILTER (WHERE bank ~ '^\\s*[A-Za-z]{3,}[- ]?\\d{2,4}\\s*$')          AS bank_is_month,
+        COUNT(*) FILTER (WHERE bank IS NULL OR trim(bank) = '')                       AS bank_missing
+      FROM bank_transactions`);
+
+    const p4_orphan_dupes = await query(`
+      WITH bt_alloc AS (
+        SELECT bt.id, bt.txn_amount, COUNT(p.id) AS pay_count
+        FROM bank_transactions bt LEFT JOIN payments p ON p.bank_txn_id = bt.id
+        GROUP BY bt.id
+      )
+      SELECT
+        COUNT(*) FILTER (WHERE pay_count = 0)  AS orphan_txns,
+        COUNT(*) FILTER (WHERE pay_count > 0)  AS linked_txns,
+        COUNT(*) FILTER (WHERE pay_count = 0 AND EXISTS (
+          SELECT 1 FROM bt_alloc s
+          WHERE s.id <> bt_alloc.id AND s.txn_amount = bt_alloc.txn_amount AND s.pay_count > 0
+        )) AS orphan_with_linked_same_amount_sibling
+      FROM bt_alloc`);
+
     res.json({
       generated_at: new Date().toISOString(),
+      p1_payment_fingerprint: p1_payment_fingerprint[0],
+      p2_payment_by_batch,
+      p3_bank_txn_fingerprint: p3_bank_txn_fingerprint[0],
+      p4_orphan_dupes: p4_orphan_dupes[0],
       d1_per_batch_fingerprint: d1,
       d2_f1_rows: {
         total_count: d2_count[0]?.count ?? '0',
