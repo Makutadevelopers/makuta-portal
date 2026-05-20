@@ -4,7 +4,7 @@ import { useVendors } from '../../hooks/useVendors';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useAuth } from '../../hooks/useAuth';
 import {
-  createVendor, updateVendor, deleteVendor, getSimilarVendors,
+  createVendor, updateVendor, getSimilarVendors,
   mergeVendors as mergeVendorsApi,
 } from '../../api/vendors';
 import { formatINR } from '../../utils/formatters';
@@ -15,7 +15,6 @@ import BulkImportModal from '../../components/shared/BulkImportModal';
 import { useToast } from '../../context/ToastContext';
 import { highlight } from '../../utils/searchHighlight';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
-import { useConfirm } from '../../components/ui/ConfirmDialog';
 
 const TERM_OPTIONS = [7, 10, 14, 15, 21, 30, 45, 60, 75, 90];
 
@@ -40,7 +39,6 @@ export default function VendorMaster() {
   const [savingTermsId, setSavingTermsId] = useState<string | null>(null);
   const [mergeFrom, setMergeFrom] = useState<Vendor | null>(null);
   const { notify } = useToast();
-  const { confirm, dialog: confirmDialog } = useConfirm();
 
   async function handleQuickTermsChange(v: Vendor, newTerms: number) {
     if (newTerms === v.payment_terms) {
@@ -107,27 +105,8 @@ export default function VendorMaster() {
     return 'bg-gray-50 text-gray-600 border-gray-200';
   }
 
-  async function handleDelete(v: Vendor) {
-    const ok = await confirm({
-      title: `Delete vendor "${v.name}"?`,
-      message: 'Invoices for this vendor will default to 30-day terms.',
-      confirmLabel: 'Delete vendor',
-      variant: 'danger',
-    });
-    if (!ok) return;
-    try {
-      await deleteVendor(v.id);
-      notify(`${v.name} removed`, 'error');
-      refresh();
-      refreshInvoices();
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Delete failed', 'error');
-    }
-  }
-
   return (
     <AppShell>
-      {confirmDialog}
       <div
         ref={stickyHeaderRef}
         className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-1 mb-4"
@@ -290,10 +269,9 @@ export default function VendorMaster() {
                           : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-4 py-3">
-                        {/* Visual hierarchy: Edit is the primary row action
-                            (most frequent), Merge is secondary, Delete is
-                            destructive and pushed to the right with a soft
-                            divider so it's harder to mis-click. */}
+                        {/* Edit is the primary row action; Merge is secondary.
+                            Vendors are never deleted from here — consolidate
+                            duplicates via Merge instead. */}
                         <div className="flex items-center gap-1">
                           {canManage(v) && (
                             <button
@@ -310,24 +288,6 @@ export default function VendorMaster() {
                           >
                             Merge
                           </button>
-                          {canManage(v) && (
-                            <>
-                              <span className="mx-1 h-4 w-px bg-gray-200" aria-hidden />
-                              <button
-                                onClick={() => handleDelete(v)}
-                                className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                                title={`Delete ${v.name}`}
-                                aria-label={`Delete ${v.name}`}
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <polyline points="3 6 5 6 21 6" />
-                                  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                                  <path d="M10 11v6M14 11v6" />
-                                  <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                                </svg>
-                              </button>
-                            </>
-                          )}
                         </div>
                       </td>
                     </tr>
