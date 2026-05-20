@@ -173,9 +173,10 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
   const status = (req.query.status as string) || 'All';
   const category = (req.query.category as string) || 'All';
   const search = (req.query.search as string) || '';
-  const month = (req.query.month as string) || '';     // YYYY-MM
-  const from = (req.query.from as string) || '';        // YYYY-MM-DD
-  const to = (req.query.to as string) || '';            // YYYY-MM-DD
+  const month = (req.query.month as string) || '';     // YYYY-MM (invoice month)
+  const from = (req.query.from as string) || '';        // YYYY-MM-DD (invoice date)
+  const to = (req.query.to as string) || '';            // YYYY-MM-DD (invoice date)
+  const paidMonth = (req.query.paid_month as string) || ''; // YYYY-MM (paid month)
   const sortRaw = (req.query.sort as string) || 'created_at';
   const sortBy: 'invoice_date' | 'created_at' | 'last_paid_date' =
     sortRaw === 'invoice_date' ? 'invoice_date'
@@ -192,21 +193,15 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
     if (site !== 'All')     { conds.push(`i.site = $${p++}`);            params.push(site); }
     if (status !== 'All')   { conds.push(`i.payment_status = $${p++}`);  params.push(status); }
     if (category !== 'All') { conds.push(`i.purpose = $${p++}`);         params.push(category); }
-    // Date filters follow the active sort axis so the export matches the
-    // on-screen filtered view (e.g. "paid in April 2026" when sorted by paid
-    // date). created_at is a UTC timestamp; cast it to IST date for parity
-    // with the client's en-CA / Asia/Kolkata formatting.
-    const monthExpr =
-      sortBy === 'last_paid_date' ? `TO_CHAR(p.last_paid_date, 'YYYY-MM')`
-      : sortBy === 'created_at'   ? `TO_CHAR((i.created_at AT TIME ZONE 'Asia/Kolkata')::date, 'YYYY-MM')`
-      : `TO_CHAR(i.month, 'YYYY-MM')`;
-    const dayExpr =
-      sortBy === 'last_paid_date' ? `p.last_paid_date`
-      : sortBy === 'created_at'   ? `(i.created_at AT TIME ZONE 'Asia/Kolkata')::date`
-      : `i.invoice_date`;
-    if (month)              { conds.push(`${monthExpr} = $${p++}`);      params.push(month); }
-    if (from)               { conds.push(`${dayExpr} >= $${p++}`);       params.push(from); }
-    if (to)                 { conds.push(`${dayExpr} <= $${p++}`);       params.push(to); }
+    // Two independent date filters, matching the on-screen view:
+    //   • Invoice date — the month picker + timeline range select by the
+    //     invoice's accounting month / invoice_date.
+    //   • Paid date — paid_month selects by the latest payment month.
+    // They combine (e.g. "invoiced Feb, paid Apr"); sort only orders rows.
+    if (month)     { conds.push(`TO_CHAR(i.month, 'YYYY-MM') = $${p++}`);          params.push(month); }
+    if (from)      { conds.push(`i.invoice_date >= $${p++}`);                       params.push(from); }
+    if (to)        { conds.push(`i.invoice_date <= $${p++}`);                       params.push(to); }
+    if (paidMonth) { conds.push(`TO_CHAR(p.last_paid_date, 'YYYY-MM') = $${p++}`);  params.push(paidMonth); }
     if (search) {
       conds.push(`(LOWER(i.vendor_name) LIKE $${p} OR LOWER(i.invoice_no) LIKE $${p} OR LOWER(COALESCE(i.po_number, '')) LIKE $${p})`);
       params.push(`%${search.toLowerCase()}%`);

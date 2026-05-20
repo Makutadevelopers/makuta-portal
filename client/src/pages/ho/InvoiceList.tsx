@@ -46,6 +46,7 @@ export default function InvoiceList() {
   const [fStatus, setFStatus] = useState('All');
   const [fPurpose, setFPurpose] = useState('All');
   const [fMonth, setFMonth] = useState('');
+  const [fPaidMonth, setFPaidMonth] = useState('');
   const [fMissingInvNo, setFMissingInvNo] = useState(false);
   const [timeline, setTimeline] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
@@ -142,41 +143,29 @@ export default function InvoiceList() {
 
   const filtered = useMemo(() => {
     const range = getTimelineRange(timeline);
-    // When sorting by upload date, the timeline filter ("Today" / "This Week" / etc.)
-    // should match against the upload time too — otherwise an invoice uploaded today
-    // with a back-dated invoice_date is hidden from the "Today" view.
-    // created_at is a UTC TIMESTAMP; format it in IST so "Today" lines up with what
-    // the user sees in the audit trail.
-    const dateForRange = (i: Invoice): string => {
-      if (sortBy === 'created_at') {
-        const ts = i.created_at;
-        if (!ts) return '';
-        const d = new Date(ts);
-        return isNaN(d.getTime())
-          ? ''
-          : d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-      }
-      if (sortBy === 'last_paid_date') {
-        return (i.last_paid_date || '').slice(0, 10);
-      }
-      return (i.invoice_date || '').slice(0, 10);
-    };
+    // Two independent date filters:
+    //   • Invoice date — the Timeline range + the "Invoiced" month picker both
+    //     select by the invoice's own date/accounting month.
+    //   • Paid date — the separate "Paid" month picker selects by the month of
+    //     the latest payment (last_paid_date).
+    // They combine, so you can ask for e.g. "invoiced in Feb, paid in Apr".
+    // The Sort dropdown only reorders rows — it never changes which show.
     const result = invoices.filter(i => {
       if (fSite !== 'All' && i.site !== fSite) return false;
       if (fStatus !== 'All' && i.payment_status !== fStatus) return false;
       if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
       if (fMissingInvNo && (i.invoice_no ?? '').trim() !== '') return false;
+      const invDay = (i.invoice_date || '').slice(0, 10);
       if (range) {
-        const cmp = dateForRange(i);
-        if (range.from && cmp < range.from) return false;
-        if (range.to && cmp > range.to) return false;
+        if (range.from && invDay < range.from) return false;
+        if (range.to && invDay > range.to) return false;
       } else if (fMonth) {
-        // Month picker always selects by the invoice's accounting month (its
-        // period). The sort dropdown only reorders the rows it never changes
-        // which invoices are shown — so "February 2026" lists every invoice
-        // dated February regardless of when it was added or paid.
         const cmpMonth = (i.month || i.invoice_date || '').slice(0, 7);
         if (cmpMonth !== fMonth) return false;
+      }
+      if (fPaidMonth) {
+        const paidMonth = (i.last_paid_date || '').slice(0, 7);
+        if (paidMonth !== fPaidMonth) return false;
       }
       if (search) {
         const q = normaliseSearch(search);
@@ -218,7 +207,7 @@ export default function InvoiceList() {
       });
     }
     return result;
-  }, [invoices, fSite, fStatus, fPurpose, fMonth, fMissingInvNo, search, timeline, dateFrom, dateTo, sortBy]);
+  }, [invoices, fSite, fStatus, fPurpose, fMonth, fPaidMonth, fMissingInvNo, search, timeline, dateFrom, dateTo, sortBy]);
 
   // Count of historical rows still missing an invoice number — surfaced as a
   // toggle chip in the filter row so HO can work through them. New entries
@@ -409,6 +398,7 @@ export default function InvoiceList() {
                 if (range?.from)        params.set('from', range.from);
                 if (range?.to)          params.set('to', range.to);
                 if (!range && fMonth)   params.set('month', fMonth);
+                if (fPaidMonth)         params.set('paid_month', fPaidMonth);
                 params.set('sort', sortBy);
               }
               return `/export/invoices?${params.toString()}`;
@@ -421,6 +411,7 @@ export default function InvoiceList() {
               (search ? 1 : 0) +
               (timeline !== 'all' ? 1 : 0) +
               (fMonth ? 1 : 0) +
+              (fPaidMonth ? 1 : 0) +
               (fMissingInvNo ? 1 : 0)
             }
           />
@@ -476,9 +467,18 @@ export default function InvoiceList() {
           includeAll
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
         />
-        <input type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
-          title="Filter by invoice month"
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-500">Invoiced</span>
+          <input type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
+            title="Filter by invoice month"
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-500">Paid</span>
+          <input type="month" value={fPaidMonth} onChange={e => setFPaidMonth(e.target.value)}
+            title="Filter by paid month (latest payment date)"
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        </div>
         <select value={sortBy} onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at' | 'last_paid_date')}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
           title="Sort order">
