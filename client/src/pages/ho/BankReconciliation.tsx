@@ -191,7 +191,7 @@ export default function BankReconciliation() {
                       <td className="px-4 py-3 text-gray-600">{r.bank ?? '—'}</td>
                       <td className="px-4 py-3 text-right font-medium text-gray-900">{formatINR(r.txn_amount)}</td>
                       <td className="px-4 py-3 text-right text-gray-700">{formatINR(r.allocated_total)}</td>
-                      <td className={`px-4 py-3 text-right font-medium ${Math.abs(r.balance) < 0.01 ? 'text-gray-400' : 'text-amber-600'}`}>{formatINR(r.balance)}</td>
+                      <td className={`px-4 py-3 text-right font-medium ${r.tally_ok ? 'text-gray-400' : 'text-amber-600'}`}>{formatINR(r.balance)}</td>
                       <td className="px-4 py-3 text-center text-gray-600">{r.allocation_count}</td>
                       <td className="px-4 py-3 text-center">
                         {r.tally_ok ? (
@@ -265,7 +265,7 @@ export default function BankReconciliation() {
                                 </tr>
                                 <tr className="bg-gray-50/60">
                                   <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Balance (un-allocated)</td>
-                                  <td className={`px-3 py-2 text-right font-medium ${Math.abs(r.balance) < 0.01 ? 'text-green-700' : 'text-amber-700'}`}>{formatINR(r.balance)}</td>
+                                  <td className={`px-3 py-2 text-right font-medium ${r.tally_ok ? 'text-green-700' : 'text-amber-700'}`}>{formatINR(r.balance)}</td>
                                   <td></td>
                                 </tr>
                               </tbody>
