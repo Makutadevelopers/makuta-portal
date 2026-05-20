@@ -13,14 +13,20 @@ import {
   Legend,
   ResponsiveContainer,
   CartesianGrid,
+  PieChart,
+  Pie,
+  Cell,
 } from 'recharts';
 
-const EMPTY: AnalyticsResponse = { monthly: [], vendors: [], availableMonths: [] };
+const EMPTY: AnalyticsResponse = { monthly: [], vendors: [], byProject: [], availableMonths: [] };
 
 const NAVY = '#1a3c5e';
 const GREEN = '#22c55e';
 const RED = '#dc2626';
 const ORANGE = '#c2410c';
+
+// Distinct slice colours for the composition donut (projects ≤ 6, months ≤ ~12).
+const SLICE_COLORS = ['#1a3c5e', '#22c55e', '#c2410c', '#7c3aed', '#0891b2', '#db2777', '#ca8a04', '#475569', '#16a34a', '#9333ea', '#0d9488', '#e11d48'];
 
 function monthLabel(ym: string): string {
   const [y, m] = ym.split('-');
@@ -149,6 +155,7 @@ export default function Analytics() {
           <div className="space-y-6">
             <KpiCards totals={totals} settledPct={settledPct} />
             <MonthlyChart chartData={chartData} singleMonth={fMonth !== 'All'} />
+            <CompositionDonut data={data} byProjectView={fSite === 'All'} />
             <VendorTable data={data} totals={totals} />
           </div>
         )}
@@ -282,6 +289,121 @@ function MonthlyChart({ chartData, singleMonth }: { chartData: ChartPoint[]; sin
               />
             </ComposedChart>
           </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Composition donut (smart: by project, or by month for a single project) ──
+type Metric = 'count' | 'invoiced' | 'paid';
+
+const METRICS: { key: Metric; label: string; money: boolean }[] = [
+  { key: 'count', label: 'Invoices', money: false },
+  { key: 'invoiced', label: 'Invoiced', money: true },
+  { key: 'paid', label: 'Paid', money: true },
+];
+
+interface DonutTooltipProps {
+  active?: boolean;
+  payload?: { name: string; value: number; payload: { color: string } }[];
+  money: boolean;
+  total: number;
+}
+
+function DonutTooltip({ active, payload, money, total }: DonutTooltipProps) {
+  if (!active || !payload || payload.length === 0) return null;
+  const slice = payload[0];
+  const pct = total > 0 ? Math.round((slice.value / total) * 100) : 0;
+  return (
+    <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: '8px 12px', fontSize: 13, boxShadow: '0 4px 12px rgba(0,0,0,0.06)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: '#111827' }}>
+        <span style={{ width: 8, height: 8, borderRadius: 2, background: slice.payload.color, display: 'inline-block' }} />
+        {slice.name}
+      </div>
+      <div style={{ color: '#4b5563', marginTop: 3 }}>
+        {money ? formatINR(slice.value) : `${slice.value} invoice${slice.value !== 1 ? 's' : ''}`} · {pct}%
+      </div>
+    </div>
+  );
+}
+
+function CompositionDonut({ data, byProjectView }: { data: AnalyticsResponse; byProjectView: boolean }) {
+  const [metric, setMetric] = useState<Metric>('invoiced');
+  const meta = METRICS.find(m => m.key === metric)!;
+
+  const rows = byProjectView
+    ? data.byProject.map(p => ({ name: p.project, count: Number(p.invoiceCount), invoiced: Number(p.totalInvoiced), paid: Number(p.totalPaid) }))
+    : data.monthly.map(m => ({ name: monthLabel(m.month), count: Number(m.invoiceCount), invoiced: Number(m.totalInvoiced), paid: Number(m.totalPaid) }));
+
+  const slices = rows
+    .map(r => ({ name: r.name, value: r[metric] }))
+    .filter(s => s.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .map((s, i) => ({ ...s, color: SLICE_COLORS[i % SLICE_COLORS.length] }));
+
+  const total = slices.reduce((s, x) => s + x.value, 0);
+  const fmtTotal = meta.money ? formatINR(total) : String(total);
+  const dimLabel = byProjectView ? 'project' : 'month';
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div className="text-sm font-medium text-gray-900">Composition by {byProjectView ? 'Project' : 'Month'}</div>
+          <div className="text-[11px] text-gray-500 mt-0.5">
+            Share of {meta.label.toLowerCase()} across each {dimLabel} for the current selection
+          </div>
+        </div>
+        <div className="flex bg-gray-100 rounded-lg p-0.5">
+          {METRICS.map(m => (
+            <button
+              key={m.key}
+              onClick={() => setMetric(m.key)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                metric === m.key ? 'bg-white text-[#1a3c5e] shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="px-5 py-5">
+        {slices.length === 0 ? (
+          <div className="py-8 text-center text-sm text-gray-400">No data for this selection</div>
+        ) : (
+          <div className="flex flex-col sm:flex-row items-center gap-6">
+            {/* Donut */}
+            <div className="relative flex-shrink-0" style={{ width: 220, height: 220 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={slices} dataKey="value" nameKey="name" innerRadius={64} outerRadius={96} paddingAngle={slices.length > 1 ? 1 : 0} stroke="none">
+                    {slices.map(s => <Cell key={s.name} fill={s.color} />)}
+                  </Pie>
+                  <Tooltip content={<DonutTooltip money={meta.money} total={total} />} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <div className="text-[10px] uppercase tracking-wider text-gray-400">Total {meta.label}</div>
+                <div className="text-lg font-semibold text-gray-900">{fmtTotal}</div>
+              </div>
+            </div>
+            {/* Legend */}
+            <div className="flex-1 w-full space-y-1.5">
+              {slices.map(s => {
+                const pct = total > 0 ? Math.round((s.value / total) * 100) : 0;
+                return (
+                  <div key={s.name} className="flex items-center gap-2.5 text-[13px]">
+                    <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: s.color }} />
+                    <span className="flex-1 min-w-0 truncate text-gray-700">{s.name}</span>
+                    <span className="font-medium text-gray-900 whitespace-nowrap">{meta.money ? formatINR(s.value) : s.value}</span>
+                    <span className="text-gray-400 w-9 text-right tabular-nums">{pct}%</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
     </div>

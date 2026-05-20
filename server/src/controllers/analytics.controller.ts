@@ -5,6 +5,8 @@
 //     total paid against those invoices, and remaining balance
 //   - vendors: per vendor — invoices raised, total invoiced, invoices
 //     fully cleared, total amount paid, and remaining balance
+//   - byProject: per site — count, invoiced, paid (ignores the site filter so
+//     the project-composition donut always shows every project)
 //   - availableMonths: distinct months (site-filtered) for the month dropdown
 //
 // "Amount paid" / "total cleared" is the sum of all payments recorded against
@@ -31,37 +33,44 @@ interface VendorRow {
   balance: number;
 }
 
+interface ProjectRow {
+  project: string;
+  invoiceCount: number;
+  totalInvoiced: number;
+  totalPaid: number;
+}
+
+// Per-invoice paid total, joined once and reused by every aggregate below.
+const PAID_JOIN = `
+  LEFT JOIN (
+    SELECT invoice_id, SUM(amount) AS paid
+    FROM payments
+    GROUP BY invoice_id
+  ) pay ON pay.invoice_id = i.id`;
+
 export async function getAnalytics(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const site = (req.query.site as string) || 'All';
     const month = (req.query.month as string) || 'All'; // 'YYYY-MM' or 'All'
 
-    // Site filter applies to every query below. Month filter applies to the
-    // monthly + vendor breakdowns but NOT to availableMonths (the dropdown must
-    // keep listing every month even after one is picked).
-    const siteConds = ['i.deleted_at IS NULL'];
-    const siteParams: string[] = [];
-    if (site !== 'All') {
-      siteConds.push(`i.site = $${siteParams.length + 1}`);
-      siteParams.push(site);
+    // Build a WHERE clause + positional params for the subset of filters a
+    // given query should honour. Each query gets its own params array because
+    // placeholders are positional ($1, $2, …).
+    function buildWhere(opts: { site: boolean; month: boolean }): { where: string; params: string[] } {
+      const conds = ['i.deleted_at IS NULL'];
+      const params: string[] = [];
+      if (opts.site && site !== 'All') {
+        conds.push(`i.site = $${params.length + 1}`);
+        params.push(site);
+      }
+      if (opts.month && month !== 'All') {
+        conds.push(`TO_CHAR(i.invoice_date, 'YYYY-MM') = $${params.length + 1}`);
+        params.push(month);
+      }
+      return { where: `WHERE ${conds.join(' AND ')}`, params };
     }
 
-    const conds = [...siteConds];
-    const params = [...siteParams];
-    if (month !== 'All') {
-      conds.push(`TO_CHAR(i.invoice_date, 'YYYY-MM') = $${params.length + 1}`);
-      params.push(month);
-    }
-    const whereClause = `WHERE ${conds.join(' AND ')}`;
-
-    // Per-invoice paid total, joined once and reused.
-    const paidJoin = `
-      LEFT JOIN (
-        SELECT invoice_id, SUM(amount) AS paid
-        FROM payments
-        GROUP BY invoice_id
-      ) pay ON pay.invoice_id = i.id`;
-
+    const main = buildWhere({ site: true, month: true });
     const monthly = await query<MonthlyRow>(
       `SELECT
          TO_CHAR(i.invoice_date, 'YYYY-MM')                              AS month,
@@ -70,11 +79,11 @@ export async function getAnalytics(req: Request, res: Response, next: NextFuncti
          COALESCE(SUM(pay.paid), 0)                                    AS "totalPaid",
          COALESCE(SUM(i.invoice_amount), 0) - COALESCE(SUM(pay.paid), 0) AS balance
        FROM invoices i
-       ${paidJoin}
-       ${whereClause}
+       ${PAID_JOIN}
+       ${main.where}
        GROUP BY TO_CHAR(i.invoice_date, 'YYYY-MM')
        ORDER BY month`,
-      params
+      main.params
     );
 
     const vendors = await query<VendorRow>(
@@ -86,24 +95,43 @@ export async function getAnalytics(req: Request, res: Response, next: NextFuncti
          COALESCE(SUM(pay.paid), 0)                                   AS "totalCleared",
          COALESCE(SUM(i.invoice_amount), 0) - COALESCE(SUM(pay.paid), 0) AS balance
        FROM invoices i
-       ${paidJoin}
-       ${whereClause}
+       ${PAID_JOIN}
+       ${main.where}
        GROUP BY i.vendor_name
        ORDER BY balance DESC, "totalInvoiced" DESC`,
-      params
+      main.params
     );
 
+    // Project composition ignores the site filter (month filter still applies)
+    // so the donut can always show every project's share.
+    const proj = buildWhere({ site: false, month: true });
+    const byProject = await query<ProjectRow>(
+      `SELECT
+         i.site                                AS project,
+         COUNT(*)::int                         AS "invoiceCount",
+         COALESCE(SUM(i.invoice_amount), 0)   AS "totalInvoiced",
+         COALESCE(SUM(pay.paid), 0)          AS "totalPaid"
+       FROM invoices i
+       ${PAID_JOIN}
+       ${proj.where}
+       GROUP BY i.site
+       ORDER BY "totalInvoiced" DESC`,
+      proj.params
+    );
+
+    const months = buildWhere({ site: true, month: false });
     const monthsRows = await query<{ month: string }>(
       `SELECT DISTINCT TO_CHAR(i.invoice_date, 'YYYY-MM') AS month
        FROM invoices i
-       WHERE ${siteConds.join(' AND ')}
+       ${months.where}
        ORDER BY month DESC`,
-      siteParams
+      months.params
     );
 
     res.json({
       monthly,
       vendors,
+      byProject,
       availableMonths: monthsRows.map(r => r.month),
     });
   } catch (err) {
