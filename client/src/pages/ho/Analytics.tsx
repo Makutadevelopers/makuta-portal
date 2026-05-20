@@ -17,10 +17,31 @@ import {
 
 const EMPTY: AnalyticsResponse = { monthly: [], vendors: [], availableMonths: [] };
 
+const NAVY = '#1a3c5e';
+const GREEN = '#22c55e';
+const RED = '#dc2626';
+const ORANGE = '#c2410c';
+
 function monthLabel(ym: string): string {
   const [y, m] = ym.split('-');
   const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${names[parseInt(m, 10) - 1]} ${y.slice(2)}`;
+}
+
+/** Compact ₹ for axis ticks: ₹2.5L, ₹1.2Cr. Full value lives in the tooltip. */
+function shortINR(v: number): string {
+  if (v >= 1e7) return `₹${(v / 1e7).toFixed(v % 1e7 === 0 ? 0 : 1)}Cr`;
+  if (v >= 1e5) return `₹${(v / 1e5).toFixed(v % 1e5 === 0 ? 0 : 1)}L`;
+  if (v >= 1e3) return `₹${Math.round(v / 1e3)}K`;
+  return `₹${v}`;
+}
+
+interface Totals {
+  invoiceCount: number;
+  totalInvoiced: number;
+  clearedCount: number;
+  totalCleared: number;
+  balance: number;
 }
 
 export default function Analytics() {
@@ -70,8 +91,8 @@ export default function Analytics() {
     [data.monthly],
   );
 
-  const totals = useMemo(() => {
-    return data.vendors.reduce(
+  const totals = useMemo<Totals>(() => {
+    return data.vendors.reduce<Totals>(
       (acc, v) => ({
         invoiceCount: acc.invoiceCount + Number(v.invoiceCount),
         totalInvoiced: acc.totalInvoiced + Number(v.totalInvoiced),
@@ -83,17 +104,21 @@ export default function Analytics() {
     );
   }, [data.vendors]);
 
-  const scopeLabel = `${fSite === 'All' ? 'all sites' : fSite}${fMonth === 'All' ? '' : ` · ${monthLabel(fMonth)}`}`;
+  const settledPct = totals.totalInvoiced > 0
+    ? Math.round((totals.totalCleared / totals.totalInvoiced) * 100)
+    : 0;
+
+  const scopeLabel = `${fSite === 'All' ? 'All projects' : fSite} · ${fMonth === 'All' ? 'All months' : monthLabel(fMonth)}`;
 
   return (
     <AppShell>
       <div className="max-w-[1100px]">
         {/* Heading + filters */}
-        <div className="flex items-start justify-between mb-5 sm:mb-7 flex-wrap gap-3">
+        <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
           <div className="min-w-0">
             <div className="text-lg sm:text-xl font-medium text-gray-900 truncate">Invoice Analytics</div>
             <div className="text-[11px] sm:text-xs text-gray-500 mt-1 truncate">
-              Invoices raised, billed, paid &amp; outstanding · {scopeLabel}
+              How much we billed, how much we have paid, and what is still owed — {scopeLabel}
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
@@ -122,7 +147,8 @@ export default function Analytics() {
           <div className="text-red-600 text-sm py-12 text-center">{error}</div>
         ) : (
           <div className="space-y-6">
-            <MonthlyChart chartData={chartData} />
+            <KpiCards totals={totals} settledPct={settledPct} />
+            <MonthlyChart chartData={chartData} singleMonth={fMonth !== 'All'} />
             <VendorTable data={data} totals={totals} />
           </div>
         )}
@@ -131,6 +157,35 @@ export default function Analytics() {
   );
 }
 
+// ── KPI summary cards ───────────────────────────────────────────────────────
+function KpiCards({ totals, settledPct }: { totals: Totals; settledPct: number }) {
+  const cards = [
+    { label: 'Invoices Raised', value: String(totals.invoiceCount), sub: `${totals.clearedCount} fully cleared`, accent: NAVY, bg: '#e8eef5' },
+    { label: 'Total Invoiced', value: formatINR(totals.totalInvoiced), sub: 'gross value billed', accent: NAVY, bg: '#eff6ff' },
+    { label: 'Total Paid', value: formatINR(totals.totalCleared), sub: `${settledPct}% of invoiced settled`, accent: '#15803d', bg: '#dcfce7' },
+    { label: 'Balance Outstanding', value: formatINR(totals.balance), sub: 'still owed to vendors', accent: RED, bg: '#fef2f2' },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {cards.map(c => (
+        <div key={c.label} className="rounded-xl p-3 sm:p-5" style={{ background: c.bg, border: `1px solid ${c.accent}22` }}>
+          <div className="text-[10px] sm:text-[11px] font-medium uppercase tracking-wider mb-1.5 sm:mb-2.5" style={{ color: c.accent }}>
+            {c.label}
+          </div>
+          <div className="text-base sm:text-[22px] font-semibold leading-none mb-1 sm:mb-1.5 truncate" style={{ color: c.accent }}>
+            {c.value}
+          </div>
+          <div className="text-[10px] sm:text-[11px] truncate" style={{ color: c.accent, opacity: 0.7 }}>
+            {c.sub}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Monthly stacked chart ───────────────────────────────────────────────────
 interface ChartPoint {
   name: string;
   invoiced: number;
@@ -139,13 +194,47 @@ interface ChartPoint {
   count: number;
 }
 
-function MonthlyChart({ chartData }: { chartData: ChartPoint[] }) {
+interface ChartTooltipProps {
+  active?: boolean;
+  label?: string;
+  payload?: { payload: ChartPoint }[];
+}
+
+function ChartTooltip({ active, label, payload }: ChartTooltipProps) {
+  if (!active || !payload || payload.length === 0) return null;
+  const p = payload[0].payload;
+  const rows: { color: string; label: string; value: string }[] = [
+    { color: NAVY, label: 'Invoiced', value: formatINR(p.invoiced) },
+    { color: GREEN, label: 'Paid', value: formatINR(p.paid) },
+    { color: RED, label: 'Outstanding', value: formatINR(p.balance) },
+  ];
+  return (
+    <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 12px', fontSize: 13, boxShadow: '0 4px 12px rgba(0,0,0,0.06)' }}>
+      <div style={{ fontWeight: 600, color: '#111827', marginBottom: 6 }}>{label}</div>
+      {rows.map(r => (
+        <div key={r.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18, marginTop: 2 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4b5563' }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: r.color, display: 'inline-block' }} />
+            {r.label}
+          </span>
+          <span style={{ fontWeight: 600, color: '#111827' }}>{r.value}</span>
+        </div>
+      ))}
+      <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid #f0f0f0', color: '#6b7280' }}>
+        {p.count} invoice{p.count !== 1 ? 's' : ''} raised
+      </div>
+    </div>
+  );
+}
+
+function MonthlyChart({ chartData, singleMonth }: { chartData: ChartPoint[]; singleMonth: boolean }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100">
-        <div className="text-sm font-medium text-gray-900">Monthly Invoice Analysis</div>
+        <div className="text-sm font-medium text-gray-900">Billed vs Paid by Month</div>
         <div className="text-[11px] text-gray-500 mt-0.5">
-          Bars: total invoiced (navy), paid (green) &amp; balance (red) per month · Line: number of invoices raised
+          Each bar is the total invoiced that month — <span className="text-green-700 font-medium">green</span> is paid,
+          {' '}<span className="text-red-600 font-medium">red</span> is still outstanding. The line tracks how many invoices were raised.
         </div>
       </div>
       <div className="px-5 py-4">
@@ -153,43 +242,43 @@ function MonthlyChart({ chartData }: { chartData: ChartPoint[] }) {
           <div className="py-8 text-center text-sm text-gray-400">No invoices for this selection</div>
         ) : (
           <ResponsiveContainer width="100%" height={340}>
-            <ComposedChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+            <ComposedChart
+              data={chartData}
+              margin={{ top: 10, right: 12, left: 6, bottom: 5 }}
+              barCategoryGap={singleMonth ? '60%' : '25%'}
+            >
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#6b7280' }} />
+              <XAxis dataKey="name" tick={{ fontSize: 12, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
               <YAxis
                 yAxisId="amount"
-                tickFormatter={(v: number) => formatINR(v)}
+                tickFormatter={shortINR}
                 tick={{ fontSize: 11, fill: '#6b7280' }}
-                width={80}
+                tickLine={false}
+                axisLine={false}
+                width={56}
               />
               <YAxis
                 yAxisId="count"
                 orientation="right"
                 allowDecimals={false}
-                tick={{ fontSize: 11, fill: '#6b7280' }}
-                width={40}
+                tick={{ fontSize: 11, fill: ORANGE }}
+                tickLine={false}
+                axisLine={false}
+                width={32}
               />
-              <Tooltip
-                formatter={(value, name) =>
-                  name === 'Invoices'
-                    ? [String(value), name]
-                    : [formatINR(Number(value ?? 0)), name]
-                }
-                labelStyle={{ fontWeight: 600, color: '#111827' }}
-                contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13 }}
-              />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar yAxisId="amount" dataKey="invoiced" fill="#1a3c5e" name="Invoiced" radius={[4, 4, 0, 0]} />
-              <Bar yAxisId="amount" dataKey="paid" fill="#22c55e" name="Paid" radius={[4, 4, 0, 0]} />
-              <Bar yAxisId="amount" dataKey="balance" fill="#dc2626" name="Balance" radius={[4, 4, 0, 0]} />
+              <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(26,60,94,0.04)' }} />
+              <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+              <Bar yAxisId="amount" dataKey="paid" stackId="money" fill={GREEN} name="Paid" maxBarSize={64} />
+              <Bar yAxisId="amount" dataKey="balance" stackId="money" fill={RED} name="Outstanding" radius={[4, 4, 0, 0]} maxBarSize={64} />
               <Line
                 yAxisId="count"
                 type="monotone"
                 dataKey="count"
-                stroke="#c2410c"
+                stroke={ORANGE}
                 strokeWidth={2}
-                name="Invoices"
-                dot={{ r: 3 }}
+                name="Invoices raised"
+                dot={{ r: 3, fill: ORANGE }}
+                activeDot={{ r: 5 }}
               />
             </ComposedChart>
           </ResponsiveContainer>
@@ -199,27 +288,20 @@ function MonthlyChart({ chartData }: { chartData: ChartPoint[] }) {
   );
 }
 
-interface VendorTotals {
-  invoiceCount: number;
-  totalInvoiced: number;
-  clearedCount: number;
-  totalCleared: number;
-  balance: number;
-}
-
-function VendorTable({ data, totals }: { data: AnalyticsResponse; totals: VendorTotals }) {
+// ── Vendor-wise breakdown ───────────────────────────────────────────────────
+function VendorTable({ data, totals }: { data: AnalyticsResponse; totals: Totals }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
       <div className="px-5 py-4 border-b border-gray-100">
         <div className="text-sm font-medium text-gray-900">Vendor-wise Breakdown</div>
         <div className="text-[11px] text-gray-500 mt-0.5">
-          Invoices raised, total billed, invoices cleared, amount paid &amp; outstanding balance per vendor
+          Per vendor — invoices raised &amp; cleared, total billed, amount paid, and outstanding balance. Sorted by balance owed.
         </div>
       </div>
       <table className="w-full text-[13px]">
         <thead className="bg-gray-50">
           <tr>
-            {['Vendor', 'Invoices', 'Total Invoiced', 'Cleared', 'Total Cleared', 'Balance'].map((h, i) => (
+            {['Vendor', 'Invoices', 'Total Invoiced', 'Paid', 'Balance'].map((h, i) => (
               <th key={h} className={`px-5 py-2.5 font-medium text-gray-500 whitespace-nowrap ${i > 0 ? 'text-right' : 'text-left'}`}>
                 {h}
               </th>
@@ -229,32 +311,48 @@ function VendorTable({ data, totals }: { data: AnalyticsResponse; totals: Vendor
         <tbody>
           {data.vendors.length === 0 ? (
             <tr>
-              <td colSpan={6} className="px-5 py-8 text-center text-sm text-gray-400">No vendors for this selection</td>
+              <td colSpan={5} className="px-5 py-8 text-center text-sm text-gray-400">No vendors for this selection</td>
             </tr>
           ) : (
-            data.vendors.map(v => (
-              <tr key={v.vendorName} className="border-t border-gray-100">
-                <td className="px-5 py-3.5 font-medium text-gray-900">{v.vendorName}</td>
-                <td className="px-5 py-3.5 text-right text-gray-500 text-xs">{v.invoiceCount}</td>
-                <td className="px-5 py-3.5 text-right font-medium text-gray-900">{formatINR(Number(v.totalInvoiced))}</td>
-                <td className="px-5 py-3.5 text-right text-gray-500 text-xs">{v.clearedCount} / {v.invoiceCount}</td>
-                <td className="px-5 py-3.5 text-right font-medium text-green-700">{formatINR(Number(v.totalCleared))}</td>
-                <td className="px-5 py-3.5 text-right">
-                  {Number(v.balance) > 0
-                    ? <span className="font-medium text-red-600">{formatINR(Number(v.balance))}</span>
-                    : <span className="text-green-600 text-xs">Settled</span>}
-                </td>
-              </tr>
-            ))
+            data.vendors.map(v => {
+              const invoiced = Number(v.totalInvoiced);
+              const paid = Number(v.totalCleared);
+              const balance = Number(v.balance);
+              const pct = invoiced > 0 ? Math.round((paid / invoiced) * 100) : 0;
+              return (
+                <tr key={v.vendorName} className="border-t border-gray-100">
+                  <td className="px-5 py-3.5">
+                    <div className="font-medium text-gray-900 text-[13px] truncate max-w-[260px]">{v.vendorName}</div>
+                    <div className="mt-1.5 h-1 rounded-full bg-gray-100 w-28">
+                      <div className="h-full rounded-full bg-green-500" style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="text-[10px] text-gray-400 mt-0.5">{pct}% paid</div>
+                  </td>
+                  <td className="px-5 py-3.5 text-right text-gray-600 text-xs whitespace-nowrap">
+                    {v.invoiceCount}
+                    <span className="text-gray-400"> · {v.clearedCount} cleared</span>
+                  </td>
+                  <td className="px-5 py-3.5 text-right font-medium text-gray-900">{formatINR(invoiced)}</td>
+                  <td className="px-5 py-3.5 text-right font-medium text-green-700">{formatINR(paid)}</td>
+                  <td className="px-5 py-3.5 text-right">
+                    {balance > 0
+                      ? <span className="font-medium text-red-600">{formatINR(balance)}</span>
+                      : <span className="inline-block text-[11px] font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-md">Settled</span>}
+                  </td>
+                </tr>
+              );
+            })
           )}
         </tbody>
         {data.vendors.length > 0 && (
           <tfoot className="border-t-2 border-gray-200 bg-gray-50">
             <tr>
               <td className="px-5 py-2.5 font-medium text-gray-900">All Vendors</td>
-              <td className="px-5 py-2.5 text-right text-gray-500 text-xs">{totals.invoiceCount}</td>
+              <td className="px-5 py-2.5 text-right text-gray-600 text-xs whitespace-nowrap">
+                {totals.invoiceCount}
+                <span className="text-gray-400"> · {totals.clearedCount} cleared</span>
+              </td>
               <td className="px-5 py-2.5 text-right font-semibold text-gray-900">{formatINR(totals.totalInvoiced)}</td>
-              <td className="px-5 py-2.5 text-right text-gray-500 text-xs">{totals.clearedCount} / {totals.invoiceCount}</td>
               <td className="px-5 py-2.5 text-right font-semibold text-green-700">{formatINR(totals.totalCleared)}</td>
               <td className="px-5 py-2.5 text-right font-semibold text-red-600">{formatINR(totals.balance)}</td>
             </tr>
