@@ -48,7 +48,9 @@ export default function InvoiceList() {
   const [fMonth, setFMonth] = useState('');
   const [fPaidMonth, setFPaidMonth] = useState('');
   const [fMissingInvNo, setFMissingInvNo] = useState(false);
-  const [timeline, setTimeline] = useState('all');
+  // Invoice-date filter: either a single month ('month') or a custom From–To
+  // range ('range'). The Paid filter is separate (fPaidMonth).
+  const [invMode, setInvMode] = useState<'month' | 'range'>('month');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sortBy, setSortBy] = useState<'invoice_date' | 'created_at' | 'last_paid_date'>('created_at');
@@ -99,37 +101,6 @@ export default function InvoiceList() {
 
   const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
-  function getTimelineRange(tl: string): { from: string; to: string } | null {
-    if (tl === 'all') return null;
-    if (tl === 'custom') {
-      if (dateFrom || dateTo) return { from: dateFrom, to: dateTo };
-      return null;
-    }
-    const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const today = `${yyyy}-${mm}-${dd}`;
-    if (tl === 'today') return { from: today, to: today };
-    if (tl === 'week') {
-      const day = now.getDay();
-      const diffToMon = day === 0 ? -6 : 1 - day;
-      const mon = new Date(now);
-      mon.setDate(now.getDate() + diffToMon);
-      const sun = new Date(mon);
-      sun.setDate(mon.getDate() + 6);
-      const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      return { from: fmt(mon), to: fmt(sun) };
-    }
-    if (tl === 'month') {
-      const first = `${yyyy}-${mm}-01`;
-      const lastDay = new Date(yyyy, now.getMonth() + 1, 0).getDate();
-      const last = `${yyyy}-${mm}-${String(lastDay).padStart(2, '0')}`;
-      return { from: first, to: last };
-    }
-    return null;
-  }
-
   const agingMap = useMemo(() => {
     const map = new Map<string, { balance: number; daysLabel: string; daysNum: number }>();
     for (const r of overdue) {
@@ -142,12 +113,9 @@ export default function InvoiceList() {
   }, [withinTerms, overdue]);
 
   const filtered = useMemo(() => {
-    const range = getTimelineRange(timeline);
     // Two independent date filters:
-    //   • Invoice date — the Timeline range + the "Invoiced" month picker both
-    //     select by the invoice's own date/accounting month.
-    //   • Paid date — the separate "Paid" month picker selects by the month of
-    //     the latest payment (last_paid_date).
+    //   • Invoiced — by invoice date, as a single month OR a custom From–To range.
+    //   • Paid — by the month of the latest payment (last_paid_date).
     // They combine, so you can ask for e.g. "invoiced in Feb, paid in Apr".
     // The Sort dropdown only reorders rows — it never changes which show.
     const result = invoices.filter(i => {
@@ -155,10 +123,10 @@ export default function InvoiceList() {
       if (fStatus !== 'All' && i.payment_status !== fStatus) return false;
       if (fPurpose !== 'All' && i.purpose !== fPurpose) return false;
       if (fMissingInvNo && (i.invoice_no ?? '').trim() !== '') return false;
-      const invDay = (i.invoice_date || '').slice(0, 10);
-      if (range) {
-        if (range.from && invDay < range.from) return false;
-        if (range.to && invDay > range.to) return false;
+      if (invMode === 'range') {
+        const invDay = (i.invoice_date || '').slice(0, 10);
+        if (dateFrom && invDay < dateFrom) return false;
+        if (dateTo && invDay > dateTo) return false;
       } else if (fMonth) {
         const cmpMonth = (i.month || i.invoice_date || '').slice(0, 7);
         if (cmpMonth !== fMonth) return false;
@@ -207,7 +175,7 @@ export default function InvoiceList() {
       });
     }
     return result;
-  }, [invoices, fSite, fStatus, fPurpose, fMonth, fPaidMonth, fMissingInvNo, search, timeline, dateFrom, dateTo, sortBy]);
+  }, [invoices, fSite, fStatus, fPurpose, fMonth, fPaidMonth, fMissingInvNo, search, invMode, dateFrom, dateTo, sortBy]);
 
   // Count of historical rows still missing an invoice number — surfaced as a
   // toggle chip in the filter row so HO can work through them. New entries
@@ -390,14 +358,14 @@ export default function InvoiceList() {
               if (selected.size > 0) {
                 params.set('ids', Array.from(selected).join(','));
               } else {
-                const range = getTimelineRange(timeline);
                 if (fSite !== 'All')    params.set('site', fSite);
                 if (fStatus !== 'All')  params.set('status', fStatus);
                 if (fPurpose !== 'All') params.set('category', fPurpose);
                 if (search)             params.set('search', search);
-                if (range?.from)        params.set('from', range.from);
-                if (range?.to)          params.set('to', range.to);
-                if (!range && fMonth)   params.set('month', fMonth);
+                if (invMode === 'range') {
+                  if (dateFrom)         params.set('from', dateFrom);
+                  if (dateTo)           params.set('to', dateTo);
+                } else if (fMonth)      params.set('month', fMonth);
                 if (fPaidMonth)         params.set('paid_month', fPaidMonth);
                 params.set('sort', sortBy);
               }
@@ -409,8 +377,7 @@ export default function InvoiceList() {
               (fStatus !== 'All' ? 1 : 0) +
               (fPurpose !== 'All' ? 1 : 0) +
               (search ? 1 : 0) +
-              (timeline !== 'all' ? 1 : 0) +
-              (fMonth ? 1 : 0) +
+              ((invMode === 'range' ? (dateFrom || dateTo) : fMonth) ? 1 : 0) +
               (fPaidMonth ? 1 : 0) +
               (fMissingInvNo ? 1 : 0)
             }
@@ -431,28 +398,6 @@ export default function InvoiceList() {
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendor, invoice no, PO..."
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-        <select value={timeline} onChange={e => { setTimeline(e.target.value); if (e.target.value !== 'custom') { setDateFrom(''); setDateTo(''); } }}
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-          <option value="all">All Time</option>
-          <option value="today">Today</option>
-          <option value="week">This Week</option>
-          <option value="month">This Month</option>
-          <option value="custom">Custom</option>
-        </select>
-        {timeline === 'custom' && (
-          <>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-500">From</span>
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-gray-500">To</span>
-              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-            </div>
-          </>
-        )}
         <select value={fSite} onChange={e => setFSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
           <option value="All">All Sites</option>
           {SITES.map(s => <option key={s}>{s}</option>)}
@@ -469,9 +414,27 @@ export default function InvoiceList() {
         />
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-gray-500">Invoiced</span>
-          <input type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
-            title="Filter by invoice month"
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          <select value={invMode} onChange={e => setInvMode(e.target.value as 'month' | 'range')}
+            title="Filter invoices by a single month or a custom date range"
+            className="px-2 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+            <option value="month">Month</option>
+            <option value="range">Range</option>
+          </select>
+          {invMode === 'month' ? (
+            <input type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
+              title="Filter by invoice month"
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          ) : (
+            <>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                title="Invoiced from (invoice date)"
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+              <span className="text-xs text-gray-400">–</span>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                title="Invoiced to (invoice date)"
+                className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            </>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-gray-500">Paid</span>
