@@ -5,8 +5,6 @@
 //     total paid against those invoices, and remaining balance
 //   - vendors: per vendor — invoices raised, total invoiced, invoices
 //     fully cleared, total amount paid, and remaining balance
-//   - byProject: per site — count, invoiced, paid (ignores the site filter so
-//     the project-composition donut always shows every project)
 //   - availableMonths: distinct months (site-filtered) for the month dropdown
 //
 // "Amount paid" / "total cleared" is the sum of all payments recorded against
@@ -31,13 +29,6 @@ interface VendorRow {
   clearedCount: number;
   totalCleared: number;
   balance: number;
-}
-
-interface ProjectRow {
-  project: string;
-  invoiceCount: number;
-  totalInvoiced: number;
-  totalPaid: number;
 }
 
 // Per-invoice paid total, joined once and reused by every aggregate below.
@@ -102,23 +93,6 @@ export async function getAnalytics(req: Request, res: Response, next: NextFuncti
       main.params
     );
 
-    // Project composition ignores the site filter (month filter still applies)
-    // so the donut can always show every project's share.
-    const proj = buildWhere({ site: false, month: true });
-    const byProject = await query<ProjectRow>(
-      `SELECT
-         i.site                                AS project,
-         COUNT(*)::int                         AS "invoiceCount",
-         COALESCE(SUM(i.invoice_amount), 0)   AS "totalInvoiced",
-         COALESCE(SUM(pay.paid), 0)          AS "totalPaid"
-       FROM invoices i
-       ${PAID_JOIN}
-       ${proj.where}
-       GROUP BY i.site
-       ORDER BY "totalInvoiced" DESC`,
-      proj.params
-    );
-
     const months = buildWhere({ site: true, month: false });
     const monthsRows = await query<{ month: string }>(
       `SELECT DISTINCT TO_CHAR(i.invoice_date, 'YYYY-MM') AS month
@@ -131,7 +105,6 @@ export async function getAnalytics(req: Request, res: Response, next: NextFuncti
     res.json({
       monthly,
       vendors,
-      byProject,
       availableMonths: monthsRows.map(r => r.month),
     });
   } catch (err) {
