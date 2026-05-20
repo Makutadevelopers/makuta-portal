@@ -58,20 +58,28 @@ export default function VendorMaster() {
     }
   }
 
-  // Outstanding per vendor, keyed by vendor_id (stable) — not vendor_name,
-  // which can drift between an invoice's denormalised text and the master row
-  // after renames or partial merges. Sum the actual balance (invoice_amount −
-  // payments), not the full invoice_amount, so Partial invoices don't get
-  // double-counted. Invoices with no vendor_id are "unmastered" — they're
-  // surfaced in the banner below, not aggregated into any master here.
+  // Invoice count and outstanding per vendor. We resolve each invoice to a
+  // master vendor by vendor_id first (stable across renames/merges); for the
+  // many legacy rows that were never linked (vendor_id NULL) we fall back to
+  // matching the denormalised vendor_name (case-insensitive) — otherwise those
+  // invoices would never aggregate into any master and every such vendor would
+  // read "—". Outstanding sums the actual balance (invoice_amount − payments),
+  // not invoice_amount, so Partial invoices aren't double-counted. Invoices
+  // that match no master at all are "unmastered" and surfaced in the banner.
+  const vendorIdByName = new Map<string, string>();
+  for (const v of vendors) vendorIdByName.set(v.name.toLowerCase().trim(), v.id);
+  const knownVendorIds = new Set(vendors.map(v => v.id));
+
   const vendorStats = new Map<string, number>();
   const vendorInvoiceCount = new Map<string, number>();
   for (const inv of invoices) {
-    if (!inv.vendor_id) continue;
-    vendorInvoiceCount.set(inv.vendor_id, (vendorInvoiceCount.get(inv.vendor_id) ?? 0) + 1);
+    let vid = inv.vendor_id && knownVendorIds.has(inv.vendor_id) ? inv.vendor_id : undefined;
+    if (!vid) vid = vendorIdByName.get((inv.vendor_name ?? '').toLowerCase().trim());
+    if (!vid) continue;
+    vendorInvoiceCount.set(vid, (vendorInvoiceCount.get(vid) ?? 0) + 1);
     const bal = Number(inv.balance ?? 0);
     if (bal > 0) {
-      vendorStats.set(inv.vendor_id, (vendorStats.get(inv.vendor_id) ?? 0) + bal);
+      vendorStats.set(vid, (vendorStats.get(vid) ?? 0) + bal);
     }
   }
 
@@ -85,11 +93,10 @@ export default function VendorMaster() {
   //   (b) its denormalized vendor_name matches a master name (case-insensitive).
   // Without (a), merges that re-point vendor_id but don't rewrite the legacy
   // vendor_name text would incorrectly resurface the old name in this banner.
-  const vendorIds = new Set(vendors.map(v => v.id));
   const vendorNames = new Set(vendors.map(v => v.name.toLowerCase()));
   const unmasteredVendors = Array.from(new Set(
     invoices
-      .filter(i => !(i.vendor_id && vendorIds.has(i.vendor_id)))
+      .filter(i => !(i.vendor_id && knownVendorIds.has(i.vendor_id)))
       .map(i => i.vendor_name)
       .filter(name => !vendorNames.has(name.toLowerCase()))
   ));
