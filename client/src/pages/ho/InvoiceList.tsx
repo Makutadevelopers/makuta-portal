@@ -171,13 +171,11 @@ export default function InvoiceList() {
         if (range.from && cmp < range.from) return false;
         if (range.to && cmp > range.to) return false;
       } else if (fMonth) {
-        // Month picker follows the active sort axis, so a user sorted by
-        // "Latest paid date first" who picks April 2026 sees invoices PAID in
-        // April, not invoiced in April. Matches the timeline range filter
-        // above.
-        const cmpMonth = sortBy === 'invoice_date'
-          ? (i.month || i.invoice_date || '').slice(0, 7)
-          : dateForRange(i).slice(0, 7);
+        // Month picker always selects by the invoice's accounting month (its
+        // period). The sort dropdown only reorders the rows it never changes
+        // which invoices are shown — so "February 2026" lists every invoice
+        // dated February regardless of when it was added or paid.
+        const cmpMonth = (i.month || i.invoice_date || '').slice(0, 7);
         if (cmpMonth !== fMonth) return false;
       }
       if (search) {
@@ -479,11 +477,7 @@ export default function InvoiceList() {
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
         />
         <input type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
-          title={
-            sortBy === 'last_paid_date' ? 'Filter by paid month'
-            : sortBy === 'created_at' ? 'Filter by added month'
-            : 'Filter by invoice month'
-          }
+          title="Filter by invoice month"
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
         <select value={sortBy} onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at' | 'last_paid_date')}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
