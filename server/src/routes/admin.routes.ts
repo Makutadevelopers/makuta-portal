@@ -235,15 +235,37 @@ router.get('/import-audit', requireRole(['ho']), async (_req: Request, res: Resp
       LIMIT 40`);
 
     const p6_payment_samples = await query(`
-      SELECT p.id, i.invoice_no, i.vendor_name, p.amount,
-             p.payment_type, p.payment_ref, p.bank,
-             p.payment_date, i.invoice_date, p.payment_month,
-             p.bank_txn_id IS NOT NULL AS has_bank_txn, i.batch_id
-      FROM payments p JOIN invoices i ON i.id = p.invoice_id
+      SELECT p.id, i.invoice_no, p.amount,
+             p.payment_type, p.payment_ref, p.payment_date, i.invoice_date,
+             p.bank_txn_id IS NOT NULL AS has_bank_txn,
+             bt.txn_type AS bt_type, bt.txn_ref AS bt_ref, bt.txn_date AS bt_date,
+             bt.bank AS bt_bank
+      FROM payments p
+      JOIN invoices i ON i.id = p.invoice_id
+      LEFT JOIN bank_transactions bt ON bt.id = p.bank_txn_id
       WHERE ${REF_DATE} OR ${BANK_MONTH} OR ${TYPE_BAD}
          OR (lower(COALESCE(p.payment_type,'')) <> 'cash' AND NULLIF(trim(p.payment_ref), '') IS NULL)
       ORDER BY i.batch_id, p.created_at
-      LIMIT 40`);
+      LIMIT 30`);
+
+    // Of the corrupted payments, how many link to a CLEAN txn vs a still-dirty
+    // one vs no txn — this tells us how much an adopt-from-txn pass can ever fix.
+    const p8_linkage_breakdown = await query(`
+      WITH bad AS (
+        SELECT p.*, bt.txn_type AS bt_type, bt.txn_ref AS bt_ref
+        FROM payments p LEFT JOIN bank_transactions bt ON bt.id = p.bank_txn_id
+        WHERE ${REF_DATE} OR ${BANK_MONTH} OR ${TYPE_BAD}
+           OR (lower(COALESCE(p.payment_type,'')) <> 'cash' AND NULLIF(trim(p.payment_ref), '') IS NULL)
+      )
+      SELECT
+        COUNT(*)                                                              AS bad_payments,
+        COUNT(*) FILTER (WHERE bank_txn_id IS NULL)                           AS no_txn,
+        COUNT(*) FILTER (WHERE bank_txn_id IS NOT NULL
+                            AND lower(trim(COALESCE(bt_type,''))) IN ('cash','cheque','neft','rtgs','imps','upi')
+                            AND bt_ref !~ '^\\s*\\d{1,2}[-/][A-Za-z]{3}[-/]\\d{2,4}\\s*$') AS linked_clean_txn,
+        COUNT(*) FILTER (WHERE bank_txn_id IS NOT NULL
+                            AND lower(trim(COALESCE(bt_type,''))) NOT IN ('cash','cheque','neft','rtgs','imps','upi')) AS linked_dirty_txn
+      FROM bad`);
 
     const p7_flagged_bank_values = await query(`
       SELECT p.bank, COUNT(*) AS cnt
@@ -256,6 +278,7 @@ router.get('/import-audit', requireRole(['ho']), async (_req: Request, res: Resp
       p5_bad_payment_types,
       p6_payment_samples,
       p7_flagged_bank_values,
+      p8_linkage_breakdown: p8_linkage_breakdown[0],
       p1_payment_fingerprint: p1_payment_fingerprint[0],
       p2_payment_by_batch,
       p3_bank_txn_fingerprint: p3_bank_txn_fingerprint[0],
