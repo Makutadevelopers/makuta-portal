@@ -415,86 +415,143 @@ export default function InvoiceList() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendor, invoice no, PO..."
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-        <select value={fSite} onChange={e => setFSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-          <option value="All">All Sites</option>
-          {SITES.map(s => <option key={s}>{s}</option>)}
-        </select>
-        <select value={fStatus} onChange={e => setFStatus(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-          <option value="All">All Statuses</option>
-          <option>Paid</option><option>Partial</option><option>Not Paid</option>
-        </select>
-        <CategorySelect
-          value={fPurpose}
-          onChange={setFPurpose}
-          includeAll
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
-        />
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-500">Invoiced</span>
-          <select value={invMode} onChange={e => setInvMode(e.target.value as 'month' | 'range')}
-            title="Filter invoices by a single month or a custom date range"
-            className="px-2 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
-            <option value="month">Month</option>
-            <option value="range">Range</option>
+      <div className="mb-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendor, invoice no, PO..."
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+
+          {/* Filters popover */}
+          <div className="relative">
+            <button type="button" onClick={() => setShowFilters(v => !v)}
+              className={`flex items-center gap-2 px-3 py-2 border rounded-lg text-sm transition-colors ${
+                activeChips.length > 0 ? 'border-[#1a3c5e] text-[#1a3c5e] bg-[#1a3c5e]/5' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}>
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18M6 12h12M10 20h4" />
+              </svg>
+              Filters
+              {activeChips.length > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[11px] font-semibold text-white bg-[#1a3c5e] rounded-full">{activeChips.length}</span>
+              )}
+            </button>
+            {showFilters && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowFilters(false)} />
+                <div className="absolute left-0 top-11 z-50 w-80 bg-white border border-gray-200 rounded-xl shadow-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium text-gray-900">Filters</div>
+                    {activeChips.length > 0 && (
+                      <button onClick={clearAllFilters} className="text-xs text-gray-500 hover:text-gray-700 hover:underline">Clear all</button>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-xs text-gray-500">Site</span>
+                    <select value={fSite} onChange={e => setFSite(e.target.value)} className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+                      <option value="All">All Sites</option>
+                      {SITES.map(s => <option key={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <span className="text-xs text-gray-500">Status</span>
+                    <select value={fStatus} onChange={e => setFStatus(e.target.value)} className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+                      <option value="All">All Statuses</option>
+                      <option>Paid</option><option>Partial</option><option>Not Paid</option>
+                    </select>
+                  </div>
+                  <div>
+                    <span className="text-xs text-gray-500">Category</span>
+                    <CategorySelect
+                      value={fPurpose}
+                      onChange={setFPurpose}
+                      includeAll
+                      className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-xs text-gray-500">Invoiced</span>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <select value={invMode} onChange={e => setInvMode(e.target.value as 'month' | 'range')}
+                        className="px-2 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+                        <option value="month">Month</option>
+                        <option value="range">Range</option>
+                      </select>
+                      {invMode === 'month' ? (
+                        <input type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
+                          className="flex-1 min-w-0 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+                      ) : (
+                        <div className="flex-1 min-w-0 flex items-center gap-1">
+                          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} title="Invoiced from"
+                            className="flex-1 min-w-0 px-2 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+                          <span className="text-xs text-gray-400">–</span>
+                          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} title="Invoiced to"
+                            className="flex-1 min-w-0 px-2 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-xs text-gray-500">Paid</span>
+                    <input type="month" value={fPaidMonth} onChange={e => setFPaidMonth(e.target.value)}
+                      title="Filter by paid month (latest payment date)"
+                      className="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+                  </div>
+                  <div className="pt-1 flex justify-end">
+                    <button onClick={() => setShowFilters(false)} className="px-4 py-1.5 text-sm font-medium bg-[#1a3c5e] text-white rounded-lg hover:bg-[#15304d]">Done</button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          <select value={sortBy} onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at' | 'last_paid_date')}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
+            title="Sort order">
+            <option value="created_at">Latest added first</option>
+            <option value="invoice_date">Latest invoice date first</option>
+            <option value="last_paid_date">Latest paid date first</option>
           </select>
-          {invMode === 'month' ? (
-            <input type="month" value={fMonth} onChange={e => setFMonth(e.target.value)}
-              title="Filter by invoice month"
-              className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-          ) : (
-            <>
-              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                title="Invoiced from (invoice date)"
-                className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-              <span className="text-xs text-gray-400">–</span>
-              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                title="Invoiced to (invoice date)"
-                className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-            </>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-gray-500">Paid</span>
-          <input type="month" value={fPaidMonth} onChange={e => setFPaidMonth(e.target.value)}
-            title="Filter by paid month (latest payment date)"
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200" />
-        </div>
-        <select value={sortBy} onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at' | 'last_paid_date')}
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
-          title="Sort order">
-          <option value="created_at">Latest added first</option>
-          <option value="invoice_date">Latest invoice date first</option>
-          <option value="last_paid_date">Latest paid date first</option>
-        </select>
-        <div className="ml-auto flex items-center gap-3">
-          {missingInvNoCount > 0 && (
+
+          <div className="ml-auto flex items-center gap-3">
+            {missingInvNoCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setFMissingInvNo(v => !v)}
+                title="Historical rows imported before invoice_no became mandatory. Click to filter; edit each row to enter the real number."
+                className={`text-xs px-2 py-1 rounded-full border transition-colors ${
+                  fMissingInvNo
+                    ? 'bg-amber-100 border-amber-300 text-amber-800 hover:bg-amber-200'
+                    : 'border-amber-200 text-amber-700 hover:bg-amber-50'
+                }`}
+              >
+                Missing inv. no · {missingInvNoCount}
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => setFMissingInvNo(v => !v)}
-              title="Historical rows imported before invoice_no became mandatory. Click to filter; edit each row to enter the real number."
-              className={`text-xs px-2 py-1 rounded-full border transition-colors ${
-                fMissingInvNo
-                  ? 'bg-amber-100 border-amber-300 text-amber-800 hover:bg-amber-200'
-                  : 'border-amber-200 text-amber-700 hover:bg-amber-50'
-              }`}
+              onClick={handleRecomputeStatuses}
+              disabled={recomputing}
+              title="Heal stale Paid / Partial / Not Paid badges by recomputing from the payments table"
+              className="text-xs text-gray-500 hover:text-gray-700 hover:underline disabled:opacity-50 disabled:cursor-wait"
             >
-              Missing inv. no · {missingInvNoCount}
+              {recomputing ? 'Recomputing…' : 'Recompute statuses'}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={handleRecomputeStatuses}
-            disabled={recomputing}
-            title="Heal stale Paid / Partial / Not Paid badges by recomputing from the payments table"
-            className="text-xs text-gray-500 hover:text-gray-700 hover:underline disabled:opacity-50 disabled:cursor-wait"
-          >
-            {recomputing ? 'Recomputing…' : 'Recompute statuses'}
-          </button>
-          <span className="text-xs text-gray-400">{filtered.length} records</span>
+            <span className="text-xs text-gray-400">{filtered.length} records</span>
+          </div>
         </div>
+
+        {/* Active filter chips */}
+        {activeChips.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap mt-3">
+            {activeChips.map(c => (
+              <span key={c.key} className="inline-flex items-center gap-1.5 pl-2.5 pr-1 py-1 bg-gray-100 text-gray-700 text-xs rounded-full">
+                {c.label}
+                <button onClick={c.clear} title="Remove filter"
+                  className="w-4 h-4 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-300">✕</button>
+              </span>
+            ))}
+            <button onClick={clearAllFilters} className="text-xs text-gray-500 hover:text-gray-700 hover:underline ml-1">Clear all</button>
+          </div>
+        )}
       </div>
 
       {/* Bulk actions bar */}
