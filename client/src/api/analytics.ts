@@ -17,9 +17,17 @@ export interface AnalyticsVendor {
   balance: number;
 }
 
+export interface AnalyticsProject {
+  project: string;
+  invoiceCount: number;
+  totalInvoiced: number;
+  totalPaid: number;
+}
+
 export interface AnalyticsResponse {
   monthly: AnalyticsMonthly[];
   vendors: AnalyticsVendor[];
+  byProject: AnalyticsProject[];
   availableMonths: string[];
 }
 
