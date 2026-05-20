@@ -13,7 +13,7 @@ import { query, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
 import { notifyPaymentEdited } from '../services/email.service';
 import { userHasSite } from '../middleware/auth';
-import { paymentStatusCase } from '../services/payment.service';
+import { paymentStatusCase, syncBankTxnForPayment } from '../services/payment.service';
 
 const MINOR_LIMIT = 50000;
 
@@ -71,6 +71,7 @@ interface PaymentRow {
   created_at: string;
   tds_pct: number;
   tds_amount: number;
+  bank_txn_id: string | null;
 }
 
 export async function createPayment(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -146,6 +147,19 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
          RETURNING *`,
         [invoiceId, data.amount, data.payment_type, data.payment_ref ?? null, data.payment_date, data.bank ?? null, userId, tdsPctVal, tdsAmount]
       );
+      if (!payment) {
+        return { status: 500, body: { error: 'Internal Server Error', message: 'Failed to record payment' } };
+      }
+
+      // Surface non-Cash payments on Bank Reconciliation (creates/links a bank_transactions row).
+      await syncBankTxnForPayment(tx, payment.id, {
+        payment_type: data.payment_type,
+        payment_ref: data.payment_ref ?? null,
+        bank: data.bank ?? null,
+        payment_date: data.payment_date,
+        amount: data.amount,
+        recorded_by: userId,
+      }, null);
 
       // If minor payment by site, mark invoice as minor_payment
       if (role === 'site') {
@@ -297,6 +311,18 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
          RETURNING *`,
         [data.amount, data.payment_type, data.payment_ref ?? null, data.payment_date, data.bank ?? null, tdsPctVal, tdsAmount, paymentId, invoiceId]
       );
+
+      // Re-link the bank_transactions row to match the edited details (a changed
+      // type/ref/bank/date moves the payment to a different cheque; a changed
+      // amount re-sums the same one; switching to Cash unlinks it entirely).
+      await syncBankTxnForPayment(tx, paymentId, {
+        payment_type: data.payment_type,
+        payment_ref: data.payment_ref ?? null,
+        bank: data.bank ?? null,
+        payment_date: data.payment_date,
+        amount: data.amount,
+        recorded_by: existing.recorded_by,
+      }, existing.bank_txn_id ?? null);
 
       const statusRow = await tx.queryOne<{ payment_status: string }>(
         `UPDATE invoices

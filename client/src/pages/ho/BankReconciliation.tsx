@@ -1,8 +1,26 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import AppShell from '../../components/layout/AppShell';
-import { getBankReconciliation, BankReconciliationRow } from '../../api/reconciliation';
+import { getBankReconciliation, verifyBankTxn, BankReconciliationRow, BankTxnAllocation } from '../../api/reconciliation';
 import { formatINR, formatDate } from '../../utils/formatters';
+import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useAuth } from '../../hooks/useAuth';
+
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "2026-05-12" → "May-2026" (the app's accounting-month label). */
+function monthLabel(ym: string): string {
+  const [y, mo] = ym.split('-');
+  return `${MONTH_ABBR[parseInt(mo, 10) - 1] ?? mo}-${y}`;
+}
+
+/** A cheque can pay several vendors. Show the first + "+N" when it spans more. */
+function vendorSummary(allocations: BankTxnAllocation[]): string {
+  const names = [...new Set(allocations.map(a => a.vendor_name).filter(Boolean))];
+  if (names.length === 0) return '—';
+  if (names.length === 1) return names[0];
+  return `${names[0]} +${names.length - 1}`;
+}
 
 export default function BankReconciliation() {
   const [rows, setRows] = useState<BankReconciliationRow[]>([]);
@@ -10,6 +28,11 @@ export default function BankReconciliation() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [fType, setFType] = useState('All');
+  const [fSite, setFSite] = useState('All');
+  const [fMonth, setFMonth] = useState('All');
+  const [fVerified, setFVerified] = useState('All');
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const { user } = useAuth();
   const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
   async function load() {
@@ -25,18 +48,54 @@ export default function BankReconciliation() {
 
   useEffect(() => { load(); }, []);
 
+  // Tick / un-tick a transaction as verified against the bank statement.
+  // Optimistic: flip the row immediately, revert if the save fails.
+  async function toggleVerified(r: BankReconciliationRow) {
+    if (savingId) return;
+    const next = !r.verified_at;
+    setSavingId(r.id);
+    setRows(prev => prev.map(x => x.id === r.id
+      ? { ...x, verified_at: next ? new Date().toISOString() : null, verified_by_name: next ? (user?.name ?? null) : null }
+      : x));
+    try {
+      const res = await verifyBankTxn(r.id, next);
+      setRows(prev => prev.map(x => x.id === r.id ? { ...x, verified_at: res.verified_at, verified_by: res.verified_by } : x));
+    } catch {
+      setRows(prev => prev.map(x => x.id === r.id ? { ...x, verified_at: r.verified_at, verified_by_name: r.verified_by_name } : x));
+    }
+    setSavingId(null);
+  }
+
+  // Distinct transaction months (YYYY-MM), newest first — driven by the data.
+  const monthOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) {
+      const ym = r.txn_date?.slice(0, 7);
+      if (ym) set.add(ym);
+    }
+    return [...set].sort().reverse();
+  }, [rows]);
+
   const filtered = useMemo(() => rows.filter(r => {
     if (fType !== 'All' && r.txn_type !== fType) return false;
+    if (fMonth !== 'All' && r.txn_date?.slice(0, 7) !== fMonth) return false;
+    if (fVerified === 'Verified' && !r.verified_at) return false;
+    if (fVerified === 'Pending' && r.verified_at) return false;
+    // A transaction matches a site filter when any of its allocations
+    // settles an invoice for that site (a cheque can span sites).
+    if (fSite !== 'All' && !r.allocations.some(a => a.site === fSite)) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!`${r.txn_ref} ${r.bank ?? ''}`.toLowerCase().includes(q)) return false;
+      const vendors = r.allocations.map(a => a.vendor_name).join(' ');
+      if (!`${r.txn_ref} ${r.bank ?? ''} ${vendors}`.toLowerCase().includes(q)) return false;
     }
     return true;
-  }), [rows, search, fType]);
+  }), [rows, search, fType, fSite, fMonth, fVerified]);
 
   const totalTxn = filtered.reduce((s, r) => s + r.txn_amount, 0);
   const totalAlloc = filtered.reduce((s, r) => s + r.allocated_total, 0);
   const untally = filtered.filter(r => !r.tally_ok).length;
+  const verifiedCount = filtered.filter(r => r.verified_at).length;
 
   return (
     <AppShell>
@@ -53,23 +112,40 @@ export default function BankReconciliation() {
 
       {/* Filters */}
       <div className="flex items-center gap-3 mb-0 flex-wrap">
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search cheque no, txn id, bank..."
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search cheque no, txn id, bank, vendor..."
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-200" />
         <select value={fType} onChange={e => setFType(e.target.value)}
           className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
           <option value="All">All Types</option>
           <option>Cheque</option><option>NEFT</option><option>RTGS</option><option>UPI</option><option>Cash</option>
         </select>
+        <select value={fSite} onChange={e => setFSite(e.target.value)}
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+          <option value="All">All Sites</option>
+          {SITES.map(s => <option key={s}>{s}</option>)}
+        </select>
+        <select value={fMonth} onChange={e => setFMonth(e.target.value)}
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+          <option value="All">All Months</option>
+          {monthOptions.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+        </select>
+        <select value={fVerified} onChange={e => setFVerified(e.target.value)}
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
+          <option value="All">All</option>
+          <option value="Verified">Verified</option>
+          <option value="Pending">Pending check</option>
+        </select>
         <span className="text-xs text-gray-400 ml-auto">{filtered.length} records</span>
       </div>
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 mb-5">
         <Kpi label="Transactions" value={String(filtered.length)} />
         <Kpi label="Total cheque / txn amount" value={formatINR(totalTxn)} />
         <Kpi label="Total allocated" value={formatINR(totalAlloc)} />
         <Kpi label="Un-tallied" value={String(untally)} tone={untally > 0 ? 'warn' : 'ok'} />
+        <Kpi label="Verified vs statement" value={`${verifiedCount} / ${filtered.length}`} tone={filtered.length > 0 && verifiedCount === filtered.length ? 'ok' : 'neutral'} />
       </div>
 
       {/* Table */}
@@ -85,19 +161,21 @@ export default function BankReconciliation() {
                 <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Date</th>
                 <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Payment Type</th>
                 <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Cheque / Txn ID</th>
+                <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Vendor</th>
                 <th className="text-left px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Bank</th>
                 <th className="text-right px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Cheque Amount</th>
                 <th className="text-right px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Allocated</th>
                 <th className="text-right px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Balance</th>
                 <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Invoices</th>
                 <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Tally</th>
+                <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Verified</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-gray-400">Loading...</td></tr>
+                <tr><td colSpan={12} className="px-4 py-10 text-center text-sm text-gray-400">Loading...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-gray-400">No transactions yet</td></tr>
+                <tr><td colSpan={12} className="px-4 py-10 text-center text-sm text-gray-400">No transactions yet</td></tr>
               ) : filtered.map((r, idx) => {
                 const isOpen = expanded === r.id;
                 return (
@@ -109,6 +187,7 @@ export default function BankReconciliation() {
                       <td className="px-4 py-3 text-gray-700">{formatDate(r.txn_date)}</td>
                       <td className="px-4 py-3 text-gray-700">{r.txn_type}</td>
                       <td className="px-4 py-3 font-medium text-gray-900">{r.txn_ref}</td>
+                      <td className="px-4 py-3 text-gray-700">{vendorSummary(r.allocations)}</td>
                       <td className="px-4 py-3 text-gray-600">{r.bank ?? '—'}</td>
                       <td className="px-4 py-3 text-right font-medium text-gray-900">{formatINR(r.txn_amount)}</td>
                       <td className="px-4 py-3 text-right text-gray-700">{formatINR(r.allocated_total)}</td>
@@ -121,10 +200,27 @@ export default function BankReconciliation() {
                           <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-amber-50 text-amber-700">Mismatch</span>
                         )}
                       </td>
+                      <td className="px-4 py-3 text-center">
+                        <label
+                          className="inline-flex items-center justify-center cursor-pointer"
+                          title={r.verified_at
+                            ? `Verified${r.verified_by_name ? ` by ${r.verified_by_name}` : ''} on ${formatDate(r.verified_at)}`
+                            : 'Tick once checked against the bank statement'}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!r.verified_at}
+                            disabled={savingId === r.id}
+                            onChange={() => toggleVerified(r)}
+                            className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-200 cursor-pointer disabled:opacity-50"
+                          />
+                        </label>
+                      </td>
                     </tr>
                     {isOpen && (
                       <tr className="bg-gray-50/80">
-                        <td colSpan={10} className="px-6 py-4">
+                        <td colSpan={12} className="px-6 py-4">
                           <div className="text-xs font-medium text-gray-500 mb-2">Invoices paid by this transaction</div>
                           {r.allocations.length === 0 ? (
                             <div className="text-xs text-gray-400">No linked invoices.</div>

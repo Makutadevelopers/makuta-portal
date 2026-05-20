@@ -7,6 +7,7 @@ import { authenticate } from '../middleware/auth';
 import { requireRole } from '../middleware/rbac';
 import {
   getInvoices,
+  getInvoiceById,
   createInvoice,
   createInvoiceBatch,
   updateInvoice,
@@ -30,6 +31,8 @@ router.use(authenticate);
 
 router.get('/', getInvoices);
 router.get('/bin', requireRole(['ho', 'mgmt']), getBinInvoices);
+// Must stay AFTER the literal GET routes above so '/bin' isn't captured by ':id'.
+router.get('/:id', getInvoiceById);
 router.post('/bin/purge', requireRole(['mgmt']), purgeOldBinInvoices);
 router.post('/bin/:id/restore', requireRole(['ho']), restoreInvoice);
 router.delete('/bin/:id', requireRole(['mgmt']), permanentDeleteInvoice);

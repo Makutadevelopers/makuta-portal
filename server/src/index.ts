@@ -3,6 +3,7 @@
 // Loads env (fail-fast), registers middleware, mounts routes, starts server.
 
 import express from 'express';
+import compression from 'compression';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -36,6 +37,12 @@ import cron from 'node-cron';
 console.log('Imported routes:', { authRoutes, vendorRoutes });
 
 const app = express();
+
+// gzip JSON (and any other) responses. The fronting nginx only gzips
+// text/css/xml — application/json was excluded, so list endpoints like
+// GET /api/invoices (thousands of rows) were shipped uncompressed. Doing it
+// here makes the API own its own compression regardless of proxy config.
+app.use(compression());
 
 // Global middleware
 app.use(cors({

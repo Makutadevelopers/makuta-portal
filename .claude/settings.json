@@ -1,6 +1,8 @@
 {
   "permissions": {
     "allow": [
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
       "Bash(npx tsc:*)",
       "Bash(find /Users/sohailshaik/Desktop/makuta-portal/server/src/routes -name \"*.ts\" -exec grep -l \"aging\\\\|payment\" {} \\\\;)",
       "Bash(npx vitest:*)",
@@ -110,7 +112,24 @@
       "Bash(curl -sS -X POST -H \"Content-Type: application/json\" -d '{\"email\":\"raju@makuta.in\",\"password\":\"ho123\"}' -w \"\\\\nHTTP %{http_code}\\\\n\" http://localhost:4000/api/auth/login)",
       "Bash(ps -p 16501 -o pid,comm,args)",
       "Bash(curl -s http://localhost:4100/api/health)",
-      "Bash(curl -sS -X POST -H \"Content-Type: application/json\" -H \"Origin: https://makuta-portal.vercel.app\" -d '{\"email\":\"raju@makuta.in\",\"password\":\"ho123\"}' -w \"\\\\nHTTP %{http_code}\\\\n\" https://monsoon-shakiness-finless.ngrok-free.dev/api/auth/login)"
+      "Bash(curl -sS -X POST -H \"Content-Type: application/json\" -H \"Origin: https://makuta-portal.vercel.app\" -d '{\"email\":\"raju@makuta.in\",\"password\":\"ho123\"}' -w \"\\\\nHTTP %{http_code}\\\\n\" https://monsoon-shakiness-finless.ngrok-free.dev/api/auth/login)",
+      "Bash(git commit -m ' *)",
+      "Bash(grep -E \"\\\\.\\(tsx?|jsx?\\)$\")",
+      "Bash(ssh -o BatchMode=yes -o ConnectTimeout=10 ubuntu@52.3.199.149 'echo connected && docker ps --format \"{{.Names}}\" | grep -E \"portal|api\" | head -20')",
+      "Bash(ssh -o BatchMode=yes -o ConnectTimeout=10 ec2@52.3.199.149 'echo connected && docker ps --format \"{{.Names}}\" | grep portal | head')",
+      "Bash(ssh -i \"/Users/sohailshaik/Downloads/certificates -keys/makuta-crm-key.pem\" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no ec2@52.3.199.149 'echo connected && docker ps --format \"{{.Names}}\" | grep -E \"portal|api\" | head')",
+      "Bash(ssh -i '/Users/sohailshaik/Downloads/certificates -keys/makuta-crm-key.pem' -o StrictHostKeyChecking=no ubuntu@52.3.199.149 'sudo docker ps --format \"{{.Names}} | {{.Image}}\" | grep -i -E \"portal|makuta\"')",
+      "Bash(ssh -i '/Users/sohailshaik/Downloads/certificates -keys/makuta-crm-key.pem' -o StrictHostKeyChecking=no ubuntu@52.3.199.149 'sudo docker exec makuta_portal_api_prod sh -c \"echo HOST=\\\\$DB_HOST DB=\\\\$DB_NAME USER=\\\\$DB_USER PORT=\\\\$DB_PORT SSL=\\\\$DB_SSL\"')",
+      "Bash(ssh -i '/Users/sohailshaik/Downloads/certificates -keys/makuta-crm-key.pem' -o StrictHostKeyChecking=no ubuntu@52.3.199.149 'sudo docker exec makuta_portal_api_prod sh -lc \"PGPASSWORD=\\\\$DB_PASSWORD psql -h \\\\$DB_HOST -U \\\\$DB_USER -d \\\\$DB_NAME -p \\\\$DB_PORT -v ON_ERROR_STOP=1 -c \\\\\"SELECT COUNT\\(*\\) FROM invoices WHERE deleted_at IS NULL;\\\\\"\"')",
+      "Bash(ssh -i '/Users/sohailshaik/Downloads/certificates -keys/makuta-crm-key.pem' -o StrictHostKeyChecking=no ubuntu@52.3.199.149 'sudo docker run --rm --network crm_makuta_prod_net -e PGPASSWORD=\"$\\(sudo docker exec makuta_portal_api_prod printenv DB_PASSWORD\\)\" postgres:16-alpine psql -h database-1.ced4ca8e0c1w.us-east-1.rds.amazonaws.com -U makuta_admin -d makuta_portal -p 5432 -v ON_ERROR_STOP=1 -c \"SELECT COUNT\\(*\\) FROM invoices WHERE deleted_at IS NULL;\" 2>&1')",
+      "Bash(ssh -i *)",
+      "Bash(npx eslint *)",
+      "Read(//Volumes/mac-scratch/**)",
+      "Bash(launchctl list *)",
+      "Bash(git checkout *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://invoice.makutadevelopers.com/api/analytics)",
+      "Bash(git fetch *)",
+      "Bash(docker version *)"
     ],
     "additionalDirectories": [
       "/tmp",

@@ -1,15 +1,22 @@
 import { useState, useEffect, useMemo } from 'react';
 import { getAuditLogs, undoBatchImport } from '../../api/audit';
+import { getVendorMerges, revertVendorMerge, VendorMerge } from '../../api/vendors';
 import { AuditLog } from '../../types/audit';
 import AppShell from '../../components/layout/AppShell';
 import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useAuth } from '../../hooks/useAuth';
 
 export default function AuditTrail() {
+  const { user } = useAuth();
+  const canRevertMerge = user?.role === 'ho';
   const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [merges, setMerges] = useState<VendorMerge[]>([]);
   const [loading, setLoading] = useState(true);
   const [confirmBatchId, setConfirmBatchId] = useState<string | null>(null);
   const [undoing, setUndoing] = useState(false);
+  const [confirmMergeId, setConfirmMergeId] = useState<string | null>(null);
+  const [revertingMergeId, setRevertingMergeId] = useState<string | null>(null);
 
   // Filters
   const [fSite, setFSite] = useState('All');
@@ -32,6 +39,7 @@ export default function AuditTrail() {
     Disputed: s => /^(disputed|cleared dispute)/i.test(s),
     Paid: s => /payment|paid/i.test(s),
     Imported: s => /import|imported/i.test(s),
+    Merges: s => /^(merged vendor|reverted vendor merge)/i.test(s),
   };
   const actionOptions = Object.keys(actionMatchers);
 
@@ -63,7 +71,27 @@ export default function AuditTrail() {
     getAuditLogs().then(setLogs).finally(() => setLoading(false));
   }
 
-  useEffect(() => { loadLogs(); }, []);
+  function loadMerges() {
+    getVendorMerges(true).then(setMerges).catch(() => setMerges([]));
+  }
+
+  useEffect(() => { loadLogs(); loadMerges(); }, []);
+
+  const mergesById = useMemo(() => {
+    const m = new Map<string, VendorMerge>();
+    for (const v of merges) m.set(v.id, v);
+    return m;
+  }, [merges]);
+
+  function getRevertableMergeId(log: AuditLog): string | null {
+    if (!/^merged vendor/i.test(log.action)) return null;
+    const meta = log.metadata as Record<string, unknown> | null;
+    const mergeId = meta && typeof meta.mergeId === 'string' ? meta.mergeId : null;
+    if (!mergeId) return null;
+    const m = mergesById.get(mergeId);
+    if (!m || m.reverted_at) return null;
+    return mergeId;
+  }
 
   function fmtDate(d: string): string {
     return new Date(d).toLocaleDateString('en-IN', {
@@ -168,6 +196,21 @@ export default function AuditTrail() {
       alert(err instanceof Error ? err.message : 'Failed to undo import');
     } finally {
       setUndoing(false);
+    }
+  }
+
+  async function handleRevertMerge(mergeId: string) {
+    setRevertingMergeId(mergeId);
+    try {
+      const result = await revertVendorMerge(mergeId);
+      alert(`Restored "${result.restoredVendor.name}" — ${result.restoredInvoiceCount} invoice${result.restoredInvoiceCount === 1 ? '' : 's'} re-pointed back.`);
+      setConfirmMergeId(null);
+      loadLogs();
+      loadMerges();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to revert merge');
+    } finally {
+      setRevertingMergeId(null);
     }
   }
 
@@ -288,6 +331,7 @@ export default function AuditTrail() {
           {filtered.map((log, i) => {
             const badge = getRoleBadge(log.user_name);
             const batchId = isBulkImport(log);
+            const revertableMergeId = canRevertMerge ? getRevertableMergeId(log) : null;
             const invNo = getLogInvoiceNo(log);
             const site = getLogSite(log);
             return (
@@ -342,6 +386,37 @@ export default function AuditTrail() {
                         className="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 transition-colors"
                       >
                         Undo Import
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {revertableMergeId && (
+                  <div className="flex-shrink-0">
+                    {confirmMergeId === revertableMergeId ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-amber-700 font-medium">Revert this merge?</span>
+                        <button
+                          onClick={() => handleRevertMerge(revertableMergeId)}
+                          disabled={revertingMergeId === revertableMergeId}
+                          className="px-3 py-1 text-xs font-medium text-white bg-amber-600 rounded hover:bg-amber-700 disabled:opacity-50"
+                        >
+                          {revertingMergeId === revertableMergeId ? 'Reverting…' : 'Yes, revert'}
+                        </button>
+                        <button
+                          onClick={() => setConfirmMergeId(null)}
+                          disabled={revertingMergeId === revertableMergeId}
+                          className="px-3 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmMergeId(revertableMergeId)}
+                        className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-md hover:bg-amber-100 transition-colors"
+                      >
+                        Revert Merge
                       </button>
                     )}
                   </div>

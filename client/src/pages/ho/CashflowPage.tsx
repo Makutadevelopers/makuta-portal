@@ -87,7 +87,7 @@ export default function CashflowPage() {
             <div className="text-xs text-gray-500 mt-1">
               {activeTab === 'expenditure'
                 ? 'Monthly breakdown by accounting month'
-                : 'Monthly breakdown by accounting month'}
+                : 'Monthly breakdown by payment month'}
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
@@ -187,7 +187,7 @@ export default function CashflowPage() {
           <div className="mt-3 text-xs text-gray-400">
             {activeTab === 'expenditure'
               ? `By invoice date · ${fSite === 'All' ? 'All Sites' : fSite}`
-              : `By invoice month · ${fSite === 'All' ? 'All Sites' : fSite}`
+              : `By payment month · ${fSite === 'All' ? 'All Sites' : fSite}`
             }
           </div>
         </>

@@ -160,6 +160,9 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
 interface ReconciliationRow extends BankTxnRow {
   allocated_total: string | number;
   allocation_count: string | number;
+  verified_at: string | null;
+  verified_by: string | null;
+  verified_by_name: string | null;
 }
 
 interface AllocationDetail {
@@ -177,11 +180,13 @@ export async function listReconciliation(req: Request, res: Response, next: Next
   try {
     const txns = await query<ReconciliationRow>(
       `SELECT bt.*,
+              vu.name AS verified_by_name,
               COALESCE(SUM(p.amount), 0)::NUMERIC(14,2) AS allocated_total,
               COUNT(p.id)                               AS allocation_count
        FROM bank_transactions bt
        LEFT JOIN payments p ON p.bank_txn_id = bt.id
-       GROUP BY bt.id
+       LEFT JOIN users vu ON vu.id = bt.verified_by
+       GROUP BY bt.id, vu.name
        ORDER BY bt.txn_date DESC, bt.created_at DESC`
     );
 
@@ -238,6 +243,60 @@ export async function listReconciliation(req: Request, res: Response, next: Next
     });
 
     res.json(out);
+  } catch (err) {
+    next(err);
+  }
+}
+
+const verifySchema = z.object({
+  verified: z.boolean(),
+});
+
+interface VerifyResultRow {
+  id: string;
+  txn_ref: string;
+  verified_at: string | null;
+  verified_by: string | null;
+}
+
+// PATCH /api/reconciliation/:id/verify — HO + MD
+//   Marks a bank transaction as verified (ticked) against the bank
+//   statement, or clears the verification. Records who verified and when.
+export async function verifyReconciliation(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    if (!z.string().uuid().safeParse(id).success) {
+      res.status(400).json({ error: 'Bad Request', message: 'Invalid transaction id' });
+      return;
+    }
+    const { verified } = verifySchema.parse(req.body);
+    const { id: userId } = req.user!;
+
+    const updated = await query<VerifyResultRow>(
+      `UPDATE bank_transactions
+       SET verified_at = ${verified ? 'NOW()' : 'NULL'},
+           verified_by = ${verified ? '$2' : 'NULL'}
+       WHERE id = $1
+       RETURNING id, txn_ref, verified_at, verified_by`,
+      verified ? [id, userId] : [id]
+    );
+
+    if (updated.length === 0) {
+      res.status(404).json({ error: 'Not Found', message: 'Bank transaction not found' });
+      return;
+    }
+
+    try {
+      await logAudit({
+        userId,
+        action: `${verified ? 'Verified' : 'Un-verified'} bank transaction ${updated[0].txn_ref} against bank statement`,
+        metadata: { bank_txn_id: id, verified },
+      });
+    } catch (err) {
+      console.error('[audit] verifyReconciliation audit log failed:', err);
+    }
+
+    res.json(updated[0]);
   } catch (err) {
     next(err);
   }

@@ -25,6 +25,9 @@ export interface BankReconciliationRow {
   allocation_count: number;
   balance: number;
   tally_ok: boolean;
+  verified_at: string | null;
+  verified_by: string | null;
+  verified_by_name: string | null;
   allocations: BankTxnAllocation[];
 }
 
@@ -45,6 +48,18 @@ export interface BulkPayInput {
 
 export function getBankReconciliation(): Promise<BankReconciliationRow[]> {
   return apiFetch<BankReconciliationRow[]>('/reconciliation');
+}
+
+export function verifyBankTxn(id: string, verified: boolean): Promise<{
+  id: string;
+  txn_ref: string;
+  verified_at: string | null;
+  verified_by: string | null;
+}> {
+  return apiFetch(`/reconciliation/${id}/verify`, {
+    method: 'PATCH',
+    body: JSON.stringify({ verified }),
+  });
 }
 
 export function bulkPayInvoices(data: BulkPayInput): Promise<{

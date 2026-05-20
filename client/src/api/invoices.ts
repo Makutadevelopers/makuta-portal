@@ -5,6 +5,12 @@ export function getInvoices(): Promise<Invoice[]> {
   return apiFetch<Invoice[]>('/invoices');
 }
 
+// Single invoice with the same computed shape the list returns. Used to patch
+// one row after an edit instead of re-fetching the whole list.
+export function getInvoice(id: string): Promise<Invoice> {
+  return apiFetch<Invoice>(`/invoices/${id}`);
+}
+
 export function createInvoice(data: CreateInvoiceData): Promise<Invoice> {
   return apiFetch<Invoice>('/invoices', {
     method: 'POST',

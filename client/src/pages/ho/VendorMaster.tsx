@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, FormEvent, Fragment } from 'react';
+import { useState, FormEvent, Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import { useVendors } from '../../hooks/useVendors';
 import { useInvoices } from '../../hooks/useInvoices';
@@ -6,9 +6,8 @@ import { useAuth } from '../../hooks/useAuth';
 import {
   createVendor, updateVendor, deleteVendor, getSimilarVendors,
   mergeVendors as mergeVendorsApi,
-  getVendorMerges, revertVendorMerge, VendorMerge,
 } from '../../api/vendors';
-import { formatINR, formatDate } from '../../utils/formatters';
+import { formatINR } from '../../utils/formatters';
 import CategorySelect from '../../components/shared/CategorySelect';
 import { Vendor } from '../../types/vendor';
 import AppShell from '../../components/layout/AppShell';
@@ -40,16 +39,8 @@ export default function VendorMaster() {
   const [editingTermsId, setEditingTermsId] = useState<string | null>(null);
   const [savingTermsId, setSavingTermsId] = useState<string | null>(null);
   const [mergeFrom, setMergeFrom] = useState<Vendor | null>(null);
-  const [merges, setMerges] = useState<VendorMerge[]>([]);
-  const [revertingId, setRevertingId] = useState<string | null>(null);
-  const [showAllMerges, setShowAllMerges] = useState(false);
   const { notify } = useToast();
   const { confirm, dialog: confirmDialog } = useConfirm();
-
-  const loadMerges = useCallback(() => {
-    getVendorMerges().then(setMerges).catch(() => setMerges([]));
-  }, []);
-  useEffect(() => { loadMerges(); }, [loadMerges]);
 
   async function handleQuickTermsChange(v: Vendor, newTerms: number) {
     if (newTerms === v.payment_terms) {
@@ -132,29 +123,6 @@ export default function VendorMaster() {
     }
   }
 
-  async function handleRevert(m: VendorMerge) {
-    const invoiceWord = `${m.invoice_count} invoice${m.invoice_count === 1 ? '' : 's'}`;
-    const ok = await confirm({
-      title: 'Revert this merge?',
-      message: `"${m.removed_vendor_name}" will be restored as a separate vendor and ${invoiceWord} will be re-pointed back to it.`,
-      confirmLabel: 'Revert merge',
-      variant: 'warning',
-    });
-    if (!ok) return;
-    setRevertingId(m.id);
-    try {
-      await revertVendorMerge(m.id);
-      notify(`Restored "${m.removed_vendor_name}"`);
-      loadMerges();
-      refresh();
-      refreshInvoices();
-    } catch (err) {
-      notify(err instanceof Error ? err.message : 'Revert failed', 'error');
-    } finally {
-      setRevertingId(null);
-    }
-  }
-
   return (
     <AppShell>
       {confirmDialog}
@@ -234,52 +202,6 @@ export default function VendorMaster() {
         />
       )}
 
-      {(() => {
-        const liveMerges = merges.filter(m => !m.reverted_at);
-        if (liveMerges.length === 0) return null;
-        const visible = showAllMerges ? liveMerges : liveMerges.slice(0, 5);
-        const hidden = liveMerges.length - visible.length;
-        return (
-          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="text-xs font-medium text-blue-900 mb-2">
-              Recent merges {isSite ? '(yours)' : ''} — you can revert if needed
-              <span className="text-blue-600/70 font-normal ml-1">({liveMerges.length})</span>
-            </div>
-            <div className={`space-y-1.5 ${showAllMerges ? 'max-h-80 overflow-y-auto pr-1' : ''}`}>
-              {visible.map(m => (
-                <div key={m.id} className="flex items-center justify-between gap-3 px-3 py-2 bg-white rounded border border-blue-100 text-xs">
-                  <div className="min-w-0 flex-1 text-gray-800">
-                    <span className="font-medium">{m.removed_vendor_name}</span>
-                    <span className="text-blue-600 mx-2">→</span>
-                    <span className="font-medium">{m.kept_vendor_name ?? '(deleted)'}</span>
-                    <span className="text-gray-500 ml-2">
-                      · {m.invoice_count} invoice{m.invoice_count === 1 ? '' : 's'}
-                      {m.merged_by_name ? ` · by ${m.merged_by_name}` : ''}
-                      {' · '}{formatDate(m.merged_at)}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => handleRevert(m)}
-                    disabled={revertingId === m.id}
-                    className="text-xs text-amber-700 hover:bg-amber-50 rounded px-2 py-1 disabled:opacity-50 flex-shrink-0"
-                  >
-                    {revertingId === m.id ? 'Reverting…' : 'Revert'}
-                  </button>
-                </div>
-              ))}
-            </div>
-            {(hidden > 0 || showAllMerges) && (
-              <button
-                onClick={() => setShowAllMerges(v => !v)}
-                className="mt-2 text-xs text-blue-700 hover:underline"
-              >
-                {showAllMerges ? 'Show less' : `Show ${hidden} more`}
-              </button>
-            )}
-          </div>
-        );
-      })()}
-
       {mergeFrom && (
         <MergeIntoModal
           removeVendor={mergeFrom}
@@ -293,7 +215,6 @@ export default function VendorMaster() {
             notify(`Merged "${removedName}" into "${keptName}"${suffix}`);
             refresh();
             refreshInvoices();
-            loadMerges();
           }}
           onError={msg => notify(msg, 'error')}
         />
@@ -676,7 +597,7 @@ function MergeIntoModal({
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg">&#10005;</button>
         </div>
         <div className="text-xs text-gray-600 mb-4">
-          All invoices for <strong>{removeVendor.name}</strong> will be re-pointed to the vendor you pick below, and <strong>{removeVendor.name}</strong> will be removed from Vendor Master. You can revert this from the Recent Merges list.
+          All invoices for <strong>{removeVendor.name}</strong> will be re-pointed to the vendor you pick below, and <strong>{removeVendor.name}</strong> will be removed from Vendor Master. You can revert this from the Audit Trail.
         </div>
 
         <input

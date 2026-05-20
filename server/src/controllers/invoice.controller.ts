@@ -155,6 +155,47 @@ export async function getInvoices(req: Request, res: Response, next: NextFunctio
   }
 }
 
+// GET /api/invoices/:id — single invoice with the SAME computed shape the
+// list returns (balance, attachment_count, aging joins), filtered by role.
+// Lets the client patch one row after an edit instead of re-fetching the
+// whole list. Returns 404 if the row is deleted or outside the caller's scope.
+export async function getInvoiceById(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { role } = req.user!;
+    const id = req.params.id as string;
+
+    let invoice: InvoiceRow | null;
+    if (role === 'site') {
+      const userSites = req.user!.sites && req.user!.sites.length > 0
+        ? req.user!.sites
+        : (req.user!.site ? [req.user!.site] : []);
+      invoice = await queryOne<InvoiceRow>(
+        `SELECT ${SITE_PROJECTION}, ${AGG_FIELDS}
+         FROM invoices inv
+         ${AGG_JOINS}
+         WHERE inv.id = $1 AND inv.site = ANY($2) AND inv.deleted_at IS NULL`,
+        [id, userSites]
+      );
+    } else {
+      invoice = await queryOne<InvoiceRow>(
+        `SELECT inv.*, ${AGG_FIELDS}
+         FROM invoices inv
+         ${AGG_JOINS}
+         WHERE inv.id = $1 AND inv.deleted_at IS NULL`,
+        [id]
+      );
+    }
+
+    if (!invoice) {
+      res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
+      return;
+    }
+    res.json(invoice);
+  } catch (err) {
+    next(err);
+  }
+}
+
 // Per-row insert pipeline shared by createInvoice (single) and
 // createInvoiceBatch (many). Runs site canonicalisation, vendor-master
 // lookup, category-match, dedup checks, INSERT, and audit log. Returns a

@@ -3,10 +3,11 @@
 # Daily local backup pull from AWS S3 to the user's external drive.
 #
 # What this does, every run:
-#   1. Confirms /Volumes/mac-scratch is mounted (skips harmlessly if not).
+#   1. Confirms /Volumes/mac-scratch is mounted (defers + alerts if not).
 #   2. Reads AWS read-only creds from macOS Keychain (set up once via INSTALL.md).
-#   3. Picks the latest dated folder from each S3 prefix on
-#      s3://makuta-backup-use1/{db-backups,file-backups}/.
+#   3. Catch-up sync: for each of the last CATCHUP_DAYS (default 7), downloads
+#      any dated DB dump / file-backup from s3://makuta-backup-use1/ that isn't
+#      already present locally — so a skipped run self-heals on the next run.
 #   4. Downloads them to
 #        /Volumes/mac-scratch/Backups/invoice portal/<YYYY-MM-DD>/{db,files}/
 #   5. Trims local copies older than RETENTION_DAYS (default 30).
@@ -35,7 +36,11 @@ echo "════════════════════════�
 
 # ── Preflight ─────────────────────────────────────────────────────────────
 if [ ! -d "$DRIVE_ROOT" ]; then
-  echo "[skip] External drive $DRIVE_ROOT is not mounted. Will catch up next run."
+  echo "[skip] External drive $DRIVE_ROOT is not mounted — backup deferred."
+  echo "       The next run will backfill this gap automatically (catch-up window: ${CATCHUP_DAYS:-7} days)."
+  # Best-effort desktop alert so a skip isn't silent. May not surface from a
+  # LaunchAgent context, but is harmless when it doesn't.
+  osascript -e 'display notification "Backup drive not mounted — will backfill on next run." with title "Makuta backup skipped"' >/dev/null 2>&1 || true
   exit 0
 fi
 if ! command -v aws >/dev/null 2>&1; then
@@ -59,52 +64,75 @@ export AWS_DEFAULT_REGION="$S3_REGION"
 
 mkdir -p "$DEST_ROOT"
 
-# ── Discover latest backup folders / files on S3 ──────────────────────────
-# file-backups/ holds date-stamped sub-prefixes (file-backups/YYYY-MM-DD/...).
-# db-backups/   holds dump files directly (makuta_*.sql.gz), no sub-prefix.
-
-latest_prefix() {
-  aws s3 ls "s3://$S3_BUCKET/$1/" \
-    | awk '$1=="PRE"{sub("/","",$2); print $2}' \
-    | sort \
-    | tail -1
-}
-
-latest_file() {
-  aws s3api list-objects-v2 \
-    --bucket "$S3_BUCKET" \
-    --prefix "$1/" \
-    --query 'reverse(sort_by(Contents[?ends_with(Key, `.sql.gz`)], &LastModified))[0].Key' \
-    --output text 2>/dev/null
-}
-
-LATEST_DB_KEY=$(latest_file db-backups || true)
-LATEST_FILES=$(latest_prefix file-backups || true)
-
-if [ -z "$LATEST_DB_KEY" ] || [ "$LATEST_DB_KEY" = "None" ]; then
-  echo "[warn] No db-backups found on s3://$S3_BUCKET — skipping DB sync."
-  LATEST_DB_KEY=""
-fi
-if [ -z "$LATEST_FILES" ]; then
-  echo "[warn] No file-backups found on s3://$S3_BUCKET — skipping file sync."
-fi
-
-# ── Sync ──────────────────────────────────────────────────────────────────
+# ── Catch-up sync ──────────────────────────────────────────────────────────
+# Pull every dated backup from the last CATCHUP_DAYS that we don't already
+# have locally — not just the newest. This makes a skipped run (drive
+# unplugged, laptop asleep) self-heal: the next run backfills the gap instead
+# of silently leaving a hole. db-backups/ holds dump files named
+# makuta_*_YYYYMMDD_HHMMSS.sql.gz; file-backups/ holds YYYY-MM-DD sub-prefixes.
+CATCHUP_DAYS="${CATCHUP_DAYS:-7}"
 TODAY=$(date '+%Y-%m-%d')
 TARGET="$DEST_ROOT/$TODAY"
 mkdir -p "$TARGET"
 
-if [ -n "$LATEST_DB_KEY" ]; then
-  mkdir -p "$TARGET/db"
-  DB_FILE=$(basename "$LATEST_DB_KEY")
-  echo "[sync] $LATEST_DB_KEY  →  $TARGET/db/$DB_FILE"
-  aws s3 cp "s3://$S3_BUCKET/$LATEST_DB_KEY" "$TARGET/db/$DB_FILE" \
-    --no-progress --only-show-errors
+# Dates we care about: today and the prior CATCHUP_DAYS-1 days.
+WANTED_DATES=()
+for d in $(seq 0 $((CATCHUP_DAYS - 1))); do
+  WANTED_DATES+=("$(date -v-"${d}"d '+%Y-%m-%d')")
+done
+
+PULLED_ANY=0
+BACKFILLED=()
+
+# --- DB dumps ---
+ALL_DB_KEYS=$(aws s3api list-objects-v2 --bucket "$S3_BUCKET" --prefix "db-backups/" \
+  --query 'Contents[?ends_with(Key, `.sql.gz`)].Key' --output text 2>/dev/null | tr '\t' '\n' || true)
+if [ -z "$ALL_DB_KEYS" ]; then
+  echo "[warn] No db-backups found on s3://$S3_BUCKET — skipping DB sync."
 fi
-if [ -n "$LATEST_FILES" ]; then
-  echo "[sync] file-backups/$LATEST_FILES  →  $TARGET/files"
-  aws s3 sync "s3://$S3_BUCKET/file-backups/$LATEST_FILES/" "$TARGET/files/" \
-    --no-progress --only-show-errors
+
+for wd in "${WANTED_DATES[@]}"; do
+  compact="${wd//-/}"                                   # 2026-05-20 -> 20260520
+  key=$(echo "$ALL_DB_KEYS" | grep "_${compact}_" | sort | tail -1 || true)
+  [ -z "$key" ] && continue                             # no dump for that day on S3
+  fname=$(basename "$key")
+  dest="$DEST_ROOT/$wd/db/$fname"
+  [ -f "$dest" ] && continue                            # already have it
+  mkdir -p "$DEST_ROOT/$wd/db"
+  echo "[sync] $key  →  $dest"
+  if aws s3 cp "s3://$S3_BUCKET/$key" "$dest" --no-progress --only-show-errors; then
+    PULLED_ANY=1
+    [ "$wd" != "$TODAY" ] && BACKFILLED+=("$wd")
+  fi
+done
+
+# --- File backups (date-prefixed) ---
+ALL_FILE_PREFIXES=$(aws s3 ls "s3://$S3_BUCKET/file-backups/" \
+  | awk '$1=="PRE"{sub("/","",$2); print $2}' || true)
+if [ -z "$ALL_FILE_PREFIXES" ]; then
+  echo "[warn] No file-backups found on s3://$S3_BUCKET — skipping file sync."
+fi
+
+for wd in "${WANTED_DATES[@]}"; do
+  echo "$ALL_FILE_PREFIXES" | grep -qx "$wd" || continue # no file backup that day
+  destdir="$DEST_ROOT/$wd/files"
+  # Skip if we already have a non-empty local copy.
+  if [ -d "$destdir" ] && [ -n "$(ls -A "$destdir" 2>/dev/null)" ]; then continue; fi
+  mkdir -p "$destdir"
+  echo "[sync] file-backups/$wd  →  $destdir"
+  if aws s3 sync "s3://$S3_BUCKET/file-backups/$wd/" "$destdir/" --no-progress --only-show-errors; then
+    PULLED_ANY=1
+    [ "$wd" != "$TODAY" ] && BACKFILLED+=("$wd")
+  fi
+done
+
+if [ "${#BACKFILLED[@]}" -gt 0 ]; then
+  # De-dupe and report which prior days were recovered.
+  uniq_days=$(printf '%s\n' "${BACKFILLED[@]}" | sort -u | tr '\n' ' ')
+  echo "[catch-up] Backfilled missed day(s): $uniq_days"
+fi
+if [ "$PULLED_ANY" -eq 0 ]; then
+  echo "[ok] Nothing new to pull — local copies already current for the last $CATCHUP_DAYS days."
 fi
 
 # ── Retention — trim local copies older than $RETENTION_DAYS days ────────

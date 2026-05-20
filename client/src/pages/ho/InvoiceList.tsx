@@ -32,7 +32,7 @@ import { Vendor } from '../../types/vendor';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 export default function InvoiceList() {
-  const { invoices, loading, refresh } = useInvoices();
+  const { invoices, loading, refresh, patchInvoice, removeInvoice } = useInvoices();
   const { withinTerms, overdue } = useAgingCalc();
   const { vendors } = useVendors();
   const [searchParams] = useSearchParams();
@@ -54,6 +54,7 @@ export default function InvoiceList() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sortBy, setSortBy] = useState<'invoice_date' | 'created_at' | 'last_paid_date'>('created_at');
+  const [showFilters, setShowFilters] = useState(false);
   const [expandedEditId, setExpandedEditId] = useState<string | null>(null);
 
   // Sync search from URL query param
@@ -185,6 +186,25 @@ export default function InvoiceList() {
     [invoices],
   );
 
+  // Active-filter chips shown beneath the filter bar (excludes Search + Sort,
+  // which stay as their own visible controls). Each chip can clear its filter.
+  const fmtMonth = (ym: string): string => {
+    const [y, m] = ym.split('-');
+    const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${names[parseInt(m, 10) - 1]} ${y}`;
+  };
+  const activeChips: { key: string; label: string; clear: () => void }[] = [];
+  if (fSite !== 'All') activeChips.push({ key: 'site', label: `Site: ${fSite}`, clear: () => setFSite('All') });
+  if (fStatus !== 'All') activeChips.push({ key: 'status', label: `Status: ${fStatus}`, clear: () => setFStatus('All') });
+  if (fPurpose !== 'All') activeChips.push({ key: 'cat', label: `Category: ${fPurpose}`, clear: () => setFPurpose('All') });
+  if (invMode === 'month' && fMonth) activeChips.push({ key: 'inv', label: `Invoiced: ${fmtMonth(fMonth)}`, clear: () => setFMonth('') });
+  if (invMode === 'range' && (dateFrom || dateTo)) activeChips.push({ key: 'inv', label: `Invoiced: ${dateFrom ? formatDate(dateFrom) : '…'} – ${dateTo ? formatDate(dateTo) : '…'}`, clear: () => { setDateFrom(''); setDateTo(''); } });
+  if (fPaidMonth) activeChips.push({ key: 'paid', label: `Paid: ${fmtMonth(fPaidMonth)}`, clear: () => setFPaidMonth('') });
+  const clearAllFilters = () => {
+    setFSite('All'); setFStatus('All'); setFPurpose('All');
+    setFMonth(''); setDateFrom(''); setDateTo(''); setFPaidMonth('');
+  };
+
   // The row checkbox drives two flows: bulk actions (finalize/pay) AND
   // Export. Bulk-action handlers below already re-filter the selection to
   // the rows they apply to (drafts only for finalize, unpaid only for pay),
@@ -266,13 +286,13 @@ export default function InvoiceList() {
   async function handlePush(id: string) {
     await pushInvoice(id);
     notify('Invoice finalized');
-    refresh();
+    patchInvoice(id);
   }
 
   async function handleUndo(id: string) {
     await undoPushInvoice(id);
     notify('Finalization reverted');
-    refresh();
+    patchInvoice(id);
   }
 
   async function handleDelete(inv: Invoice) {
@@ -286,7 +306,7 @@ export default function InvoiceList() {
     try {
       await deleteInvoiceApi(inv.id);
       notify('Invoice deleted');
-      refresh();
+      removeInvoice(inv.id);
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Failed to delete');
     }
@@ -567,7 +587,7 @@ export default function InvoiceList() {
           invoice={payInvoice}
           balance={agingMap.get(payInvoice.id)?.balance ?? Number(payInvoice.invoice_amount)}
           onClose={() => setPayInvoice(null)}
-          onSaved={() => { setPayInvoice(null); notify('Payment recorded'); refresh(); }}
+          onSaved={() => { const id = payInvoice.id; setPayInvoice(null); notify('Payment recorded'); patchInvoice(id); }}
         />
       )}
 
@@ -587,9 +607,10 @@ export default function InvoiceList() {
           onClose={() => setDisputeInvoice(null)}
           onDone={() => {
             const wasDisputed = disputeInvoice.disputed;
+            const id = disputeInvoice.id;
             setDisputeInvoice(null);
             notify(wasDisputed ? 'Dispute cleared' : 'Invoice disputed');
-            refresh();
+            patchInvoice(id);
           }}
         />
       )}
@@ -619,7 +640,7 @@ export default function InvoiceList() {
               const fresh = await getPayments(inv.id);
               setHistoryPayments(fresh);
             } catch { /* leave stale */ }
-            refresh();
+            patchInvoice(inv.id);
           }}
         />
       )}
@@ -754,7 +775,7 @@ export default function InvoiceList() {
                             vendors={vendors}
                             editInvoice={inv}
                             onCancel={() => setExpandedEditId(null)}
-                            onSaved={() => { setExpandedEditId(null); notify('Invoice updated'); refresh(); }}
+                            onSaved={() => { setExpandedEditId(null); notify('Invoice updated'); patchInvoice(inv.id); }}
                           />
                         </td>
                       </tr>
