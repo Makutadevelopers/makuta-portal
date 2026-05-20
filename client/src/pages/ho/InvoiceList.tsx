@@ -2601,7 +2601,7 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
   const initialAllocs = useMemo(() => {
     const m: Record<string, string> = {};
     for (const inv of invoices) {
-      const bal = agingMap.get(inv.id)?.balance ?? Number(inv.invoice_amount);
+      const bal = Number(inv.balance ?? agingMap.get(inv.id)?.balance ?? inv.invoice_amount);
       m[inv.id] = bal > 0 ? String(bal) : '0';
     }
     return m;
@@ -2622,7 +2622,7 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
   const tallied = Math.abs(diff) < 1 && txnAmtNum > 0;
 
   function balanceFor(inv: Invoice): number {
-    return agingMap.get(inv.id)?.balance ?? Number(inv.invoice_amount);
+    return Number(inv.balance ?? agingMap.get(inv.id)?.balance ?? inv.invoice_amount);
   }
 
   function autoDistribute() {
@@ -2640,15 +2640,15 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
   }
 
   async function handleSubmit() {
-    if (txnType !== 'Cash' && !txnRef.trim()) { notify('Enter cheque / transaction reference'); return; }
-    if (txnAmtNum <= 0) { notify('Enter cheque / transaction amount'); return; }
-    if (!tallied) { notify(`Allocations total ₹${allocTotal.toLocaleString('en-IN')} must equal txn amount ₹${txnAmtNum.toLocaleString('en-IN')}`); return; }
+    if (txnType !== 'Cash' && !txnRef.trim()) { notify('Enter cheque / transaction reference', 'error'); return; }
+    if (txnAmtNum <= 0) { notify('Enter cheque / transaction amount', 'error'); return; }
+    if (!tallied) { notify(`Allocations total ₹${allocTotal.toLocaleString('en-IN')} must equal txn amount ₹${txnAmtNum.toLocaleString('en-IN')}`, 'error'); return; }
 
     const allocations = invoices
       .map(inv => ({ invoice_id: inv.id, amount: Number(allocs[inv.id] || 0) }))
       .filter(a => a.amount > 0);
 
-    if (allocations.length === 0) { notify('Allocate at least one invoice'); return; }
+    if (allocations.length === 0) { notify('Allocate at least one invoice', 'error'); return; }
 
     setSaving(true);
     try {
@@ -2663,7 +2663,7 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
       });
       onSaved();
     } catch (err) {
-      notify(err instanceof Error ? err.message : 'Bulk payment failed');
+      notify(err instanceof Error ? err.message : 'Bulk payment failed', 'error');
     } finally {
       setSaving(false);
     }
