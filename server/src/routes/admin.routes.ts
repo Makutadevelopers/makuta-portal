@@ -223,8 +223,39 @@ router.get('/import-audit', requireRole(['ho']), async (_req: Request, res: Resp
         )) AS orphan_with_linked_same_amount_sibling
       FROM bt_alloc`);
 
+    // ── Shape of the payment-level corruption (040 didn't touch payments — the
+    //    WHERE assumed payment_type='Chq <n>', which matched 0 rows). Find the
+    //    actual values so the real repair can be written. ────────────────────
+    const p5_bad_payment_types = await query(`
+      SELECT payment_type, COUNT(*) AS cnt
+      FROM payments
+      WHERE lower(trim(COALESCE(payment_type,''))) NOT IN ${VALID_METHODS}
+      GROUP BY payment_type
+      ORDER BY cnt DESC
+      LIMIT 40`);
+
+    const p6_payment_samples = await query(`
+      SELECT p.id, i.invoice_no, i.vendor_name, p.amount,
+             p.payment_type, p.payment_ref, p.bank,
+             p.payment_date, i.invoice_date, p.payment_month,
+             p.bank_txn_id IS NOT NULL AS has_bank_txn, i.batch_id
+      FROM payments p JOIN invoices i ON i.id = p.invoice_id
+      WHERE ${REF_DATE} OR ${BANK_MONTH} OR ${TYPE_BAD}
+         OR (lower(COALESCE(p.payment_type,'')) <> 'cash' AND NULLIF(trim(p.payment_ref), '') IS NULL)
+      ORDER BY i.batch_id, p.created_at
+      LIMIT 40`);
+
+    const p7_flagged_bank_values = await query(`
+      SELECT bank, COUNT(*) AS cnt
+      FROM payments
+      WHERE ${BANK_MONTH}
+      GROUP BY bank ORDER BY cnt DESC LIMIT 40`);
+
     res.json({
       generated_at: new Date().toISOString(),
+      p5_bad_payment_types,
+      p6_payment_samples,
+      p7_flagged_bank_values,
       p1_payment_fingerprint: p1_payment_fingerprint[0],
       p2_payment_by_batch,
       p3_bank_txn_fingerprint: p3_bank_txn_fingerprint[0],
