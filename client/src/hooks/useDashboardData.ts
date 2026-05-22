@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { apiFetch } from '../api/client';
+import { useReloadOnFocus } from './useReloadOnFocus';
 import { Invoice } from '../types/invoice';
 import { CashflowRow } from '../types/cashflow';
 
@@ -261,51 +262,50 @@ interface RawData {
   invoices: Invoice[];
 }
 
-export function useDashboardData(dateRange?: { from: string; to: string } | null): DashboardData {
+export function useDashboardData(dateRange?: { from: string; to: string } | null): DashboardData & { refresh: () => void } {
   const [raw, setRaw] = useState<RawData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch once on mount
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        const [aging, cashflow, invoices] = await Promise.all([
-          apiFetch<AgingData>('/aging?site=All'),
-          apiFetch<{ expenditure: { month: string; purpose: string; total: number }[]; cashflow: { month: string; purpose: string; total: number }[] }>('/cashflow').then(res => {
-            // Merge expenditure + cashflow into CashflowRow[] for dashboard compatibility
-            const merged = new Map<string, CashflowRow>();
-            for (const r of res.expenditure) {
-              const key = `${r.month}|${r.purpose}`;
-              if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
-              merged.get(key)!.total_invoiced += Number(r.total);
-            }
-            for (const r of res.cashflow) {
-              const key = `${r.month}|${r.purpose}`;
-              if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
-              merged.get(key)!.total_paid += Number(r.total);
-            }
-            return Array.from(merged.values());
-          }),
-          apiFetch<Invoice[]>('/invoices'),
-        ]);
-        if (!cancelled) {
-          setRaw({ aging, cashflow, invoices });
-          setLoading(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
-          setLoading(false);
-        }
-      }
+  // `background: true` reloads the figures without flipping the page back to a
+  // spinner — used by the on-focus refresh so the dashboard updates in place.
+  const load = useCallback(async (opts?: { background?: boolean }) => {
+    if (!opts?.background) setLoading(true);
+    try {
+      const [aging, cashflow, invoices] = await Promise.all([
+        apiFetch<AgingData>('/aging?site=All'),
+        apiFetch<{ expenditure: { month: string; purpose: string; total: number }[]; cashflow: { month: string; purpose: string; total: number }[] }>('/cashflow').then(res => {
+          // Merge expenditure + cashflow into CashflowRow[] for dashboard compatibility
+          const merged = new Map<string, CashflowRow>();
+          for (const r of res.expenditure) {
+            const key = `${r.month}|${r.purpose}`;
+            if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
+            merged.get(key)!.total_invoiced += Number(r.total);
+          }
+          for (const r of res.cashflow) {
+            const key = `${r.month}|${r.purpose}`;
+            if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
+            merged.get(key)!.total_paid += Number(r.total);
+          }
+          return Array.from(merged.values());
+        }),
+        apiFetch<Invoice[]>('/invoices'),
+      ]);
+      setRaw({ aging, cashflow, invoices });
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
+    } finally {
+      setLoading(false);
     }
-
-    load();
-    return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const refresh = useCallback(() => load({ background: true }), [load]);
+
+  // Pick up edits made elsewhere when the dashboard tab regains focus.
+  useReloadOnFocus(refresh);
 
   // Derive from raw data, filtering by date range
   const data = useMemo<DashboardData>(() => {
@@ -337,5 +337,5 @@ export function useDashboardData(dateRange?: { from: string; to: string } | null
     return { ...derived, loading: false, error: null };
   }, [raw, loading, error, dateRange?.from, dateRange?.to]);
 
-  return data;
+  return { ...data, refresh };
 }

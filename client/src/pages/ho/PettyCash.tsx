@@ -17,6 +17,7 @@ import {
 } from '../../types/pettyCash';
 import { useToast } from '../../context/ToastContext';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 
 export default function PettyCash() {
   const { notify } = useToast();
@@ -38,8 +39,8 @@ export default function PettyCash() {
   const [fRemarks, setFRemarks]   = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  async function refresh() {
-    setLoading(true);
+  async function refresh(opts?: { background?: boolean }) {
+    if (!opts?.background) setLoading(true);
     try {
       const [b, l] = await Promise.all([
         getAllBalances(),
@@ -48,13 +49,16 @@ export default function PettyCash() {
       setBalances(b);
       setLedger(l);
     } catch (err) {
-      notify(err instanceof Error ? err.message : 'Failed to load petty cash', 'error');
+      if (!opts?.background) notify(err instanceof Error ? err.message : 'Failed to load petty cash', 'error');
     } finally {
-      setLoading(false);
+      if (!opts?.background) setLoading(false);
     }
   }
 
   useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filterSite]);
+
+  // Silent refresh on focus so balances reflect expenses logged elsewhere.
+  useReloadOnFocus(() => { refresh({ background: true }); });
 
   // Merge in sites that have no activity yet so HO sees zero balances too
   const balanceBySite = useMemo(() => {
@@ -216,7 +220,7 @@ export default function PettyCash() {
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
-                {['Date','Site','Type','Description','By','Amount'].map(h => (
+                {['Transaction Date','Site','Type','Description','By','Amount'].map(h => (
                   <th
                     key={h}
                     className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}

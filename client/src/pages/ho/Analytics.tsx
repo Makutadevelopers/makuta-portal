@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { getAnalytics, AnalyticsResponse } from '../../api/analytics';
+import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 import { formatINR } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
@@ -72,6 +73,13 @@ export default function Analytics() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [fSite, fMonth]);
+
+  // Silent refresh on focus so figures reflect edits made elsewhere (no spinner).
+  useReloadOnFocus(() => {
+    getAnalytics(fSite, fMonth)
+      .then(res => { setData(res); if (fMonth === 'All') setMonthOptions(res.availableMonths); })
+      .catch(() => {});
+  });
 
   // Reset month filter when switching site if the selected month vanishes.
   useEffect(() => {

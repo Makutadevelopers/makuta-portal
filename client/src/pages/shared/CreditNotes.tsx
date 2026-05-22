@@ -21,6 +21,7 @@ import { CreditNote } from '../../types/creditNote';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 
 export default function CreditNotes() {
@@ -38,8 +39,8 @@ export default function CreditNotes() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (opts?: { background?: boolean }) => {
+    if (!opts?.background) setLoading(true);
     try {
       const [cns, vs, invs] = await Promise.all([
         getCreditNotes(),
@@ -50,15 +51,18 @@ export default function CreditNotes() {
       setVendors(vs);
       setInvoices(invs);
     } catch (err) {
-      notify(err instanceof Error ? err.message : 'Failed to load credit notes');
+      if (!opts?.background) notify(err instanceof Error ? err.message : 'Failed to load credit notes');
     } finally {
-      setLoading(false);
+      if (!opts?.background) setLoading(false);
     }
   }, [notify]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Refresh on focus so allocations/balances reflect edits made elsewhere.
+  useReloadOnFocus(useCallback(() => load({ background: true }), [load]));
 
   async function handleDelete(cn: CreditNote) {
     const ok = await confirm({

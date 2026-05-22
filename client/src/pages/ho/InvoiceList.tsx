@@ -1067,8 +1067,8 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
             <thead className="bg-gray-50">
               <tr>
                 {(hasAnyTds
-                  ? ['Date', 'Cash', 'TDS', 'Type', 'Reference', 'Bank', '']
-                  : ['Date', 'Amount', 'Type', 'Reference', 'Bank', '']
+                  ? ['Payment Date', 'Cash', 'TDS', 'Type', 'Reference', 'Bank', '']
+                  : ['Payment Date', 'Amount', 'Type', 'Reference', 'Bank', '']
                 ).map((h, i) => (
                   <th key={i} className={`px-4 py-2.5 font-medium text-gray-500 ${h === 'Amount' || h === 'Cash' || h === 'TDS' ? 'text-right' : 'text-left'}`}>{h}</th>
                 ))}

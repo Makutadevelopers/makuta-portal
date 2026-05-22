@@ -266,7 +266,7 @@ export default function SiteDashboard() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 text-left">
-                    <th className="px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                    <th className="px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Invoice Date</th>
                     <th className="px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
                     <th className="px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
                     <th className="px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Amount</th>

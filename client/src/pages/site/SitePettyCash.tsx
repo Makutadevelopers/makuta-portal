@@ -10,6 +10,7 @@ import { getSiteBalance, createExpense, getLedger } from '../../api/pettyCash';
 import { PettyCashBalance, PettyCashLedgerEntry } from '../../types/pettyCash';
 import { useToast } from '../../context/ToastContext';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 
 const MINOR_LIMIT = 50000;
 
@@ -41,21 +42,24 @@ export default function SitePettyCash() {
   const [pRemarks, setPRemarks]     = useState('');
   const [paying, setPaying]         = useState(false);
 
-  async function refresh() {
+  async function refresh(opts?: { background?: boolean }) {
     if (!site) return;
-    setLoading(true);
+    if (!opts?.background) setLoading(true);
     try {
       const [b, l] = await Promise.all([getSiteBalance(site), getLedger(site)]);
       setBalance(b);
       setLedger(l);
     } catch (err) {
-      notify(err instanceof Error ? err.message : 'Failed to load petty cash', 'error');
+      if (!opts?.background) notify(err instanceof Error ? err.message : 'Failed to load petty cash', 'error');
     } finally {
-      setLoading(false);
+      if (!opts?.background) setLoading(false);
     }
   }
 
   useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [site]);
+
+  // Silent refresh on focus so the balance reflects expenses logged elsewhere.
+  useReloadOnFocus(() => { refresh({ background: true }); });
 
   async function handleLog(e: FormEvent) {
     e.preventDefault();
@@ -300,7 +304,7 @@ export default function SitePettyCash() {
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
-                {['Date','Type','Description','By','Amount'].map(h => (
+                {['Transaction Date','Type','Description','By','Amount'].map(h => (
                   <th
                     key={h}
                     className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}

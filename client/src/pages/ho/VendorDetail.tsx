@@ -11,6 +11,7 @@ import AppShell from '../../components/layout/AppShell';
 import ActionsMenu from '../../components/shared/ActionsMenu';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import PaymentModal from '../../components/shared/PaymentModal';
+import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 
 type StatusFilter = 'All' | 'Paid' | 'Partial' | 'Not Paid';
 type OrderType = 'All' | 'PO' | 'WO';
@@ -43,18 +44,25 @@ export default function VendorDetail() {
   const { confirm, dialog: confirmDialog } = useConfirm();
   const isHO = user?.role === 'ho';
 
-  const reload = useCallback(() => {
+  // `background: true` reloads without the page spinner — used by the on-focus
+  // refresh so figures update in place when returning from an edit elsewhere.
+  const reload = useCallback((opts?: { background?: boolean }) => {
     if (!id) return;
-    setLoading(true);
-    setError('');
+    if (!opts?.background) {
+      setLoading(true);
+      setError('');
+    }
     getVendorDetail(id)
       .then(setData)
-      .catch(err => setError(err instanceof Error ? err.message : 'Failed to load vendor'))
-      .finally(() => setLoading(false));
+      .catch(err => { if (!opts?.background) setError(err instanceof Error ? err.message : 'Failed to load vendor'); })
+      .finally(() => { if (!opts?.background) setLoading(false); });
     getVendorCreditBalance(id).then(setCreditBalance).catch(() => setCreditBalance(null));
   }, [id]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Refresh when returning to this tab so a payment recorded elsewhere shows here.
+  useReloadOnFocus(useCallback(() => reload({ background: true }), [reload]));
 
   // Hooks must run unconditionally on every render — keep this above the
   // loading/error early-returns so the hook count stays stable. The previous

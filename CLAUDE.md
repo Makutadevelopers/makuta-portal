@@ -72,6 +72,29 @@ diagnostic `GET /api/admin/import-audit` (HO-only, temporary) returns
 the current corruption fingerprint; raw queries in
 `server/src/db/diagnostics/2026-05-19_import_corruption_audit.sql`.
 
+### Human edits are final — repairs must never overwrite them (since 2026-05-20)
+A value a person typed/edited through the app is the **source of truth** and
+outranks any automated repair, importer re-run, or backfill. Repair migrations
+recover data heuristically (e.g. parsing a misfiled date out of `payment_ref`);
+that guess must NOT clobber a field a human already set by hand.
+- "Edited" means there is an `audit_logs` row whose `action` starts with
+  `Edited payment` / `Edited invoice` for that record, with the human's value
+  in `metadata->'after'`. Treat that as immutable from a repair's point of view.
+- **Every repair/backfill migration that touches `payments` (or `invoices`)
+  must exclude human-edited rows.** Add this guard to the `UPDATE … WHERE`:
+  ```sql
+  AND id NOT IN (
+    SELECT (metadata->>'paymentId')::uuid     -- or 'invoiceId'
+    FROM audit_logs
+    WHERE action LIKE 'Edited payment%'        -- or 'Edited invoice%'
+      AND metadata ? 'paymentId'
+  )
+  ```
+- Repair migration `040`/`042`/`043` predate this rule and DID overwrite
+  hand-entered dates; migration `046_restore_human_edited_payment_dates.sql`
+  restores them from the latest `Edited payment` audit entry (pre-restore
+  values snapshotted under tag `046_restore_human_dates` for rollback).
+
 ## Tech stack
 - **Production URL**: `https://invoice.makutadevelopers.com` (everything
   served from AWS — no Vercel, no split hosts).

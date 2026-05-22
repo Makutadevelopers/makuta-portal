@@ -4,6 +4,7 @@ import { formatINR } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 
 interface PivotRow {
   month: string;
@@ -47,6 +48,15 @@ export default function CashflowPage() {
       .then(setData)
       .finally(() => setLoading(false));
   }, [fSite, fCategory]);
+
+  // Silent refresh on focus so figures reflect edits made elsewhere (no spinner).
+  useReloadOnFocus(() => {
+    const params = new URLSearchParams();
+    if (fSite !== 'All') params.set('site', fSite);
+    if (fCategory !== 'All') params.set('category', fCategory);
+    const qs = params.toString();
+    apiFetch<CashflowResponse>(`/cashflow${qs ? `?${qs}` : ''}`).then(setData).catch(() => {});
+  });
 
   const rows = activeTab === 'expenditure' ? data.expenditure : data.cashflow;
 

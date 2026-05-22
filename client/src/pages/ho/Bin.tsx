@@ -120,7 +120,7 @@ export default function Bin() {
           <table className="w-full text-[13px]">
             <thead className="bg-gray-50">
               <tr>
-                {['Date', 'Vendor', 'Inv. No', 'Site', 'Amount', 'Deleted By', 'Deleted On', 'Auto-purge', 'Actions'].map(h => (
+                {['Invoice Date', 'Vendor', 'Inv. No', 'Site', 'Amount', 'Deleted By', 'Deleted On', 'Auto-purge', 'Actions'].map(h => (
                   <th
                     key={h}
                     className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}

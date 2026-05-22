@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Invoice } from '../types/invoice';
 import { getInvoices, getInvoice } from '../api/invoices';
+import { useReloadOnFocus } from './useReloadOnFocus';
 
 export function useInvoices() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -26,6 +27,13 @@ export function useInvoices() {
   useEffect(() => { fetch(); }, [fetch]);
 
   const refresh = useCallback(() => fetch({ background: true }), [fetch]);
+
+  // Pick up edits made in another tab/screen when this one regains focus. Safe
+  // to run unconditionally: the list's inline edit form (HOInvoiceForm) seeds
+  // its draft once and is keyed by invoice id, so a background row refresh never
+  // resets in-progress input; vendor edit forms read from useVendors, which is
+  // intentionally left without focus-refetch.
+  useReloadOnFocus(refresh);
 
   // Patch a single row in place after an edit: re-fetch just that invoice
   // (with the server-computed balance/status/attachment_count) and swap it

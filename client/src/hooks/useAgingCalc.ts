@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../api/client';
+import { useReloadOnFocus } from './useReloadOnFocus';
 
 interface AgingRow {
   invoice_id: string;
@@ -28,8 +29,10 @@ export function useAgingCalc(site: string = 'All') {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetch = useCallback(async () => {
-    setLoading(true);
+  // `background: true` re-fetches without the spinner, so an on-focus refresh
+  // updates the figures in place instead of blanking the table.
+  const fetch = useCallback(async (opts?: { background?: boolean }) => {
+    if (!opts?.background) setLoading(true);
     setError(null);
     try {
       const result = await apiFetch<AgingData>(`/aging?site=${encodeURIComponent(site)}`);
@@ -37,11 +40,16 @@ export function useAgingCalc(site: string = 'All') {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load aging data');
     } finally {
-      setLoading(false);
+      if (!opts?.background) setLoading(false);
     }
   }, [site]);
 
   useEffect(() => { fetch(); }, [fetch]);
 
-  return { ...data, loading, error, refresh: fetch };
+  const refresh = useCallback(() => fetch({ background: true }), [fetch]);
+
+  // Pick up payments/edits made elsewhere when the tab regains focus.
+  useReloadOnFocus(refresh);
+
+  return { ...data, loading, error, refresh };
 }
