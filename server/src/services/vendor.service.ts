@@ -16,6 +16,8 @@ export interface VendorRow {
   phone: string | null;
   email: string | null;
   notes: string | null;
+  invoice_no_optional: boolean;
+  invoice_no_optional_reason: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -30,6 +32,8 @@ export interface CreateVendorInput {
   phone?: string | null;
   email?: string | null;
   notes?: string | null;
+  invoice_no_optional?: boolean;
+  invoice_no_optional_reason?: string | null;
 }
 
 export interface UpdateVendorInput {
@@ -41,6 +45,8 @@ export interface UpdateVendorInput {
   phone?: string | null;
   email?: string | null;
   notes?: string | null;
+  invoice_no_optional?: boolean;
+  invoice_no_optional_reason?: string | null;
 }
 
 export async function getAllVendors(): Promise<VendorRow[]> {
@@ -71,8 +77,8 @@ export async function createVendor(
   userId: string
 ): Promise<VendorRow> {
   const vendor = await queryOne<VendorRow>(
-    `INSERT INTO vendors (name, payment_terms, category, gstin, contact_name, phone, email, notes, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO vendors (name, payment_terms, category, gstin, contact_name, phone, email, notes, invoice_no_optional, invoice_no_optional_reason, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
     [
       data.name,
@@ -83,6 +89,8 @@ export async function createVendor(
       data.phone ?? null,
       data.email ?? null,
       data.notes ?? null,
+      data.invoice_no_optional ?? false,
+      data.invoice_no_optional_reason ?? null,
       userId,
     ]
   );
@@ -97,6 +105,7 @@ export async function updateVendor(
   const ALLOWED_FIELDS = [
     'name', 'payment_terms', 'category', 'gstin',
     'contact_name', 'phone', 'email', 'notes',
+    'invoice_no_optional', 'invoice_no_optional_reason',
   ];
 
   const fields: string[] = [];
@@ -183,6 +192,18 @@ export interface VendorDetailAttachment {
   uploaded_at: string;
 }
 
+export interface VendorDetailPayment {
+  id: string;
+  invoice_id: string;
+  payment_date: string;
+  payment_type: string;
+  payment_ref: string | null;
+  bank: string | null;
+  amount: number;
+  tds_pct: number;
+  tds_amount: number;
+}
+
 export interface VendorDetailInvoice {
   id: string;
   invoice_date: string;
@@ -193,7 +214,9 @@ export interface VendorDetailInvoice {
   invoice_amount: number;
   payment_status: string;
   balance: number;
+  last_paid_date: string | null;
   attachments: VendorDetailAttachment[];
+  payments: VendorDetailPayment[];
 }
 
 export interface VendorDetailResult {
@@ -229,7 +252,7 @@ export async function getVendorDetail(
     siteClause = `AND i.site = ANY($${params.length}::text[])`;
   }
 
-  const invoiceRows = await query<Omit<VendorDetailInvoice, 'attachments'>>(
+  const invoiceRows = await query<Omit<VendorDetailInvoice, 'attachments' | 'payments'>>(
     `SELECT
        i.id,
        i.invoice_date,
@@ -239,9 +262,15 @@ export async function getVendorDetail(
        i.site,
        i.invoice_amount,
        i.payment_status,
-       i.invoice_amount - COALESCE(
-         (SELECT SUM(p.amount) FROM payments p WHERE p.invoice_id = i.id), 0
-       ) AS balance
+       i.invoice_amount
+         -- "Settled" = cash received + TDS withheld (paid to govt on the vendor's
+         -- behalf) + credit notes applied — the same tally payment_status uses.
+         -- Cash-only here would leave fully-settled invoices showing a phantom
+         -- balance (their TDS/credit portion) that leaked into Outstanding.
+         - COALESCE((SELECT SUM(p.amount + p.tds_amount) FROM payments p WHERE p.invoice_id = i.id), 0)
+         - COALESCE((SELECT SUM(c.allocated_amount) FROM credit_note_allocations c WHERE c.invoice_id = i.id), 0)
+       AS balance,
+       (SELECT MAX(p.payment_date) FROM payments p WHERE p.invoice_id = i.id) AS last_paid_date
      FROM invoices i
      WHERE i.vendor_id = $1
        AND i.deleted_at IS NULL
@@ -260,6 +289,24 @@ export async function getVendorDetail(
         [invoiceIds]
       )
     : [];
+
+  const paymentRows = invoiceIds.length
+    ? await query<VendorDetailPayment>(
+        `SELECT id, invoice_id, payment_date, payment_type, payment_ref,
+                bank, amount, tds_pct, tds_amount
+         FROM payments
+         WHERE invoice_id = ANY($1::uuid[])
+         ORDER BY payment_date ASC, created_at ASC`,
+        [invoiceIds]
+      )
+    : [];
+
+  const paymentsByInvoice = new Map<string, VendorDetailPayment[]>();
+  for (const p of paymentRows) {
+    const list = paymentsByInvoice.get(p.invoice_id) ?? [];
+    list.push(p);
+    paymentsByInvoice.set(p.invoice_id, list);
+  }
 
   const attachmentsByInvoice = new Map<string, VendorDetailAttachment[]>();
   await Promise.all(attachmentRows.map(async (att) => {
@@ -290,6 +337,7 @@ export async function getVendorDetail(
   const invoicesWithAttachments: VendorDetailInvoice[] = invoiceRows.map(inv => ({
     ...inv,
     attachments: attachmentsByInvoice.get(inv.id) ?? [],
+    payments: paymentsByInvoice.get(inv.id) ?? [],
   }));
 
   const totalInvoices = invoicesWithAttachments.length;

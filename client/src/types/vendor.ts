@@ -8,6 +8,8 @@ export interface Vendor {
   phone: string | null;
   email: string | null;
   notes: string | null;
+  invoice_no_optional: boolean;
+  invoice_no_optional_reason: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -22,6 +24,8 @@ export interface CreateVendorInput {
   phone?: string | null;
   email?: string | null;
   notes?: string | null;
+  invoice_no_optional?: boolean;
+  invoice_no_optional_reason?: string | null;
 }
 
 export interface UpdateVendorInput extends Partial<CreateVendorInput> {}

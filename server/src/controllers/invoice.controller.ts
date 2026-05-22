@@ -29,12 +29,13 @@ const createInvoiceSchema = z.object({
   // Free-text vendor names are no longer accepted from the manual form.
   vendor_id: z.string().uuid('Pick a vendor from Vendor Master, or create a new one'),
   vendor_name: z.string().min(1, 'Vendor name is required').max(500, 'Vendor name too long'),
-  // invoice_no is required at the API boundary — every entry must carry a
-  // vendor-supplied invoice number. The DB column is nullable for the sake of
-  // historical rows imported before this rule existed (migration 010); new
-  // rows go through this schema and cannot be saved blank. Both the HO and
-  // site forms already enforce this client-side; this aligns the server.
-  invoice_no: z.string().trim().min(1, 'Invoice number is required').max(100, 'Invoice number too long'),
+  // invoice_no is normally required, but vendors flagged "invoice number
+  // optional" in Vendor Master (e.g. bank charges, refunds) may omit it. The
+  // schema therefore accepts blank/missing and normalises it to null; the
+  // controller (insertSingleInvoice) enforces the requirement per-vendor once
+  // the vendor's flag is known. The DB column is nullable since migration 010.
+  invoice_no: z.string().trim().max(100, 'Invoice number too long').nullable().optional()
+    .transform(v => (v ? v : null)),
   po_number: z.string().max(200).nullable().optional(),
   purpose: z.string().min(1, 'Purpose is required').max(100),
   site: z.string().min(1, 'Site is required').max(100),
@@ -228,14 +229,20 @@ async function insertSingleInvoice(
     return { ok: false, status: 403, message: 'You can only create invoices for sites you are assigned to' };
   }
 
-  const masterVendor = await queryOne<{ id: string; name: string; category: string | null }>(
-    'SELECT id, name, category FROM vendors WHERE id = $1',
+  const masterVendor = await queryOne<{ id: string; name: string; category: string | null; invoice_no_optional: boolean }>(
+    'SELECT id, name, category, invoice_no_optional FROM vendors WHERE id = $1',
     [data.vendor_id]
   );
   if (!masterVendor) {
     return { ok: false, status: 400, message: 'Selected vendor is not in Vendor Master' };
   }
   data.vendor_name = masterVendor.name;
+
+  // Invoice number is mandatory unless this vendor is flagged "invoice number
+  // optional" in Vendor Master (e.g. bank charges, refunds — no invoice issued).
+  if (!data.invoice_no && !masterVendor.invoice_no_optional) {
+    return { ok: false, status: 400, message: 'Invoice number is required' };
+  }
 
   if (masterVendor.category && masterVendor.category.trim()) {
     const expected = masterVendor.category.trim().toLowerCase();
@@ -554,6 +561,20 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
         ? data.vendor_id
         : (existing.vendor_id as string | null);
       const finalVendorName = (resolvedVendor?.name ?? (existing.vendor_name as string)) || '';
+      // Leaving the invoice number blank is only allowed when the (final) vendor
+      // is flagged "invoice number optional" in Vendor Master.
+      if (!finalInvoiceNo || !finalInvoiceNo.trim()) {
+        const allowsBlank = finalVendorId
+          ? await queryOne<{ invoice_no_optional: boolean }>(
+              'SELECT invoice_no_optional FROM vendors WHERE id = $1',
+              [finalVendorId]
+            )
+          : null;
+        if (!allowsBlank?.invoice_no_optional) {
+          res.status(400).json({ error: 'Bad Request', message: 'Invoice number is required' });
+          return;
+        }
+      }
       if (finalInvoiceNo && finalInvoiceNo.trim()) {
         const collision = await queryOne<{ id: string; invoice_no: string | null }>(
           `SELECT id, invoice_no FROM invoices

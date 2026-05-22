@@ -19,6 +19,18 @@ export interface VendorDetailAttachment {
   uploaded_at: string;
 }
 
+export interface VendorDetailPayment {
+  id: string;
+  invoice_id: string;
+  payment_date: string;
+  payment_type: string;
+  payment_ref: string | null;
+  bank: string | null;
+  amount: number;
+  tds_pct: number;
+  tds_amount: number;
+}
+
 export interface VendorDetailInvoice {
   id: string;
   invoice_date: string;
@@ -29,7 +41,9 @@ export interface VendorDetailInvoice {
   invoice_amount: number;
   payment_status: string;
   balance: number;
+  last_paid_date: string | null;
   attachments: VendorDetailAttachment[];
+  payments: VendorDetailPayment[];
 }
 
 export interface VendorDetailResponse {
@@ -47,6 +61,8 @@ export async function getVendorDetail(id: string): Promise<VendorDetailResponse>
   const origin = getApiOrigin();
   data.invoices = data.invoices.map(inv => ({
     ...inv,
+    // Server may not yet expose payments (older deploy) — default to [] so the UI doesn't crash.
+    payments: inv.payments ?? [],
     // Server may not yet expose attachments (older deploy) — default to [] so the UI doesn't crash.
     attachments: (inv.attachments ?? []).map(att => {
       if (!att.url.startsWith('/api/')) return att;

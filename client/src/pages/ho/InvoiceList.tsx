@@ -719,7 +719,7 @@ export default function InvoiceList() {
                     className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
                     title="Select all draft invoices" />
                 </th>
-                {['Date', 'Paid Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Site', 'Amount', 'Balance', 'Days', 'Status', 'Docs', 'Actions'].map(h => (
+                {['Invoice Date', 'Paid Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Site', 'Amount', 'Balance', 'Days', 'Status', 'Docs', 'Actions'].map(h => (
                   <th
                     key={h}
                     className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' || h === 'Balance' ? 'text-right' : 'text-left'}`}
@@ -1392,6 +1392,11 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
     if (v?.category && v.category !== purpose) setPurpose(v.category);
   }, [vendorId, localVendors, purpose]);
 
+  // Vendors flagged "invoice number optional" in Vendor Master (e.g. bank
+  // charges, refunds) may be saved without an invoice number.
+  const selectedVendor = localVendors.find(v => v.id === vendorId);
+  const invoiceNoOptional = !!selectedVendor?.invoice_no_optional;
+
   function handleVendorChange(id: string) {
     setVendorId(id);
     setPendingNewVendorName(null);
@@ -1432,7 +1437,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
       return;
     }
     if (!purpose) { setError('Pick a category'); return; }
-    if (!invoiceNo.trim()) { setError('Invoice number is required'); return; }
+    if (!invoiceNo.trim() && !invoiceNoOptional) { setError('Invoice number is required'); return; }
     if (baseNum <= 0) { setError('Enter a valid base amount'); return; }
     if (totalAmount <= 0) { setError('Total amount must be greater than zero'); return; }
     if (addlChargeOn && addlChargeNum > 0 && !addlReason.trim()) {
@@ -1580,9 +1585,13 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Invoice No *</label>
-            <input value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)} placeholder="Invoice number"
+            <label className="block text-xs text-gray-500 mb-1">Invoice No {invoiceNoOptional ? '(optional)' : '*'}</label>
+            <input value={invoiceNo} onChange={e => setInvoiceNo(e.target.value)}
+              placeholder={invoiceNoOptional ? 'Not required for this vendor' : 'Invoice number'}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            {invoiceNoOptional && selectedVendor?.invoice_no_optional_reason && (
+              <p className="mt-1 text-xs text-gray-400">{selectedVendor.invoice_no_optional_reason}</p>
+            )}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">PO Number</label>
@@ -1944,6 +1953,9 @@ function HOInvoiceBatchForm({ vendors, onCancel, onSaved }: {
   const selectedVendor = localVendors.find(v => v.id === vendorId);
   const vendorCategory = selectedVendor?.category || (pendingNewVendorName ? masterCategory : '');
   const categoryLocked = !!vendorCategory;
+  // Vendors flagged "invoice number optional" let every row in the batch skip
+  // the invoice number (the batch shares a single vendor).
+  const invoiceNoOptional = !!selectedVendor?.invoice_no_optional;
 
   // Whenever the vendor's locked category changes, snap every row's purpose
   // to it so the user can't submit a stale value.
@@ -2050,10 +2062,14 @@ function HOInvoiceBatchForm({ vendors, onCancel, onSaved }: {
     const seenInvoiceNos = new Set<string>();
     for (const r of editableRows) {
       const total = rowTotal(r);
-      if (!r.invoiceNo.trim()) { rowErrors.push({ id: r.id, msg: 'Invoice number is required' }); continue; }
-      const lower = r.invoiceNo.trim().toLowerCase();
-      if (seenInvoiceNos.has(lower)) { rowErrors.push({ id: r.id, msg: `Duplicate invoice no "${r.invoiceNo}" in this batch` }); continue; }
-      seenInvoiceNos.add(lower);
+      if (!r.invoiceNo.trim() && !invoiceNoOptional) { rowErrors.push({ id: r.id, msg: 'Invoice number is required' }); continue; }
+      // Skip the in-batch duplicate check for blank numbers (allowed when the
+      // vendor is invoice-number-optional — many blank rows are fine).
+      if (r.invoiceNo.trim()) {
+        const lower = r.invoiceNo.trim().toLowerCase();
+        if (seenInvoiceNos.has(lower)) { rowErrors.push({ id: r.id, msg: `Duplicate invoice no "${r.invoiceNo}" in this batch` }); continue; }
+        seenInvoiceNos.add(lower);
+      }
       if (Number(r.baseAmount) <= 0) { rowErrors.push({ id: r.id, msg: 'Enter a valid base amount' }); continue; }
       if (total <= 0) { rowErrors.push({ id: r.id, msg: 'Total must be greater than zero' }); continue; }
       if (!r.purpose) { rowErrors.push({ id: r.id, msg: 'Pick a category' }); continue; }
@@ -2310,9 +2326,9 @@ function HOInvoiceBatchForm({ vendors, onCancel, onSaved }: {
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Invoice No *</label>
+                      <label className="block text-xs text-gray-500 mb-1">Invoice No {invoiceNoOptional ? '(optional)' : '*'}</label>
                       <input value={r.invoiceNo} onChange={e => updateRow(r.id, { invoiceNo: e.target.value })}
-                        placeholder="Invoice number"
+                        placeholder={invoiceNoOptional ? 'Not required' : 'Invoice number'}
                         className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
                     </div>
                     <div>

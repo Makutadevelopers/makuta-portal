@@ -353,6 +353,8 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
   const [phone, setPhone] = useState(vendor?.phone ?? '');
   const [email, setEmail] = useState(vendor?.email ?? '');
   const [notes, setNotes] = useState(vendor?.notes ?? '');
+  const [invoiceNoOptional, setInvoiceNoOptional] = useState(vendor?.invoice_no_optional ?? false);
+  const [invoiceNoReason, setInvoiceNoReason] = useState(vendor?.invoice_no_optional_reason ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [similarVendors, setSimilarVendors] = useState<{ id: string; name: string; similarity: string }[]>([]);
@@ -388,6 +390,10 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) { setError('Vendor name is required'); return; }
+    if (invoiceNoOptional && !invoiceNoReason.trim()) {
+      setError('A reason is required when the invoice number is made optional');
+      return;
+    }
 
     const data = {
       name: name.trim(),
@@ -398,6 +404,8 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
       phone: phone.trim() || null,
       email: email.trim() || null,
       notes: notes.trim() || null,
+      invoice_no_optional: invoiceNoOptional,
+      invoice_no_optional_reason: invoiceNoOptional ? invoiceNoReason.trim() : null,
     };
 
     setSaving(true);
@@ -511,6 +519,29 @@ function VendorForm({ vendor, initialName, onCancel, onSaved, onMerged }: {
             <input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Internal notes"
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
           </div>
+        </div>
+
+        <div className="mb-4 p-3 bg-gray-50 border border-gray-100 rounded-lg">
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="checkbox" checked={invoiceNoOptional}
+              onChange={e => setInvoiceNoOptional(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200" />
+            <span className="text-sm text-gray-700">
+              Invoice number not required for this vendor
+              <span className="block text-xs text-gray-500">
+                For vendors that don't issue an invoice number (e.g. bank charges, refunds).
+              </span>
+            </span>
+          </label>
+          {invoiceNoOptional && (
+            <div className="mt-3">
+              <label className="block text-xs text-gray-500 mb-1">Reason *</label>
+              <input value={invoiceNoReason} onChange={e => setInvoiceNoReason(e.target.value)}
+                placeholder="Why this vendor has no invoice number"
+                maxLength={300}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3">

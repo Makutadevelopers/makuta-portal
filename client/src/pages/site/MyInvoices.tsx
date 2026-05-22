@@ -414,7 +414,7 @@ export default function MyInvoices() {
                     );
                   })()}
                 </th>
-                {['#', 'Int. No', 'Date', 'Paid Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Amount', 'Status', 'Actions'].map(h => (
+                {['#', 'Int. No', 'Invoice Date', 'Paid Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Amount', 'Status', 'Actions'].map(h => (
                   <th
                     key={h}
                     className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}
@@ -528,7 +528,7 @@ export default function MyInvoices() {
 }
 
 // ── Invoice Form ────────────────────────────────────────────────────────────
-interface Vendor { id: string; name: string; payment_terms: number; category: string | null; }
+interface Vendor { id: string; name: string; payment_terms: number; category: string | null; invoice_no_optional?: boolean; invoice_no_optional_reason?: string | null; }
 
 function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel, onSaved }: {
   allowedSites: string[];
@@ -742,12 +742,17 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
     }
   }
 
+  // Vendors flagged "invoice number optional" in Vendor Master (e.g. bank
+  // charges, refunds) may be saved without an invoice number.
+  const selectedVendor = localVendors.find(v => v.id === vendorId);
+  const invoiceNoOptional = !!selectedVendor?.invoice_no_optional;
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
 
     if (!vendorId) { setError('Pick a vendor from the dropdown, or click "+ Create vendor" if it isn\'t in Vendor Master yet.'); return; }
-    if (!invoiceNo.trim()) { setError('Invoice number is required'); return; }
+    if (!invoiceNo.trim() && !invoiceNoOptional) { setError('Invoice number is required'); return; }
     if (baseNum <= 0) { setError('Enter a valid base amount'); return; }
     if (totalAmount <= 0) { setError('Total amount must be greater than zero'); return; }
     if (addlChargeOn && addlChargeNum > 0 && !addlReason.trim()) {
@@ -918,13 +923,16 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
         {/* Row 3: Invoice No + PO + Category */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Invoice No *</label>
+            <label className="block text-xs text-gray-500 mb-1">Invoice No {invoiceNoOptional ? '(optional)' : '*'}</label>
             <input
               value={invoiceNo}
               onChange={e => setInvoiceNo(e.target.value)}
-              placeholder="Invoice number"
+              placeholder={invoiceNoOptional ? 'Not required for this vendor' : 'Invoice number'}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
+            {invoiceNoOptional && selectedVendor?.invoice_no_optional_reason && (
+              <p className="mt-1 text-xs text-gray-400">{selectedVendor.invoice_no_optional_reason}</p>
+            )}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">PO Number</label>

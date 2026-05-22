@@ -23,7 +23,14 @@ export default function VendorDetail() {
   const [error, setError] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
   const [orderType, setOrderType] = useState<OrderType>('All');
-  const [monthFilter, setMonthFilter] = useState<string>('All');
+  // Invoice-date + paid-date filters, mirroring the All Invoices page:
+  //   • Invoiced — by invoice date, as a single month OR a custom From–To range.
+  //   • Paid — by the month of the latest payment (last_paid_date).
+  const [invMode, setInvMode] = useState<'month' | 'range'>('month');
+  const [fMonth, setFMonth] = useState<string>('');   // invoiced month, YYYY-MM
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+  const [fPaidMonth, setFPaidMonth] = useState<string>(''); // paid month, YYYY-MM
   const [siteFilter, setSiteFilter] = useState<string>('All');
   const [creditBalance, setCreditBalance] = useState<VendorCreditBalance | null>(null);
   const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
@@ -71,17 +78,25 @@ export default function VendorDetail() {
   // 'All' (filteredInvoices === invoices then).
   const filteredStats = useMemo(() => {
     const invs = data?.invoices ?? [];
-    const monthOf = (iso: string) => (iso || '').slice(0, 7);
+    // Overdue uses the vendor's own payment terms: due = invoice_date + terms.
+    const terms = Number(data?.vendor?.payment_terms ?? 0);
+    const todayStr = new Date().toISOString().slice(0, 10);
     let count = 0;
     let totalAmount = 0;
     let paidAmount = 0;
     let outstandingAmount = 0;
+    let overdueAmount = 0;
     let oldestUnpaid: string | null = null;
     for (const inv of invs) {
       if (statusFilter !== 'All' && inv.payment_status !== statusFilter) continue;
       if (orderType === 'PO' && !(inv.po_number || '').toUpperCase().includes('/PO/')) continue;
       if (orderType === 'WO' && !(inv.po_number || '').toUpperCase().includes('/WO/')) continue;
-      if (monthFilter !== 'All' && monthOf(inv.invoice_date) !== monthFilter) continue;
+      if (invMode === 'range') {
+        const invDay = (inv.invoice_date || '').slice(0, 10);
+        if (dateFrom && invDay < dateFrom) continue;
+        if (dateTo && invDay > dateTo) continue;
+      } else if (fMonth && (inv.invoice_date || '').slice(0, 7) !== fMonth) continue;
+      if (fPaidMonth && (inv.last_paid_date || '').slice(0, 7) !== fPaidMonth) continue;
       if (siteFilter !== 'All' && inv.site !== siteFilter) continue;
       const amt = Number(inv.invoice_amount);
       const bal = Number(inv.balance);
@@ -89,15 +104,24 @@ export default function VendorDetail() {
       totalAmount += amt;
       outstandingAmount += bal;
       paidAmount += (amt - bal);
-      if (bal > 0 && (!oldestUnpaid || inv.invoice_date < oldestUnpaid)) {
-        oldestUnpaid = inv.invoice_date;
+      if (bal > 0) {
+        if (!oldestUnpaid || inv.invoice_date < oldestUnpaid) oldestUnpaid = inv.invoice_date;
+        // Overdue = today is past the due date (invoice_date + payment_terms) and
+        // there's still a balance. Within-terms invoices are owed but not overdue.
+        const invDay = (inv.invoice_date || '').slice(0, 10);
+        if (invDay) {
+          const due = new Date(invDay + 'T00:00:00Z');
+          due.setUTCDate(due.getUTCDate() + terms);
+          if (todayStr > due.toISOString().slice(0, 10)) overdueAmount += bal;
+        }
       }
     }
-    return { count, totalAmount, paidAmount, outstandingAmount, oldestUnpaid };
-  }, [data, statusFilter, orderType, monthFilter, siteFilter]);
+    return { count, totalAmount, paidAmount, outstandingAmount, overdueAmount, oldestUnpaid };
+  }, [data, statusFilter, orderType, invMode, fMonth, dateFrom, dateTo, fPaidMonth, siteFilter]);
 
   const anyFilterActive =
-    statusFilter !== 'All' || orderType !== 'All' || monthFilter !== 'All' || siteFilter !== 'All';
+    statusFilter !== 'All' || orderType !== 'All' || siteFilter !== 'All' ||
+    fPaidMonth !== '' || (invMode === 'month' ? fMonth !== '' : dateFrom !== '' || dateTo !== '');
 
   if (loading) {
     return (
@@ -120,25 +144,18 @@ export default function VendorDetail() {
 
   const { vendor, invoices } = data;
 
-  const monthKey = (iso: string) => (iso || '').slice(0, 7); // YYYY-MM
-  const monthLabel = (key: string) => {
-    if (!key) return '';
-    const [y, m] = key.split('-');
-    const d = new Date(Number(y), Number(m) - 1, 1);
-    return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
-  };
-
-  const monthOptions = Array.from(
-    new Set(invoices.map(i => monthKey(i.invoice_date)).filter(Boolean))
-  ).sort((a, b) => b.localeCompare(a));
-
   const siteOptions = Array.from(new Set(invoices.map(i => i.site).filter(Boolean))).sort();
 
   const filtered = invoices.filter(inv => {
     if (statusFilter !== 'All' && inv.payment_status !== statusFilter) return false;
     if (orderType === 'PO' && !(inv.po_number || '').toUpperCase().includes('/PO/')) return false;
     if (orderType === 'WO' && !(inv.po_number || '').toUpperCase().includes('/WO/')) return false;
-    if (monthFilter !== 'All' && monthKey(inv.invoice_date) !== monthFilter) return false;
+    if (invMode === 'range') {
+      const invDay = (inv.invoice_date || '').slice(0, 10);
+      if (dateFrom && invDay < dateFrom) return false;
+      if (dateTo && invDay > dateTo) return false;
+    } else if (fMonth && (inv.invoice_date || '').slice(0, 7) !== fMonth) return false;
+    if (fPaidMonth && (inv.last_paid_date || '').slice(0, 7) !== fPaidMonth) return false;
     if (siteFilter !== 'All' && inv.site !== siteFilter) return false;
     return true;
   });
@@ -214,8 +231,9 @@ export default function VendorDetail() {
   const kpiCards = [
     { label: 'Total Invoices', value: String(filteredStats.count), sub: scopeSub, accent: '#1a3c5e', bg: '#e8eef5' },
     { label: 'Total Amount', value: formatINR(filteredStats.totalAmount), sub: anyFilterActive ? 'filtered view' : 'total invoiced value', accent: '#1a3c5e', bg: '#eff6ff' },
-    { label: 'Paid Amount', value: formatINR(filteredStats.paidAmount), sub: anyFilterActive ? 'filtered view' : 'payments received', accent: '#15803d', bg: '#dcfce7' },
+    { label: 'Paid Amount', value: formatINR(filteredStats.paidAmount), sub: anyFilterActive ? 'filtered view' : 'settled (incl. TDS & credits)', accent: '#15803d', bg: '#dcfce7' },
     { label: 'Outstanding', value: formatINR(filteredStats.outstandingAmount), sub: filteredStats.oldestUnpaid ? `oldest unpaid: ${formatDate(filteredStats.oldestUnpaid)}` : (filteredStats.count > 0 ? 'fully settled' : 'no invoices'), accent: filteredStats.outstandingAmount > 0 ? '#dc2626' : '#15803d', bg: filteredStats.outstandingAmount > 0 ? '#fef2f2' : '#dcfce7' },
+    { label: 'Overdue', value: formatINR(filteredStats.overdueAmount), sub: `past ${vendor.payment_terms}-day terms`, accent: filteredStats.overdueAmount > 0 ? '#b91c1c' : '#15803d', bg: filteredStats.overdueAmount > 0 ? '#fef2f2' : '#dcfce7' },
   ];
 
   return (
@@ -247,7 +265,7 @@ export default function VendorDetail() {
         </div>
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
           {kpiCards.map(c => (
             <div
               key={c.label}
@@ -338,26 +356,68 @@ export default function VendorDetail() {
             </>
           )}
 
-          {monthOptions.length > 0 && (
-            <>
-              <div className="w-px h-5 bg-gray-200 mx-1" />
-              <select
-                value={monthFilter}
-                onChange={e => setMonthFilter(e.target.value)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer ${
-                  monthFilter !== 'All'
-                    ? 'bg-[#1a3c5e] text-white border-[#1a3c5e]'
-                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                }`}
-                title="Filter invoices by month"
-              >
-                <option value="All">All months</option>
-                {monthOptions.map(m => (
-                  <option key={m} value={m}>{monthLabel(m)}</option>
-                ))}
-              </select>
-            </>
-          )}
+          <div className="w-px h-5 bg-gray-200 mx-1" />
+
+          {/* Invoiced date filter — month picker, or a custom From–To range */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-gray-400">Invoiced</span>
+            <select
+              value={invMode}
+              onChange={e => setInvMode(e.target.value as 'month' | 'range')}
+              className="px-2 py-1.5 text-xs font-medium rounded-lg border border-gray-200 bg-white text-gray-600 cursor-pointer hover:bg-gray-50"
+              title="Filter invoices by invoice date"
+            >
+              <option value="month">Month</option>
+              <option value="range">Range</option>
+            </select>
+            {invMode === 'month' ? (
+              <input
+                type="month"
+                value={fMonth}
+                onChange={e => setFMonth(e.target.value)}
+                title="Filter by invoice month"
+                className={`px-2 py-1.5 text-xs rounded-lg border transition-colors ${
+                  fMonth ? 'border-[#1a3c5e] text-[#1a3c5e]' : 'border-gray-200 text-gray-600'
+                } bg-white`}
+              />
+            ) : (
+              <div className="flex items-center gap-1">
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={e => setDateFrom(e.target.value)}
+                  title="Invoiced from"
+                  className={`px-2 py-1.5 text-xs rounded-lg border transition-colors ${
+                    dateFrom ? 'border-[#1a3c5e] text-[#1a3c5e]' : 'border-gray-200 text-gray-600'
+                  } bg-white`}
+                />
+                <span className="text-xs text-gray-400">–</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={e => setDateTo(e.target.value)}
+                  title="Invoiced to"
+                  className={`px-2 py-1.5 text-xs rounded-lg border transition-colors ${
+                    dateTo ? 'border-[#1a3c5e] text-[#1a3c5e]' : 'border-gray-200 text-gray-600'
+                  } bg-white`}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Paid date filter — by the month of the latest payment */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-gray-400">Paid</span>
+            <input
+              type="month"
+              value={fPaidMonth}
+              onChange={e => setFPaidMonth(e.target.value)}
+              title="Filter by paid month (latest payment date)"
+              className={`px-2 py-1.5 text-xs rounded-lg border transition-colors ${
+                fPaidMonth ? 'border-[#1a3c5e] text-[#1a3c5e]' : 'border-gray-200 text-gray-600'
+              } bg-white`}
+            />
+          </div>
 
           {allAttachments.length > 0 && (
             <button
@@ -444,7 +504,7 @@ export default function VendorDetail() {
                   />
                 </th>
                 <th className="px-4 py-2.5 w-8"></th>
-                {['Date', 'Inv No', 'PO No', 'Category', 'Site', 'Amount', 'Balance', 'Status', 'Files'].map((h) => (
+                {['Invoice Date', 'Paid Date', 'Inv No', 'PO No', 'Category', 'Site', 'Amount', 'Balance', 'Status', 'Files'].map((h) => (
                   <th
                     key={h}
                     className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap ${
@@ -461,6 +521,8 @@ export default function VendorDetail() {
               {filtered.map(inv => {
                 const expanded = expandedInvoiceId === inv.id;
                 const hasFiles = inv.attachments.length > 0;
+                const hasPayments = inv.payments.length > 0;
+                const canExpand = hasFiles || hasPayments;
                 return (
                   <Fragment key={inv.id}>
                     <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${selectedIds.has(inv.id) ? 'bg-blue-50/40' : ''}`}>
@@ -474,18 +536,21 @@ export default function VendorDetail() {
                         />
                       </td>
                       <td className="px-4 py-3 text-center">
-                        {hasFiles && (
+                        {canExpand && (
                           <button
                             type="button"
                             onClick={() => setExpandedInvoiceId(expanded ? null : inv.id)}
                             className="text-gray-400 hover:text-blue-600 text-sm leading-none"
-                            title={expanded ? 'Collapse files' : 'Show files'}
+                            title={expanded ? 'Collapse details' : 'Show payment & file details'}
                           >
                             {expanded ? '▾' : '▸'}
                           </button>
                         )}
                       </td>
                       <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
+                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                        {inv.last_paid_date ? formatDate(inv.last_paid_date) : <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-4 py-3 font-medium text-gray-900">{inv.invoice_no || '—'}</td>
                       <td className="px-4 py-3 text-gray-600">{inv.po_number || '—'}</td>
                       <td className="px-4 py-3 text-gray-600">{inv.purpose}</td>
@@ -542,9 +607,64 @@ export default function VendorDetail() {
                         </td>
                       )}
                     </tr>
-                    {expanded && hasFiles && (
+                    {expanded && canExpand && (
                       <tr className="bg-gray-50/60 border-t border-gray-100">
-                        <td colSpan={isHO ? 12 : 11} className="px-4 py-3">
+                        <td colSpan={isHO ? 13 : 12} className="px-4 py-3 space-y-4">
+                          {hasPayments && (
+                            <div>
+                              <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">
+                                Payments for invoice {inv.invoice_no || '—'}
+                              </div>
+                              <div className="space-y-1.5">
+                                {inv.payments.map(p => (
+                                  <div
+                                    key={p.id}
+                                    className="flex items-center justify-between gap-3 px-3 py-2 bg-white rounded-lg border border-gray-100 text-xs"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0 flex-1 text-gray-600 flex-wrap">
+                                      <span className="font-medium text-gray-900 whitespace-nowrap">
+                                        {formatDate(p.payment_date)}
+                                      </span>
+                                      <span className="text-gray-300">·</span>
+                                      <span>{p.payment_type}</span>
+                                      {p.payment_ref && (
+                                        <>
+                                          <span className="text-gray-300">·</span>
+                                          <span>Ref {p.payment_ref}</span>
+                                        </>
+                                      )}
+                                      {p.bank && (
+                                        <>
+                                          <span className="text-gray-300">·</span>
+                                          <span>{p.bank}</span>
+                                        </>
+                                      )}
+                                      {Number(p.tds_amount) > 0 && (
+                                        <>
+                                          <span className="text-gray-300">·</span>
+                                          <span className="text-amber-600">
+                                            TDS {formatINR(Number(p.tds_amount))}
+                                            {Number(p.tds_pct) > 0 ? ` (${Number(p.tds_pct)}%)` : ''}
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                    <span className="font-medium text-green-700 whitespace-nowrap">
+                                      {formatINR(Number(p.amount))}
+                                    </span>
+                                  </div>
+                                ))}
+                                <div className="border-t border-gray-200 mt-2 pt-2 flex justify-between text-xs font-medium px-3">
+                                  <span>Total paid</span>
+                                  <span className="text-green-700">
+                                    {formatINR(Number(inv.invoice_amount) - Number(inv.balance))}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                          {hasFiles && (
+                          <div>
                           <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">
                             Attachments for invoice {inv.invoice_no || '—'}
                           </div>
@@ -580,6 +700,8 @@ export default function VendorDetail() {
                               </div>
                             ))}
                           </div>
+                          </div>
+                          )}
                         </td>
                       </tr>
                     )}
@@ -588,7 +710,7 @@ export default function VendorDetail() {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={isHO ? 12 : 11} className="px-4 py-10 text-center text-gray-400 text-sm">
+                  <td colSpan={isHO ? 13 : 12} className="px-4 py-10 text-center text-gray-400 text-sm">
                     {invoices.length === 0 ? 'No invoices for this vendor.' : 'No invoices match the selected filter.'}
                   </td>
                 </tr>

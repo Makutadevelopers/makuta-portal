@@ -36,9 +36,35 @@ const createVendorSchema = z.object({
     .transform(v => (v == null ? null : v.trim() || null)),
   email: z.string().email().nullable().optional(),
   notes: z.string().nullable().optional(),
+  // When invoice_no_optional is true, invoices for this vendor may omit the
+  // invoice number — but a reason explaining why must be recorded here.
+  invoice_no_optional: z.boolean().optional(),
+  invoice_no_optional_reason: z.string()
+    .max(300, 'Reason too long')
+    .nullable()
+    .optional()
+    .transform(v => (v == null ? null : v.trim() || null)),
 });
 
 const updateVendorSchema = createVendorSchema.partial();
+
+/**
+ * When the "invoice number optional" flag is on, a reason is mandatory. When
+ * it's explicitly turned off, drop any stale reason. Mutates `data` in place and
+ * returns an error message if the rule is violated (null if OK). For PATCH the
+ * flag may be absent (undefined) — in that case we leave both fields untouched.
+ */
+function normaliseInvoiceNoOptional(
+  data: { invoice_no_optional?: boolean; invoice_no_optional_reason?: string | null },
+): string | null {
+  if (data.invoice_no_optional === true && !data.invoice_no_optional_reason) {
+    return 'A reason is required when the invoice number is made optional';
+  }
+  if (data.invoice_no_optional === false) {
+    data.invoice_no_optional_reason = null;
+  }
+  return null;
+}
 
 export async function getVendors(
   _req: Request,
@@ -78,6 +104,12 @@ export async function createVendor(
   try {
     const data = createVendorSchema.parse(req.body);
 
+    const reasonError = normaliseInvoiceNoOptional(data);
+    if (reasonError) {
+      res.status(400).json({ error: 'Bad Request', message: reasonError });
+      return;
+    }
+
     const existing = await getVendorByName(data.name);
     if (existing) {
       res.status(409).json({
@@ -111,6 +143,12 @@ export async function updateVendor(
 
     if (Object.keys(data).length === 0) {
       res.status(400).json({ error: 'Bad Request', message: 'No fields to update' });
+      return;
+    }
+
+    const reasonError = normaliseInvoiceNoOptional(data);
+    if (reasonError) {
+      res.status(400).json({ error: 'Bad Request', message: reasonError });
       return;
     }
 
