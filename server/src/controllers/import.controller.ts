@@ -8,13 +8,26 @@ import { Request, Response, NextFunction } from 'express';
 import { parse } from 'csv-parse/sync';
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
-import { query, queryOne } from '../db/query';
+import { query, queryOne, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
-import { paymentStatusCase, recomputeInvoiceStatus } from '../services/payment.service';
+import { paymentStatusCase, recomputeInvoiceStatus, syncBankTxnForPayment } from '../services/payment.service';
 import { normaliseSiteName, isCanonicalSite, CANONICAL_SITES } from '../utils/sites';
 
 interface CsvRow {
   [key: string]: string;
+}
+
+/**
+ * Normalise a cheque/transaction reference so the same physical cheque matches
+ * regardless of how it was typed — strips a leading "Chq"/"Cheque"/"Chq no:"
+ * token and surrounding punctuation, keeping the bare number/UTR. This keeps the
+ * importer's cheque identity aligned with the interactive flow ("Chq 000968" →
+ * "000968"), so a re-import doesn't spawn a duplicate bank_transactions row.
+ */
+function normalizeChequeRef(ref: string | null | undefined): string | null {
+  if (!ref) return null;
+  const cleaned = ref.trim().replace(/^(cheque|chq|chk|ch)\.?\s*(no\.?|number|#)?\s*[:#\-]?\s*/i, '').trim();
+  return cleaned || null;
 }
 
 /**
@@ -801,65 +814,47 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
         const status = r.paymentStatus.trim().toLowerCase();
         const hasPaymentToRecord = (status === 'paid' || status === 'partial') && r.paidAmount > 0;
         if (insertedInvoice && hasPaymentToRecord) {
-          let bankTxnId: string | null = null;
-          const isBankPayment = r.paymentType && r.paymentType.toLowerCase() !== 'cash';
-
-          // Create bank_transaction for Cheque/NEFT/RTGS payments
-          if (isBankPayment && r.paymentRef) {
-            const existingTxn = await queryOne<{ id: string }>(
-              `SELECT id FROM bank_transactions WHERE txn_ref = $1 AND bank = $2`,
-              [r.paymentRef, r.paymentBank]
-            );
-            if (existingTxn) {
-              bankTxnId = existingTxn.id;
-              // Add this amount to the existing transaction
-              await queryOne(
-                `UPDATE bank_transactions SET txn_amount = txn_amount + $1 WHERE id = $2`,
-                [r.paidAmount, bankTxnId]
-              );
-            } else {
-              if (!r.paymentDate) {
-                // Defensive: normalizeInvoiceRow rejects Paid/Partial rows
-                // without a parseable Payment Date, so we should never reach
-                // this branch — but if we do, fail loudly rather than silently
-                // backdating the bank transaction to the invoice date.
-                throw new Error('payment_date is required for bank transactions');
-              }
-              const newTxn = await queryOne<{ id: string }>(
-                `INSERT INTO bank_transactions (txn_type, txn_ref, txn_amount, txn_date, bank, remarks, created_by)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-                [
-                  r.paymentType,
-                  r.paymentRef,
-                  r.paidAmount,
-                  r.paymentDate,
-                  r.paymentBank || '',
-                  `Imported batch ${batchId.slice(0, 8)}`,
-                  req.user!.id,
-                ]
-              );
-              bankTxnId = newTxn?.id ?? null;
-            }
-          }
-
           if (!r.paymentDate || !r.paymentType) {
             throw new Error('payment_date and payment_type are required for Paid/Partial rows');
           }
-          await queryOne(
-            `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, payment_month, bank_txn_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [
-              insertedInvoice.id,
-              r.paidAmount,
-              r.paymentType,
-              r.paymentRef || null,
-              r.paymentDate,
-              r.paymentBank || null,
-              req.user!.id,
-              r.paymentMonth,
-              bankTxnId,
-            ]
-          );
+
+          // Insert the payment and link/create its bank_transaction through the
+          // SAME canonical helper the interactive flow uses, inside ONE
+          // transaction. This (a) fixes the old non-transactional bug where a
+          // committed cheque row was orphaned if the payment insert failed, and
+          // (b) uses the canonical cheque identity (txn_type, txn_ref, bank,
+          // txn_date) + auto-tally so re-imports never spawn duplicate or
+          // un-tallied bank rows. Ref is normalised so "Chq 000968" == "000968".
+          // Capture as non-null locals (the guard above narrows them, but TS
+          // widens object props back to string|null inside the closure).
+          const payType: string = r.paymentType;
+          const payDate: string = r.paymentDate;
+          const normalizedRef = normalizeChequeRef(r.paymentRef);
+          const invoiceId = insertedInvoice.id;
+          await withTransaction(async (tx) => {
+            const pay = await tx.queryOne<{ id: string }>(
+              `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, payment_month)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+              [
+                invoiceId,
+                r.paidAmount,
+                payType,
+                normalizedRef,
+                payDate,
+                r.paymentBank || null,
+                req.user!.id,
+                r.paymentMonth,
+              ]
+            );
+            await syncBankTxnForPayment(tx, pay!.id, {
+              payment_type: payType,
+              payment_ref: normalizedRef,
+              bank: r.paymentBank || null,
+              payment_date: payDate,
+              amount: r.paidAmount,
+              recorded_by: req.user!.id,
+            }, null);
+          });
 
           // Recompute payment_status from sum(payments) + CN allocations so the
           // denormalized invoices.payment_status stays in sync with reality.
@@ -1123,23 +1118,39 @@ export async function importPayments(req: Request, res: Response, next: NextFunc
             continue;
           }
 
+          const normalizedRef = normalizeChequeRef(paymentRef);
+
           // Duplicate payment check: same invoice, amount, date, and ref
           const existingPayment = await queryOne<{ id: string }>(
             `SELECT id FROM payments WHERE invoice_id = $1 AND amount = $2 AND payment_date = $3
              AND COALESCE(payment_ref, '') = COALESCE($4, '')`,
-            [invoice.id, amount, paymentDate, paymentRef || null]
+            [invoice.id, amount, paymentDate, normalizedRef]
           );
           if (existingPayment) {
             skipped++;
             continue;
           }
 
-          await queryOne(
-            `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, batch_id, payment_month)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-            [invoice.id, amount, matchedType, paymentRef || null, paymentDate, bank || null, req.user!.id, batchId,
-             parseMonthColumn(rawPaymentMonth) || `${paymentDate.slice(0, 7)}-01`]
-          );
+          // Insert the payment and link/create its cheque through the canonical
+          // helper, in one transaction — so imported non-Cash payments show up
+          // tallied on Bank Reconciliation instead of being invisible (this path
+          // previously never created a bank_transactions row).
+          await withTransaction(async (tx) => {
+            const pay = await tx.queryOne<{ id: string }>(
+              `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, batch_id, payment_month)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+              [invoice.id, amount, matchedType, normalizedRef, paymentDate, bank || null, req.user!.id, batchId,
+               parseMonthColumn(rawPaymentMonth) || `${paymentDate.slice(0, 7)}-01`]
+            );
+            await syncBankTxnForPayment(tx, pay!.id, {
+              payment_type: matchedType,
+              payment_ref: normalizedRef,
+              bank: bank || null,
+              payment_date: paymentDate,
+              amount,
+              recorded_by: req.user!.id,
+            }, null);
+          });
 
           // Recompute status (accounting for CN allocations)
           await recomputeInvoiceStatus(invoice.id);

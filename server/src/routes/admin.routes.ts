@@ -273,8 +273,28 @@ router.get('/import-audit', requireRole(['ho']), async (_req: Request, res: Resp
       WHERE ${BANK_MONTH}
       GROUP BY p.bank ORDER BY cnt DESC LIMIT 40`);
 
+    // ── Bank Reconciliation invariants — all should be 0 after migration 048 +
+    //    the importer fix. A non-zero value here means a regression re-introduced
+    //    orphan/duplicate/untallied cheque rows. This is the standing health check. ──
+    const reconciliation_invariants = await query(`
+      SELECT
+        (SELECT COUNT(*) FROM bank_transactions bt
+           WHERE NOT EXISTS (SELECT 1 FROM payments p WHERE p.bank_txn_id = bt.id))                   AS orphan_bank_txns,
+        (SELECT COUNT(*) FROM (
+           SELECT bt.id FROM bank_transactions bt LEFT JOIN payments p ON p.bank_txn_id = bt.id
+           GROUP BY bt.id, bt.txn_amount
+           HAVING ABS(bt.txn_amount - COALESCE(SUM(p.amount), 0)) >= 1) t)                            AS untallied_bank_txns,
+        (SELECT COUNT(*) FROM payments p
+           WHERE lower(trim(COALESCE(p.payment_type, ''))) <> 'cash' AND p.amount > 0
+             AND NULLIF(trim(p.payment_ref), '') IS NOT NULL AND p.bank_txn_id IS NULL)               AS unlinked_noncash_payments,
+        (SELECT COALESCE(SUM(cnt - 1), 0) FROM (
+           SELECT COUNT(*) cnt FROM bank_transactions
+           GROUP BY regexp_replace(COALESCE(txn_ref, ''), '[^0-9]', '', 'g'), txn_date, round(txn_amount)
+           HAVING COUNT(*) > 1) d)                                                                    AS duplicate_extra_rows`);
+
     res.json({
       generated_at: new Date().toISOString(),
+      reconciliation_invariants: reconciliation_invariants[0],
       p5_bad_payment_types,
       p6_payment_samples,
       p7_flagged_bank_values,

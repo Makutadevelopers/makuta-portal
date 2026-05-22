@@ -6,9 +6,16 @@
 
 import { readFileSync } from 'fs';
 import { parse } from 'csv-parse/sync';
-import { query, queryOne } from './query.js';
-import { paymentStatusCase } from '../services/payment.service.js';
+import { query, queryOne, withTransaction } from './query.js';
+import { paymentStatusCase, syncBankTxnForPayment } from '../services/payment.service.js';
 import { randomUUID } from 'crypto';
+
+/** Strip a leading "Chq"/"Cheque" token so cheque refs match the app's identity. */
+function normalizeChequeRef(ref: string | null | undefined): string | null {
+  if (!ref) return null;
+  const cleaned = ref.trim().replace(/^(cheque|chq|chk|ch)\.?\s*(no\.?|number|#)?\s*[:#\-]?\s*/i, '').trim();
+  return cleaned || null;
+}
 
 interface CsvRow {
   [key: string]: string;
@@ -185,23 +192,23 @@ async function main() {
       ]
     );
 
-    // If paid, create payment record
+    // If paid, create payment record (linked to its cheque via the canonical helper)
     if (paymentStatus === 'Paid' && inv) {
       const paymentDate = parseDate(paymentDateRaw) || invoiceDate;
       const paymentMonth = parseMonth(paymentMonthRaw) || monthDate;
-
-      await query(
-        `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, batch_id, payment_month)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          inv.id, amount,
-          paymentType || 'Cheque',
-          paymentRef || null,
-          paymentDate,
-          bank || null,
-          HO_USER_ID, batchId, paymentMonth,
-        ]
-      );
+      const ptype = paymentType || 'Cheque';
+      const ref = normalizeChequeRef(paymentRef);
+      await withTransaction(async (tx) => {
+        const pay = await tx.queryOne<{ id: string }>(
+          `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, batch_id, payment_month)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+          [inv.id, amount, ptype, ref, paymentDate, bank || null, HO_USER_ID, batchId, paymentMonth]
+        );
+        await syncBankTxnForPayment(tx, pay!.id, {
+          payment_type: ptype, payment_ref: ref, bank: bank || null,
+          payment_date: paymentDate, amount, recorded_by: HO_USER_ID,
+        }, null);
+      });
       paymentsCreated++;
     }
 
@@ -209,25 +216,24 @@ async function main() {
     if (paymentStatus === 'Not Paid' && paymentType && paymentDateRaw) {
       const paymentDate = parseDate(paymentDateRaw) || invoiceDate;
       const paymentMonth = parseMonth(paymentMonthRaw) || monthDate;
-
-      await query(
-        `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, batch_id, payment_month)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          inv!.id, amount,
-          paymentType,
-          paymentRef || null,
-          paymentDate,
-          bank || null,
-          HO_USER_ID, batchId, paymentMonth,
-        ]
-      );
+      const ref = normalizeChequeRef(paymentRef);
+      await withTransaction(async (tx) => {
+        const pay = await tx.queryOne<{ id: string }>(
+          `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, batch_id, payment_month)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+          [inv!.id, amount, paymentType, ref, paymentDate, bank || null, HO_USER_ID, batchId, paymentMonth]
+        );
+        await syncBankTxnForPayment(tx, pay!.id, {
+          payment_type: paymentType, payment_ref: ref, bank: bank || null,
+          payment_date: paymentDate, amount, recorded_by: HO_USER_ID,
+        }, null);
+        // Recompute status (accounts for CN allocations)
+        await tx.query(
+          `UPDATE invoices SET payment_status = ${paymentStatusCase('invoices')}, updated_at = NOW() WHERE id = $1`,
+          [inv!.id]
+        );
+      });
       paymentsCreated++;
-      // Recompute status (accounts for CN allocations)
-      await query(
-        `UPDATE invoices SET payment_status = ${paymentStatusCase('invoices')}, updated_at = NOW() WHERE id = $1`,
-        [inv!.id]
-      );
     }
 
     imported++;

@@ -459,3 +459,35 @@ describe('Filename Sanitization', () => {
     expect(sanitizeFilename(longName).length).toBeLessThanOrEqual(255);
   });
 });
+
+// ─── Cheque reference normalization (importer dedup key) ───
+// Replicated from normalizeChequeRef in import.controller.ts / importSheet.ts.
+// A re-import that spells the same cheque differently ("Chq 000968" vs "000968")
+// must normalise to one value, otherwise it spawns a duplicate bank_transactions
+// row — the root cause of the orphan/duplicate Bank Reconciliation rows.
+function normalizeChequeRef(ref: string | null | undefined): string | null {
+  if (!ref) return null;
+  const cleaned = ref.trim().replace(/^(cheque|chq|chk|ch)\.?\s*(no\.?|number|#)?\s*[:#\-]?\s*/i, '').trim();
+  return cleaned || null;
+}
+
+describe('Cheque reference normalization', () => {
+  it('strips a leading Chq/Cheque token so the same cheque matches', () => {
+    expect(normalizeChequeRef('Chq 000968')).toBe('000968');
+    expect(normalizeChequeRef('cheque no: 000968')).toBe('000968');
+    expect(normalizeChequeRef('CHEQUE #000968')).toBe('000968');
+    expect(normalizeChequeRef('  000968 ')).toBe('000968');
+    expect(normalizeChequeRef('000968')).toBe('000968');
+  });
+
+  it('leaves real references and UTRs intact', () => {
+    expect(normalizeChequeRef('NEFT123456789')).toBe('NEFT123456789');
+    expect(normalizeChequeRef('UTR5500012345')).toBe('UTR5500012345');
+  });
+
+  it('returns null for blank/missing refs (Cash etc.)', () => {
+    expect(normalizeChequeRef(null)).toBeNull();
+    expect(normalizeChequeRef('')).toBeNull();
+    expect(normalizeChequeRef('   ')).toBeNull();
+  });
+});

@@ -179,14 +179,23 @@ interface AllocationDetail {
 export async function listReconciliation(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const txns = await query<ReconciliationRow>(
+      // Only count payments whose invoice is still live — a payment on a
+      // soft-deleted invoice is hidden everywhere else, so it must not show or
+      // tally here either.
       `SELECT bt.*,
               vu.name AS verified_by_name,
               COALESCE(SUM(p.amount), 0)::NUMERIC(14,2) AS allocated_total,
               COUNT(p.id)                               AS allocation_count
        FROM bank_transactions bt
        LEFT JOIN payments p ON p.bank_txn_id = bt.id
+              AND EXISTS (SELECT 1 FROM invoices i WHERE i.id = p.invoice_id AND i.deleted_at IS NULL)
        LEFT JOIN users vu ON vu.id = bt.verified_by
        GROUP BY bt.id, vu.name
+       -- A cheque exists only because a payment created it. Hide any row with no
+       -- live linked payments — that's a true orphan (bad import) or a cheque
+       -- whose only invoice was deleted; neither belongs on the reconciliation
+       -- view. Restore-safe (no data mutation) and keeps totals honest.
+       HAVING COUNT(p.id) > 0
        ORDER BY bt.txn_date DESC, bt.created_at DESC`
     );
 
@@ -206,6 +215,7 @@ export async function listReconciliation(req: Request, res: Response, next: Next
          FROM payments p
          JOIN invoices i ON i.id = p.invoice_id
          WHERE p.bank_txn_id = ANY($1::uuid[])
+           AND i.deleted_at IS NULL
          ORDER BY i.invoice_no`,
         [txnIds]
       );
