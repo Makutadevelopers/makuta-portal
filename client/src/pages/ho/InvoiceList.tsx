@@ -23,6 +23,7 @@ import AttachmentViewer from '../../components/shared/AttachmentViewer';
 import DisputeModal from '../../components/shared/DisputeModal';
 import ActionsMenu from '../../components/shared/ActionsMenu';
 import PaymentModal from '../../components/shared/PaymentModal';
+import RevertPaymentModal from '../../components/shared/RevertPaymentModal';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../context/ToastContext';
 import { normaliseSearch, highlight, amountMatchesSearch } from '../../utils/searchHighlight';
@@ -84,6 +85,7 @@ export default function InvoiceList() {
 
   // Payment modal state
   const [payInvoice, setPayInvoice] = useState<Invoice | null>(null);
+  const [revertInvoice, setRevertInvoice] = useState<Invoice | null>(null);
   const [showBulkPay, setShowBulkPay] = useState(false);
   // History panel state
   const [historyInvoice, setHistoryInvoice] = useState<Invoice | null>(null);
@@ -648,6 +650,12 @@ export default function InvoiceList() {
         />
       )}
 
+      <RevertPaymentModal
+        invoice={revertInvoice}
+        onClose={() => setRevertInvoice(null)}
+        onReverted={(id) => patchInvoice(id)}
+      />
+
       {/* Attachment Viewer */}
       {docsInvoice && (
         <AttachmentViewer
@@ -819,6 +827,7 @@ export default function InvoiceList() {
                               { label: 'Payment History', color: 'text-gray-600', onClick: () => openHistory(inv) },
                             ] : []),
                             ...(isPaid ? [{ label: 'Payment History', color: 'text-gray-600', onClick: () => openHistory(inv) }] : []),
+                            ...((isPaid || isPartial) ? [{ label: 'Mark as Not Paid', color: 'text-red-600', onClick: () => setRevertInvoice(inv) }] : []),
                             { label: 'Info / Audit', color: 'text-purple-600', onClick: () => openInfo(inv) },
                           ]}
                         />

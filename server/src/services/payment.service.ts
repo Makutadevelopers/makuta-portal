@@ -125,9 +125,11 @@ export async function syncBankTxnForPayment(
 /**
  * Reset a bank_transaction's amount to the sum of its linked payments. A
  * transaction left with no payments is deleted (no orphan rows on the
- * reconciliation view). Internal helper for {@link syncBankTxnForPayment}.
+ * reconciliation view). Used by {@link syncBankTxnForPayment} and by the
+ * payment-reversal flow, which deletes payments and must re-tally the cheque
+ * (a cheque covering several invoices only loses the reverted invoice's share).
  */
-async function resyncBankTxnAmount(tx: TxClient, txnId: string): Promise<void> {
+export async function resyncBankTxnAmount(tx: TxClient, txnId: string): Promise<void> {
   const agg = await tx.queryOne<{ cnt: string; total: string }>(
     `SELECT COUNT(*)::text AS cnt, COALESCE(SUM(amount), 0)::text AS total
        FROM payments WHERE bank_txn_id = $1`,

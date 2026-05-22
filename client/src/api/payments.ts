@@ -18,3 +18,13 @@ export function updatePayment(invoiceId: string, paymentId: string, data: Create
     body: JSON.stringify(data),
   });
 }
+
+// Reverse ALL payments on an invoice (cheque bounce / wrong entry) → Not Paid,
+// recording a reason in the audit log. Server hard-deletes the payments and
+// re-tallies any shared cheque.
+export function revertPayments(invoiceId: string, reason: string): Promise<{ invoice_payment_status: string; reverted_count: number }> {
+  return apiFetch<{ invoice_payment_status: string; reverted_count: number }>(`/invoices/${invoiceId}/payments/revert`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+}

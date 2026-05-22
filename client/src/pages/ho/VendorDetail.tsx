@@ -11,6 +11,7 @@ import AppShell from '../../components/layout/AppShell';
 import ActionsMenu from '../../components/shared/ActionsMenu';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import PaymentModal from '../../components/shared/PaymentModal';
+import RevertPaymentModal from '../../components/shared/RevertPaymentModal';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 
 type StatusFilter = 'All' | 'Paid' | 'Partial' | 'Not Paid';
@@ -39,6 +40,7 @@ export default function VendorDetail() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [payInvoice, setPayInvoice] = useState<VendorDetailInvoice | null>(null);
+  const [revertInvoice, setRevertInvoice] = useState<VendorDetailInvoice | null>(null);
   const { user } = useAuth();
   const { notify } = useToast();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -604,6 +606,11 @@ export default function VendorDetail() {
                                   color: 'text-green-600',
                                   onClick: () => setPayInvoice(inv),
                                 }] : []),
+                                ...(inv.payment_status !== 'Not Paid' ? [{
+                                  label: 'Mark as Not Paid',
+                                  color: 'text-red-600',
+                                  onClick: () => setRevertInvoice(inv),
+                                }] : []),
                                 {
                                   label: 'Delete',
                                   color: 'text-red-500',
@@ -741,6 +748,12 @@ export default function VendorDetail() {
           onSaved={() => { setPayInvoice(null); notify('Payment recorded'); reload(); }}
         />
       )}
+
+      <RevertPaymentModal
+        invoice={revertInvoice ? { id: revertInvoice.id, invoice_no: revertInvoice.invoice_no, vendor_name: vendor.name, payment_status: revertInvoice.payment_status } : null}
+        onClose={() => setRevertInvoice(null)}
+        onReverted={() => reload()}
+      />
     </AppShell>
   );
 }

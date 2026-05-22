@@ -13,6 +13,7 @@ import BulkImportModal from '../../components/shared/BulkImportModal';
 import DisputeModal from '../../components/shared/DisputeModal';
 import PayFromPettyCashModal from '../../components/shared/PayFromPettyCashModal';
 import SiteBulkPayModal from '../../components/shared/SiteBulkPayModal';
+import RevertPaymentModal from '../../components/shared/RevertPaymentModal';
 import { getAllBalances } from '../../api/pettyCash';
 import { PettyCashBalance } from '../../types/pettyCash';
 import { useToast } from '../../context/ToastContext';
@@ -35,6 +36,7 @@ export default function MyInvoices() {
   const [showImport, setShowImport] = useState(false);
   const [disputeInv, setDisputeInv] = useState<Invoice | null>(null);
   const [payInv, setPayInv] = useState<Invoice | null>(null);
+  const [revertInv, setRevertInv] = useState<Invoice | null>(null);
   const [bulkPayOpen, setBulkPayOpen] = useState(false);
   const [duplicateFrom, setDuplicateFrom] = useState<Invoice | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -274,6 +276,12 @@ export default function MyInvoices() {
         />
       )}
 
+      <RevertPaymentModal
+        invoice={revertInv ? { id: revertInv.id, invoice_no: revertInv.invoice_no, vendor_name: revertInv.vendor_name, payment_status: revertInv.payment_status } : null}
+        onClose={() => setRevertInv(null)}
+        onReverted={() => { refresh(); refreshPettyBalances(); }}
+      />
+
       {/* Bulk pay from petty cash modal */}
       {bulkPayOpen && bulkPayable.length > 0 && (
         <SiteBulkPayModal
@@ -495,6 +503,13 @@ export default function MyInvoices() {
                           className="text-xs text-green-700 cursor-pointer hover:underline"
                           title="Pay this invoice from your petty cash float"
                         >Pay</span>
+                      )}
+                      {!inv.pushed && (inv.payment_status === 'Paid' || inv.payment_status === 'Partial') && (
+                        <span
+                          onClick={() => setRevertInv(inv)}
+                          className="text-xs text-red-600 cursor-pointer hover:underline"
+                          title="Reverse payments (cheque bounce / wrong entry) — sets invoice back to Not Paid"
+                        >Mark Not Paid</span>
                       )}
                       {/* Duplicate action hidden for now — re-enable if/when needed. */}
                     </div>

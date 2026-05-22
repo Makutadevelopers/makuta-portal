@@ -13,7 +13,7 @@ import { query, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
 import { notifyPaymentEdited } from '../services/email.service';
 import { userHasSite } from '../middleware/auth';
-import { paymentStatusCase, syncBankTxnForPayment } from '../services/payment.service';
+import { paymentStatusCase, syncBankTxnForPayment, resyncBankTxnAmount } from '../services/payment.service';
 
 const MINOR_LIMIT = 50000;
 
@@ -412,6 +412,118 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
     }).catch((err) => console.error('[email] notifyPaymentEdited failed:', err));
 
     res.json({ ...payment, invoice_payment_status: newStatus });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const revertSchema = z.object({
+  reason: z.string().trim().min(3, 'Please give a reason (e.g. cheque bounced, wrong entry)').max(500),
+});
+
+/**
+ * Reverse ALL payments on an invoice and return it to its computed status
+ * (Not Paid, unless credit notes still cover part of it). Used for cheque
+ * bounces or payments entered against the wrong invoice.
+ *
+ * Payments are hard-deleted; the reason and the status change are preserved in
+ * the audit log. Any cheque a deleted payment was part of is re-tallied — a
+ * cheque that paid several invoices only loses this invoice's share, and a
+ * cheque left with no payments is removed from Bank Reconciliation.
+ *
+ * Access: HO any invoice; site only its own, non-finalized invoices.
+ */
+export async function revertInvoicePayments(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const invoiceId = req.params.id as string;
+    const { reason } = revertSchema.parse(req.body);
+    const { role, id: userId } = req.user!;
+
+    const result = await withTransaction(async (tx) => {
+      const invoice = await tx.queryOne<InvoiceRow & { payment_status: string }>(
+        `SELECT id, invoice_amount, site, pushed, deleted_at, vendor_name, invoice_no, payment_status
+         FROM invoices WHERE id = $1 FOR UPDATE`,
+        [invoiceId]
+      );
+      if (!invoice) {
+        return { status: 404, body: { error: 'Not Found', message: 'Invoice not found' } };
+      }
+      if (invoice.deleted_at) {
+        return { status: 404, body: { error: 'Not Found', message: 'Invoice has been deleted' } };
+      }
+      if (role === 'site' && !userHasSite(req.user, invoice.site)) {
+        return { status: 403, body: { error: 'Forbidden', message: 'You can only revert payments for invoices in sites you are assigned to' } };
+      }
+      if (role === 'site' && invoice.pushed) {
+        return { status: 403, body: { error: 'Forbidden', message: 'Finalized invoices can only be reverted by Head Office' } };
+      }
+
+      const payments = await tx.query<PaymentRow>(
+        `SELECT * FROM payments WHERE invoice_id = $1 ORDER BY payment_date, created_at`,
+        [invoiceId]
+      );
+      if (payments.length === 0) {
+        return { status: 400, body: { error: 'Bad Request', message: 'This invoice has no payments to revert' } };
+      }
+
+      // Hard-delete the payments, then re-tally every cheque they touched.
+      const txnIds = [...new Set(payments.map(p => p.bank_txn_id).filter((id): id is string => !!id))];
+      await tx.query(`DELETE FROM payments WHERE invoice_id = $1`, [invoiceId]);
+      for (const txnId of txnIds) {
+        await resyncBankTxnAmount(tx, txnId);
+      }
+
+      // Recompute status (Not Paid unless credit notes still cover part of it)
+      // and clear the site minor-payment flag now that the payments are gone.
+      const statusRow = await tx.queryOne<{ payment_status: string }>(
+        `UPDATE invoices
+            SET payment_status = ${paymentStatusCase('invoices')},
+                minor_payment = FALSE,
+                updated_at = NOW()
+          WHERE id = $1
+          RETURNING payment_status`,
+        [invoiceId]
+      );
+
+      return {
+        status: 200,
+        body: {
+          invoiceId,
+          before: invoice.payment_status,
+          newStatus: statusRow?.payment_status ?? 'Not Paid',
+          reverted: payments,
+          vendorName: invoice.vendor_name,
+          invoiceNo: invoice.invoice_no,
+        },
+      };
+    });
+
+    if (result.status !== 200) {
+      res.status(result.status).json(result.body);
+      return;
+    }
+
+    const { before, newStatus, reverted, invoiceNo } = result.body as {
+      before: string;
+      newStatus: string;
+      reverted: PaymentRow[];
+      vendorName: string;
+      invoiceNo: string | null;
+    };
+
+    try {
+      const totalCash = reverted.reduce((s, p) => s + Number(p.amount), 0);
+      await logAudit({
+        userId,
+        action: `Reverted ${reverted.length} payment${reverted.length === 1 ? '' : 's'} (₹${totalCash.toLocaleString('en-IN')}): ${before} → ${newStatus}. Reason: ${reason}`,
+        invoiceId,
+        metadata: { reason, before, after: newStatus, invoiceNo, reverted },
+      });
+    } catch (auditErr) {
+      console.error('[audit] revertInvoicePayments audit log failed:', auditErr);
+    }
+
+    res.json({ invoice_payment_status: newStatus, reverted_count: reverted.length });
   } catch (err) {
     next(err);
   }
