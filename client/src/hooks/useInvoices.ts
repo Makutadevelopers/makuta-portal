@@ -1,64 +1,49 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
 import { Invoice } from '../types/invoice';
 import { getInvoices, getInvoice } from '../api/invoices';
-import { useReloadOnFocus } from './useReloadOnFocus';
+import { useCachedQuery, setQueryData } from './useCachedQuery';
+
+const KEY = '/invoices';
 
 export function useInvoices() {
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // `background: true` re-fetches without flipping `loading`, so the current
-  // rows stay on screen instead of blanking to a spinner. Used after an edit/
-  // save so the list updates in place rather than flickering through a reload.
-  const fetch = useCallback(async (opts?: { background?: boolean }) => {
-    if (!opts?.background) setLoading(true);
-    setError(null);
-    try {
-      const data = await getInvoices();
-      setInvoices(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load invoices');
-    } finally {
-      if (!opts?.background) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetch(); }, [fetch]);
-
-  const refresh = useCallback(() => fetch({ background: true }), [fetch]);
-
-  // Pick up edits made in another tab/screen when this one regains focus. Safe
-  // to run unconditionally: the list's inline edit form (HOInvoiceForm) seeds
-  // its draft once and is keyed by invoice id, so a background row refresh never
-  // resets in-progress input; vendor edit forms read from useVendors, which is
-  // intentionally left without focus-refetch.
-  useReloadOnFocus(refresh);
+  // Shared SWR cache: revisiting any invoice-backed page renders instantly from
+  // cache while revalidating in the background, and a 20s poll + focus refresh
+  // picks up edits made elsewhere without a manual reload. Every page reading
+  // this key (list, dashboard, vendor master, site views) shares one copy.
+  const { data, loading, error, refresh } = useCachedQuery<Invoice[]>(
+    KEY,
+    getInvoices,
+    { pollMs: 20_000 },
+  );
+  const invoices = data ?? [];
+  const errMsg = error?.message ?? null;
 
   // Patch a single row in place after an edit: re-fetch just that invoice
-  // (with the server-computed balance/status/attachment_count) and swap it
-  // into the list — no full reload, no flicker. If the row vanished server-side
-  // (e.g. now out of scope), drop it locally. Falls back to a background
-  // refresh on error so the list never silently diverges from the server.
+  // (with the server-computed balance/status/attachment_count) and swap it into
+  // the shared cache — no full reload, no flicker, and every page on this key
+  // updates at once. If the row vanished server-side (e.g. now out of scope),
+  // drop it locally. Falls back to a background refresh on error so the list
+  // never silently diverges from the server.
   const patchInvoice = useCallback(async (id: string) => {
     try {
       const updated = await getInvoice(id);
-      setInvoices(prev => {
-        const idx = prev.findIndex(i => i.id === id);
-        if (idx === -1) return [updated, ...prev];
-        const next = prev.slice();
+      setQueryData<Invoice[]>(KEY, (prev) => {
+        const list = prev ?? [];
+        const idx = list.findIndex((i) => i.id === id);
+        if (idx === -1) return [updated, ...list];
+        const next = list.slice();
         next[idx] = updated;
         return next;
       });
     } catch {
-      fetch({ background: true });
+      refresh();
     }
-  }, [fetch]);
+  }, [refresh]);
 
-  // Remove a row locally after a delete — no reload needed.
+  // Remove a row from the shared cache after a delete — no reload needed.
   const removeInvoice = useCallback((id: string) => {
-    setInvoices(prev => prev.filter(i => i.id !== id));
+    setQueryData<Invoice[]>(KEY, (prev) => (prev ?? []).filter((i) => i.id !== id));
   }, []);
 
-  return { invoices, loading, error, refresh, patchInvoice, removeInvoice };
+  return { invoices, loading, error: errMsg, refresh, patchInvoice, removeInvoice };
 }

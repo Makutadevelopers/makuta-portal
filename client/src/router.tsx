@@ -1,41 +1,56 @@
+import { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import { Role } from './types/user';
+
+// Auth/login pages stay eagerly imported — they're tiny and on the critical
+// first-paint path, so code-splitting them would only add a loading flash.
 import LoginPage from './pages/auth/LoginPage';
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
 import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import SsoHandoff from './pages/auth/SsoHandoff';
 import ChangePasswordPage from './pages/shared/ChangePasswordPage';
 
+// Every role page is lazy-loaded so the initial bundle no longer ships the
+// whole app (and heavy deps like Recharts) up front. Each route downloads its
+// own chunk on first visit, cutting time-to-interactive on login.
 // HO pages
-import Dashboard from './pages/ho/Dashboard';
-import InvoiceList from './pages/ho/InvoiceList';
-import PaymentAging from './pages/ho/PaymentAging';
-import CashflowPage from './pages/ho/CashflowPage';
-import Analytics from './pages/ho/Analytics';
-import VendorMaster from './pages/ho/VendorMaster';
-import VendorDetail from './pages/ho/VendorDetail';
-import BankMaster from './pages/ho/BankMaster';
-import AuditTrail from './pages/ho/AuditTrail';
-import Bin from './pages/ho/Bin';
-import BankReconciliation from './pages/ho/BankReconciliation';
-import PettyCash from './pages/ho/PettyCash';
+const Dashboard = lazy(() => import('./pages/ho/Dashboard'));
+const InvoiceList = lazy(() => import('./pages/ho/InvoiceList'));
+const PaymentAging = lazy(() => import('./pages/ho/PaymentAging'));
+const CashflowPage = lazy(() => import('./pages/ho/CashflowPage'));
+const Analytics = lazy(() => import('./pages/ho/Analytics'));
+const VendorMaster = lazy(() => import('./pages/ho/VendorMaster'));
+const VendorDetail = lazy(() => import('./pages/ho/VendorDetail'));
+const BankMaster = lazy(() => import('./pages/ho/BankMaster'));
+const AuditTrail = lazy(() => import('./pages/ho/AuditTrail'));
+const Bin = lazy(() => import('./pages/ho/Bin'));
+const BankReconciliation = lazy(() => import('./pages/ho/BankReconciliation'));
+const PettyCash = lazy(() => import('./pages/ho/PettyCash'));
 
 // Mgmt pages
-import MgmtOverview from './pages/mgmt/MgmtOverview';
-import VendorAging from './pages/mgmt/VendorAging';
-import MgmtCashflow from './pages/mgmt/MgmtCashflow';
-import MgmtBankReconciliation from './pages/mgmt/MgmtBankReconciliation';
-import EmployeeManagement from './pages/mgmt/EmployeeManagement';
+const MgmtOverview = lazy(() => import('./pages/mgmt/MgmtOverview'));
+const VendorAging = lazy(() => import('./pages/mgmt/VendorAging'));
+const MgmtCashflow = lazy(() => import('./pages/mgmt/MgmtCashflow'));
+const MgmtBankReconciliation = lazy(() => import('./pages/mgmt/MgmtBankReconciliation'));
+const EmployeeManagement = lazy(() => import('./pages/mgmt/EmployeeManagement'));
 
 // Site pages
-import SiteDashboard from './pages/site/SiteDashboard';
-import MyInvoices from './pages/site/MyInvoices';
-import SiteExpenditure from './pages/site/SiteExpenditure';
-import SitePettyCash from './pages/site/SitePettyCash';
+const SiteDashboard = lazy(() => import('./pages/site/SiteDashboard'));
+const MyInvoices = lazy(() => import('./pages/site/MyInvoices'));
+const SiteExpenditure = lazy(() => import('./pages/site/SiteExpenditure'));
+const SitePettyCash = lazy(() => import('./pages/site/SitePettyCash'));
 
 // Shared pages
-import CreditNotes from './pages/shared/CreditNotes';
+const CreditNotes = lazy(() => import('./pages/shared/CreditNotes'));
+
+function RouteFallback() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-slate-50">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-[#1a3c5e]" />
+    </div>
+  );
+}
 
 function ProtectedRoute({ children, allowed }: { children: React.ReactNode; allowed: Role[] }) {
   const { isAuthenticated, user } = useAuth();
@@ -66,6 +81,7 @@ function RootRedirect() {
 export default function AppRouter() {
   return (
     <BrowserRouter>
+      <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/sso" element={<SsoHandoff />} />
@@ -107,6 +123,7 @@ export default function AppRouter() {
         {/* Catch-all */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

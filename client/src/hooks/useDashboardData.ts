@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useMemo } from 'react';
 import { apiFetch } from '../api/client';
-import { useReloadOnFocus } from './useReloadOnFocus';
+import { useCachedQuery } from './useCachedQuery';
 import { Invoice } from '../types/invoice';
 import { CashflowRow } from '../types/cashflow';
 
@@ -262,54 +262,46 @@ interface RawData {
   invoices: Invoice[];
 }
 
+// Fetch the three dashboard datasets in parallel and shape cashflow into the
+// CashflowRow[] the derive step expects. Pulled out of the hook so it can be
+// handed straight to the shared SWR cache.
+async function fetchDashboardRaw(): Promise<RawData> {
+  const [aging, cashflow, invoices] = await Promise.all([
+    apiFetch<AgingData>('/aging?site=All'),
+    apiFetch<{ expenditure: { month: string; purpose: string; total: number }[]; cashflow: { month: string; purpose: string; total: number }[] }>('/cashflow').then(res => {
+      // Merge expenditure + cashflow into CashflowRow[] for dashboard compatibility
+      const merged = new Map<string, CashflowRow>();
+      for (const r of res.expenditure) {
+        const key = `${r.month}|${r.purpose}`;
+        if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
+        merged.get(key)!.total_invoiced += Number(r.total);
+      }
+      for (const r of res.cashflow) {
+        const key = `${r.month}|${r.purpose}`;
+        if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
+        merged.get(key)!.total_paid += Number(r.total);
+      }
+      return Array.from(merged.values());
+    }),
+    apiFetch<Invoice[]>('/invoices'),
+  ]);
+  return { aging, cashflow, invoices };
+}
+
 export function useDashboardData(dateRange?: { from: string; to: string } | null): DashboardData & { refresh: () => void } {
-  const [raw, setRaw] = useState<RawData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // `background: true` reloads the figures without flipping the page back to a
-  // spinner — used by the on-focus refresh so the dashboard updates in place.
-  const load = useCallback(async (opts?: { background?: boolean }) => {
-    if (!opts?.background) setLoading(true);
-    try {
-      const [aging, cashflow, invoices] = await Promise.all([
-        apiFetch<AgingData>('/aging?site=All'),
-        apiFetch<{ expenditure: { month: string; purpose: string; total: number }[]; cashflow: { month: string; purpose: string; total: number }[] }>('/cashflow').then(res => {
-          // Merge expenditure + cashflow into CashflowRow[] for dashboard compatibility
-          const merged = new Map<string, CashflowRow>();
-          for (const r of res.expenditure) {
-            const key = `${r.month}|${r.purpose}`;
-            if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
-            merged.get(key)!.total_invoiced += Number(r.total);
-          }
-          for (const r of res.cashflow) {
-            const key = `${r.month}|${r.purpose}`;
-            if (!merged.has(key)) merged.set(key, { month: r.month, purpose: r.purpose, total_invoiced: 0, total_paid: 0, invoice_count: 0 });
-            merged.get(key)!.total_paid += Number(r.total);
-          }
-          return Array.from(merged.values());
-        }),
-        apiFetch<Invoice[]>('/invoices'),
-      ]);
-      setRaw({ aging, cashflow, invoices });
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load dashboard data');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const refresh = useCallback(() => load({ background: true }), [load]);
-
-  // Pick up edits made elsewhere when the dashboard tab regains focus.
-  useReloadOnFocus(refresh);
+  // Shared SWR cache: the dashboard renders instantly from cache on revisit and
+  // a 30s background poll + focus refresh keeps the figures live. The date-range
+  // filter is applied client-side in the memo below, so the fetch key is stable.
+  const { data: raw, loading, error, refresh } = useCachedQuery<RawData>(
+    'dashboard:raw',
+    fetchDashboardRaw,
+    { pollMs: 30_000 },
+  );
+  const errMsg = error?.message ?? null;
 
   // Derive from raw data, filtering by date range
   const data = useMemo<DashboardData>(() => {
-    if (loading || !raw) return { ...EMPTY, loading, error };
+    if (!raw) return { ...EMPTY, loading, error: errMsg };
 
     let { aging, cashflow, invoices } = raw;
 
@@ -335,7 +327,7 @@ export function useDashboardData(dateRange?: { from: string; to: string } | null
     // Pass full (unfiltered) aging as 4th arg so outstanding/overdue KPIs always show live state
     const derived = derive(aging, cashflow, invoices, raw.aging);
     return { ...derived, loading: false, error: null };
-  }, [raw, loading, error, dateRange?.from, dateRange?.to]);
+  }, [raw, loading, errMsg, dateRange?.from, dateRange?.to]);
 
   return { ...data, refresh };
 }

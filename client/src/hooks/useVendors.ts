@@ -1,26 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
 import { Vendor } from '../types/vendor';
 import { getVendors } from '../api/vendors';
+import { useCachedQuery } from './useCachedQuery';
+
+const KEY = '/vendors';
 
 export function useVendors() {
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetch = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getVendors();
-      setVendors(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load vendors');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetch(); }, [fetch]);
-
-  return { vendors, loading, error, refresh: fetch };
+  // Vendors change rarely, so a lighter 60s poll (plus focus refresh and the
+  // shared SWR cache for instant revisits) is plenty. `refresh()` after a
+  // mutation forces an immediate revalidation for every page on this key.
+  const { data, loading, error, refresh } = useCachedQuery<Vendor[]>(
+    KEY,
+    getVendors,
+    { pollMs: 60_000 },
+  );
+  return { vendors: data ?? [], loading, error: error?.message ?? null, refresh };
 }

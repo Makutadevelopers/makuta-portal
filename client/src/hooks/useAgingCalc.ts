@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../api/client';
-import { useReloadOnFocus } from './useReloadOnFocus';
+import { useCachedQuery } from './useCachedQuery';
 
 interface AgingRow {
   invoice_id: string;
@@ -24,32 +23,19 @@ interface AgingData {
   overdue: AgingRow[];
 }
 
+const EMPTY: AgingData = { withinTerms: [], overdue: [] };
+
 export function useAgingCalc(site: string = 'All') {
-  const [data, setData] = useState<AgingData>({ withinTerms: [], overdue: [] });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // `background: true` re-fetches without the spinner, so an on-focus refresh
-  // updates the figures in place instead of blanking the table.
-  const fetch = useCallback(async (opts?: { background?: boolean }) => {
-    if (!opts?.background) setLoading(true);
-    setError(null);
-    try {
-      const result = await apiFetch<AgingData>(`/aging?site=${encodeURIComponent(site)}`);
-      setData(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load aging data');
-    } finally {
-      if (!opts?.background) setLoading(false);
-    }
-  }, [site]);
-
-  useEffect(() => { fetch(); }, [fetch]);
-
-  const refresh = useCallback(() => fetch({ background: true }), [fetch]);
-
-  // Pick up payments/edits made elsewhere when the tab regains focus.
-  useReloadOnFocus(refresh);
-
-  return { ...data, loading, error, refresh };
+  // Shared SWR cache keyed per-site: switching back to a site you already
+  // viewed renders instantly while revalidating, and a 20s poll + focus refresh
+  // picks up payments/edits made elsewhere. The spinner only shows on the very
+  // first load of a given site.
+  const key = `/aging?site=${encodeURIComponent(site)}`;
+  const { data, loading, error, refresh } = useCachedQuery<AgingData>(
+    key,
+    () => apiFetch<AgingData>(key),
+    { pollMs: 20_000 },
+  );
+  const aging = data ?? EMPTY;
+  return { ...aging, loading, error: error?.message ?? null, refresh };
 }
