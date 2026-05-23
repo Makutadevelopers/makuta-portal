@@ -1,6 +1,7 @@
 name: Deploy to production (EC2)
 
-# Auto-deploys to https://invoice.makutadevelopers.com whenever main updates.
+# Deploys to https://invoice.makutadevelopers.com after the CI workflow passes
+# on main (see the `on: workflow_run` block below) — a failed build never ships.
 # Also exposed as workflow_dispatch so you can re-run a deploy from the
 # Actions tab without pushing a new commit.
 #
@@ -19,8 +20,14 @@ name: Deploy to production (EC2)
 #   3. SSHes in and runs:  cd $EC2_REPO_DIR && git pull && ./infra/prod/deploy.sh
 #   4. Streams the deploy script's output back into the Actions log
 
+# Gated on CI: instead of deploying on every push to main, we deploy only after
+# the "CI" workflow (typecheck + tests + build) finishes successfully on main.
+# A red build therefore never reaches production. workflow_dispatch stays as a
+# manual override (e.g. to re-run a deploy without a new commit).
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
@@ -35,6 +42,11 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Deploy when run manually, OR when the triggering CI run succeeded.
+    # (workflow_run already filters to the "CI" workflow on the main branch.)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
 
     env:
       EC2_HOST: ${{ vars.EC2_HOST || '52.3.199.149' }}
