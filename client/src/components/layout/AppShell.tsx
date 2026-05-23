@@ -5,7 +5,6 @@ import { getAlerts, getAlertCount, resolveAlert, Alert } from '../../api/alerts'
 import { sendTempPassword } from '../../api/users';
 import { useToast } from '../../context/ToastContext';
 import { useConfirm } from '../ui/ConfirmDialog';
-import { getPendingCount } from '../../utils/offlineSync';
 
 const HO_TABS = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -69,14 +68,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   // Online/offline state
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [pendingSync, setPendingSync] = useState(0);
 
   useEffect(() => {
     const goOnline = () => setIsOnline(true);
     const goOffline = () => setIsOnline(false);
     window.addEventListener('online', goOnline);
     window.addEventListener('offline', goOffline);
-    getPendingCount().then(setPendingSync).catch(() => {});
     return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
   }, []);
 
@@ -327,8 +324,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {!isOnline && (
         <div className="bg-red-50 border-b border-red-200 px-4 sm:px-6 py-2 text-xs text-red-800 flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-          You are offline — cached data is shown. Changes will sync when connectivity returns.
-          {pendingSync > 0 && <span className="font-medium ml-1">({pendingSync} pending)</span>}
+          You are offline — cached data is shown.
         </div>
       )}
 

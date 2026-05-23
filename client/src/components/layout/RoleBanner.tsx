@@ -1,1 +1,0 @@
-// TODO: RoleBanner layout component
