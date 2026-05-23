@@ -17,6 +17,10 @@ export async function listCategories(_req: Request, res: Response, next: NextFun
     const rows = await query<CategoryRow>(
       'SELECT id, name, created_at, created_by FROM categories ORDER BY name'
     );
+    // Reference data changes rarely. `no-cache` makes the browser keep the body
+    // but revalidate each time; Express's ETag then returns a bodyless 304 when
+    // nothing changed, so the (small but repeated) payload isn't re-sent.
+    res.set('Cache-Control', 'no-cache');
     res.json(rows);
   } catch (err) {
     next(err);
