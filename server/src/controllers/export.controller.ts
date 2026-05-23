@@ -282,9 +282,59 @@ function sendInvoicesCsv(rows: InvoiceExportRow[], filenameBase: string, res: Re
   res.send('﻿' + lines.join('\n'));
 }
 
+// Column indices into rowToValues() that need real spreadsheet types instead of
+// the strings the pg driver (NUMERIC → string) and our TO_CHAR() dates produce.
+// Without this, aoa_to_sheet writes every cell as text, so Excel won't sum
+// amounts or treat dates as dates. Keep these in sync with rowToValues().
+const XLSX_AMOUNT_COLS = new Set([8, 12, 13, 14, 15]); // taxable, addl charge, invoice, paid, balance
+const XLSX_PCT_COLS = new Set([9, 10, 11]);            // CGST %, SGST %, IGST %
+const XLSX_DATE_COLS: Record<number, string> = {
+  1: 'dd mmm yyyy',          // Invoice Date (date only)
+  22: 'dd mmm yyyy hh:mm',   // Created At (datetime)
+  23: 'dd mmm yyyy hh:mm',   // Pushed At (datetime)
+};
+
+// Excel stores dates as a serial day count from 1899-12-30. Computing it from
+// UTC components keeps it timezone-independent, so a calendar date never shifts
+// a day when the file is opened in another timezone.
+const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
+function excelSerial(value: string): number | null {
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!m) return null;
+  const [, y, mo, d, hh, mi, ss] = m;
+  const days = Math.round((Date.UTC(+y, +mo - 1, +d) - EXCEL_EPOCH) / 86400000);
+  if (hh === undefined) return days;
+  return days + ((+hh) * 3600 + (+mi) * 60 + (+(ss ?? '0'))) / 86400;
+}
+
 function sendInvoicesXlsx(rows: InvoiceExportRow[], filenameBase: string, res: Response) {
   const aoa: unknown[][] = [EXPORT_HEADERS, ...rows.map(rowToValues)];
   const sheet = XLSX.utils.aoa_to_sheet(aoa);
+
+  // Retype amount/percent/date cells so the spreadsheet applies real formats.
+  const range = XLSX.utils.decode_range(sheet['!ref'] as string);
+  for (let R = range.s.r + 1; R <= range.e.r; R++) {   // skip header row
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const cell = sheet[XLSX.utils.encode_cell({ r: R, c: C })] as XLSX.CellObject | undefined;
+      if (!cell || cell.v === '' || cell.v == null) continue;
+      if (XLSX_AMOUNT_COLS.has(C) || XLSX_PCT_COLS.has(C)) {
+        const n = Number(cell.v);
+        if (Number.isFinite(n)) {
+          cell.t = 'n';
+          cell.v = n;
+          cell.z = XLSX_AMOUNT_COLS.has(C) ? '#,##0.00' : '0.00';
+        }
+      } else if (C in XLSX_DATE_COLS) {
+        const serial = excelSerial(String(cell.v));
+        if (serial != null) {
+          cell.t = 'n';
+          cell.v = serial;
+          cell.z = XLSX_DATE_COLS[C];
+        }
+      }
+    }
+  }
+
   // Reasonable default column widths
   sheet['!cols'] = EXPORT_HEADERS.map((h, i) => {
     const max = Math.max(
