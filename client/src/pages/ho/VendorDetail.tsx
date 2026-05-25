@@ -8,6 +8,7 @@ import { formatINR, formatDate } from '../../utils/formatters';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../../context/ToastContext';
 import AppShell from '../../components/layout/AppShell';
+import ExportButton from '../../components/shared/ExportButton';
 import ActionsMenu from '../../components/shared/ActionsMenu';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import PaymentModal from '../../components/shared/PaymentModal';
@@ -272,6 +273,29 @@ export default function VendorDetail() {
               )}
             </div>
           </div>
+          {user?.role !== 'site' && (
+            <ExportButton
+              buildPath={(format) => {
+                const p = new URLSearchParams({ format, vendor_id: id ?? '' });
+                if (statusFilter !== 'All') p.set('status', statusFilter);
+                if (siteFilter !== 'All') p.set('site', siteFilter);
+                if (orderType !== 'All') p.set('order', orderType);
+                if (invMode === 'range') {
+                  if (dateFrom) p.set('from', dateFrom);
+                  if (dateTo) p.set('to', dateTo);
+                } else if (fMonth) {
+                  const [yy, mm] = fMonth.split('-').map(Number);
+                  p.set('from', `${fMonth}-01`);
+                  p.set('to', new Date(Date.UTC(yy, mm, 0)).toISOString().slice(0, 10));
+                }
+                if (fPaidMonth) p.set('paid_month', fPaidMonth);
+                return `/export/vendor-invoices?${p.toString()}`;
+              }}
+              filenameBase={`vendor-${vendor.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-invoices`}
+              noun="invoice"
+              filterCount={anyFilterActive ? 1 : 0}
+            />
+          )}
         </div>
 
         {/* KPI Cards */}

@@ -3,6 +3,7 @@ import { getAuditLogs, undoBatchImport } from '../../api/audit';
 import { getVendorMerges, revertVendorMerge, VendorMerge } from '../../api/vendors';
 import { AuditLog } from '../../types/audit';
 import AppShell from '../../components/layout/AppShell';
+import ExportButton from '../../components/shared/ExportButton';
 import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useAuth } from '../../hooks/useAuth';
@@ -222,8 +223,9 @@ export default function AuditTrail() {
         ref={stickyHeaderRef}
         className="sticky top-0 z-30 bg-gray-50 -mx-4 sm:-mx-6 px-4 sm:px-6 -mt-4 sm:-mt-6 pt-4 sm:pt-6 pb-1 mb-4"
       >
-      <div className="mb-3">
+      <div className="mb-3 flex items-center justify-between flex-wrap gap-3">
         <div className="text-lg font-medium text-gray-900">Audit Trail — All Users</div>
+        <ExportButton buildPath={(format) => `/export/audit?format=${format}`} filenameBase="audit-trail" noun="entry" />
       </div>
 
       {/* Filters */}

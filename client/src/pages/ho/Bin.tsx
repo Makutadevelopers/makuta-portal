@@ -3,6 +3,7 @@ import { getBinInvoices, restoreInvoice, permanentDeleteInvoice, purgeBin } from
 import { Invoice } from '../../types/invoice';
 import { formatINR, formatDate } from '../../utils/formatters';
 import AppShell from '../../components/layout/AppShell';
+import ExportButton from '../../components/shared/ExportButton';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../hooks/useAuth';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
@@ -96,12 +97,15 @@ export default function Bin() {
             <div className="text-lg font-medium text-gray-900">Bin</div>
             <div className="text-xs text-gray-500 mt-0.5">Deleted invoices are auto-purged after 30 days</div>
           </div>
-          {invoices.length > 0 && canPermanentDelete && (
-            <button onClick={handlePurge}
-              className="px-3 py-2 border border-red-200 rounded-lg text-sm text-red-600 hover:bg-red-50">
-              Purge Old (30+ days)
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            <ExportButton buildPath={(format) => `/export/bin?format=${format}`} filenameBase="bin" noun="invoice" />
+            {invoices.length > 0 && canPermanentDelete && (
+              <button onClick={handlePurge}
+                className="px-3 py-2 border border-red-200 rounded-lg text-sm text-red-600 hover:bg-red-50">
+                Purge Old (30+ days)
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

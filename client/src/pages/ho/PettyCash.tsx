@@ -4,6 +4,7 @@
 
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import AppShell from '../../components/layout/AppShell';
+import ExportButton from '../../components/shared/ExportButton';
 import { SITES } from '../../utils/constants';
 import { formatINR, formatDate } from '../../utils/formatters';
 import {
@@ -111,10 +112,17 @@ export default function PettyCash() {
             Per-site floats · Give cash to sites · Review expenses logged by site accountants
           </div>
         </div>
-        <button onClick={() => setShowForm(true)}
-          className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
-          + Give Petty Cash
-        </button>
+        <div className="flex items-center gap-2">
+          <ExportButton
+            buildPath={(format) => `/export/petty-cash?format=${format}&site=${encodeURIComponent(fSite)}`}
+            filenameBase="petty-cash"
+            noun="entry"
+          />
+          <button onClick={() => setShowForm(true)}
+            className="px-4 py-2 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d]">
+            + Give Petty Cash
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-3 mb-0">

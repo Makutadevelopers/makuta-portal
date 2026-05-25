@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import AppShell from '../../components/layout/AppShell';
+import ExportButton from '../../components/shared/ExportButton';
 import { getBankReconciliation, verifyBankTxn, BankReconciliationRow, BankTxnAllocation } from '../../api/reconciliation';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
@@ -124,13 +125,23 @@ export default function BankReconciliation() {
           <div className="text-lg font-medium text-gray-900">Bank Reconciliation</div>
           <div className="text-xs text-gray-500">Cheque &amp; transaction allocations across invoices</div>
         </div>
-        <button
-          type="button"
-          onClick={() => load({ silent: true })}
-          className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-200"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <ExportButton
+            buildPath={(format) => {
+              const v = fVerified === 'Verified' ? 'verified' : fVerified === 'Pending' ? 'unverified' : 'All';
+              return `/export/bank-transactions?format=${format}&verified=${v}`;
+            }}
+            filenameBase="bank-transactions"
+            noun="transaction"
+          />
+          <button
+            type="button"
+            onClick={() => load({ silent: true })}
+            className="px-3 py-2 text-sm border border-gray-200 rounded-lg bg-white text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-200"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
