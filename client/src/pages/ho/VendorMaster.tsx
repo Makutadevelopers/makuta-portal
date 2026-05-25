@@ -212,10 +212,20 @@ export default function VendorMaster() {
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>
       ) : (
         <div
-          className="bg-white rounded-xl border border-gray-100 overflow-auto"
+          className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
           style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
         >
-          <table className="w-full text-[13px]">
+          <table className="w-full table-fixed text-[13px]">
+            {/* Fixed proportional widths (sum 100%) so the table never exceeds
+                the container width — no horizontal scroll. Text columns truncate. */}
+            <colgroup>
+              <col style={{ width: '30%' }} />{/* Vendor Name */}
+              <col style={{ width: '22%' }} />{/* Category */}
+              <col style={{ width: '12%' }} />{/* Terms */}
+              <col style={{ width: '10%' }} />{/* Invoices */}
+              <col style={{ width: '12%' }} />{/* Outstanding */}
+              <col style={{ width: '14%' }} />{/* Actions */}
+            </colgroup>
             <thead className="bg-gray-50">
               <tr>
                 {['Vendor Name', 'Category', 'Terms', 'Invoices', 'Outstanding', ''].map(h => (
@@ -236,10 +246,10 @@ export default function VendorMaster() {
                 return (
                   <Fragment key={v.id}>
                     <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${isExpanded ? 'bg-blue-50/40' : ''}`}>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 truncate">
                         <Link to={`/vendors/${v.id}`} className="font-medium text-blue-700 hover:underline">{highlight(v.name, search)}</Link>
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{v.category ?? <span className="text-gray-300">—</span>}</td>
+                      <td className="px-4 py-3 text-gray-600 truncate">{v.category ?? <span className="text-gray-300">—</span>}</td>
                       <td className="px-4 py-3 text-center">
                         {editingTermsId === v.id && canManage(v) ? (
                           <select

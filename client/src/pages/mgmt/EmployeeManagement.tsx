@@ -272,10 +272,18 @@ export default function EmployeeManagement() {
           <div className="text-gray-400 text-sm py-12 text-center">Loading...</div>
         ) : (
           <div
-            className="bg-white rounded-xl border border-gray-100 overflow-auto"
+            className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
             style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
           >
-            <table className="w-full text-sm">
+            <table className="w-full table-fixed text-sm">
+              <colgroup>
+                <col style={{ width: '22%' }} />{/* Name */}
+                <col style={{ width: '26%' }} />{/* Email */}
+                <col style={{ width: '12%' }} />{/* Role */}
+                <col style={{ width: '14%' }} />{/* Site */}
+                <col style={{ width: '10%' }} />{/* Status */}
+                <col style={{ width: '16%' }} />{/* Actions */}
+              </colgroup>
               <thead className="bg-gray-50/60 text-xs text-gray-500 uppercase tracking-wider">
                 <tr>
                   <th className="px-4 py-3 text-left font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Name</th>
@@ -300,9 +308,9 @@ export default function EmployeeManagement() {
                             </span>
                           )}
                         </div>
-                        {u.title && <div className="text-[11px] text-gray-400">{u.title}</div>}
+                        {u.title && <div className="text-[11px] text-gray-400 truncate" title={u.title}>{u.title}</div>}
                       </td>
-                      <td className="px-4 py-3 text-gray-600">{u.email}</td>
+                      <td className="px-4 py-3 text-gray-600 truncate" title={u.email}>{u.email}</td>
                       <td className="px-4 py-3">{roleBadge(u.role)}</td>
                       <td className="px-4 py-3 text-gray-600">
                         {(() => {

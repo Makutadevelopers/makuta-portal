@@ -286,12 +286,20 @@ function VendorDedupPanel() {
 // ── Section 2: Site-wise Expenditure Table ──────────────────────────────────
 function SiteExpenditureTable({ rows, kpis }: { rows: SiteRow[]; kpis: Kpis }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+    <div className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden">
       <div className="px-5 py-4 border-b border-gray-100">
         <div className="text-sm font-medium text-gray-900">Site-wise Expenditure</div>
         <div className="text-[11px] text-gray-500 mt-0.5">Invoiced, paid and outstanding balance per project site</div>
       </div>
-      <table className="w-full text-[13px]">
+      <table className="w-full table-fixed text-[13px]">
+        <colgroup>
+          <col style={{ width: '28%' }} />{/* Site */}
+          <col style={{ width: '12%' }} />{/* Invoices */}
+          <col style={{ width: '15%' }} />{/* Total Invoiced */}
+          <col style={{ width: '15%' }} />{/* Paid */}
+          <col style={{ width: '15%' }} />{/* Outstanding */}
+          <col style={{ width: '15%' }} />{/* Overdue */}
+        </colgroup>
         <thead className="bg-gray-50">
           <tr>
             {['Site', 'Invoices', 'Total Invoiced', 'Paid', 'Outstanding', 'Overdue'].map((h, i) => (
@@ -305,7 +313,7 @@ function SiteExpenditureTable({ rows, kpis }: { rows: SiteRow[]; kpis: Kpis }) {
           {rows.map(r => (
             <tr key={r.site} className="border-t border-gray-100">
               <td className="px-5 py-3.5">
-                <div className="font-medium text-gray-900 text-[13px]">{r.site}</div>
+                <div className="font-medium text-gray-900 text-[13px] truncate">{r.site}</div>
                 <div className="mt-1.5 h-1 rounded-full bg-gray-100 w-24">
                   <div className="h-full rounded-full bg-green-500" style={{ width: `${r.settlementPct}%` }} />
                 </div>

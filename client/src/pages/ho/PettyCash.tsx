@@ -214,10 +214,20 @@ export default function PettyCash() {
         <div className="text-gray-500 text-sm py-12 text-center">Loading…</div>
       ) : (
         <div
-          className="bg-white rounded-xl border border-gray-100 overflow-auto"
+          className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
           style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
         >
-          <table className="w-full text-[13px]">
+          <table className="w-full table-fixed text-[13px]">
+            {/* Fixed proportional widths (sum 100%) so the table never exceeds
+                the container width — no horizontal scroll. Text columns truncate. */}
+            <colgroup>
+              <col style={{ width: '13%' }} />{/* Transaction Date */}
+              <col style={{ width: '14%' }} />{/* Site */}
+              <col style={{ width: '9%' }} />{/* Type */}
+              <col style={{ width: '36%' }} />{/* Description */}
+              <col style={{ width: '15%' }} />{/* By */}
+              <col style={{ width: '13%' }} />{/* Amount */}
+            </colgroup>
             <thead className="bg-gray-50">
               <tr>
                 {['Transaction Date','Site','Type','Description','By','Amount'].map(h => (
@@ -234,7 +244,7 @@ export default function PettyCash() {
               {ledger.map(e => (
                 <tr key={`${e.event_type}-${e.id}`} className="border-t border-gray-50 hover:bg-gray-50/50">
                   <td className="px-4 py-3 whitespace-nowrap">{formatDate(e.event_date)}</td>
-                  <td className="px-4 py-3">{e.site}</td>
+                  <td className="px-4 py-3 truncate">{e.site}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
                       e.event_type === 'in' ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700'
@@ -242,8 +252,8 @@ export default function PettyCash() {
                       {e.event_type === 'in' ? 'Given' : 'Spent'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-700">{e.description}</td>
-                  <td className="px-4 py-3 text-gray-500">{e.by_name ?? '—'}</td>
+                  <td className="px-4 py-3 text-gray-700 truncate">{e.description}</td>
+                  <td className="px-4 py-3 text-gray-500 truncate">{e.by_name ?? '—'}</td>
                   <td className={`px-4 py-3 text-right font-medium ${e.event_type === 'in' ? 'text-green-700' : 'text-orange-700'}`}>
                     {e.event_type === 'in' ? '+' : '−'}{formatINR(Number(e.amount))}
                   </td>

@@ -499,8 +499,25 @@ export default function VendorDetail() {
         )}
 
         {/* Invoice Table */}
-        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
-          <table className="w-full text-[13px]">
+        <div className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden">
+          <table className="w-full table-fixed text-[13px]">
+            {/* Fixed proportional widths (sum 100%) so the table never exceeds
+                the container width — no horizontal scroll. Text columns truncate. */}
+            <colgroup>
+              <col style={{ width: '3%' }} />{/* checkbox */}
+              <col style={{ width: '3%' }} />{/* expander */}
+              <col style={{ width: isHO ? '9%' : '10%' }} />{/* Invoice Date */}
+              <col style={{ width: isHO ? '9%' : '10%' }} />{/* Paid Date */}
+              <col style={{ width: isHO ? '10%' : '10%' }} />{/* Inv No */}
+              <col style={{ width: isHO ? '9%' : '10%' }} />{/* PO No */}
+              <col style={{ width: isHO ? '11%' : '11%' }} />{/* Category */}
+              <col style={{ width: isHO ? '9%' : '10%' }} />{/* Site */}
+              <col style={{ width: isHO ? '10%' : '11%' }} />{/* Amount */}
+              <col style={{ width: isHO ? '9%' : '9%' }} />{/* Balance */}
+              <col style={{ width: isHO ? '9%' : '9%' }} />{/* Status */}
+              <col style={{ width: isHO ? '4%' : '4%' }} />{/* Files */}
+              {isHO && <col style={{ width: '5%' }} />}{/* Actions */}
+            </colgroup>
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-2.5 w-8">
@@ -561,10 +578,10 @@ export default function VendorDetail() {
                       <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
                         {inv.last_paid_date ? formatDate(inv.last_paid_date) : <span className="text-gray-300">—</span>}
                       </td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{inv.invoice_no || '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">{inv.po_number || '—'}</td>
-                      <td className="px-4 py-3 text-gray-600">{inv.purpose}</td>
-                      <td className="px-4 py-3 text-gray-700">{inv.site}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900 truncate">{inv.invoice_no || '—'}</td>
+                      <td className="px-4 py-3 text-gray-600 truncate">{inv.po_number || '—'}</td>
+                      <td className="px-4 py-3 text-gray-600 truncate">{inv.purpose}</td>
+                      <td className="px-4 py-3 text-gray-700 truncate">{inv.site}</td>
                       <td className="px-4 py-3 text-right font-medium text-gray-900">{formatINR(Number(inv.invoice_amount))}</td>
                       <td className="px-4 py-3 text-right font-medium">
                         <span className={Number(inv.balance) > 0 ? 'text-red-600' : 'text-green-600'}>

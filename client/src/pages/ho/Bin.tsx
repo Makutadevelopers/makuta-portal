@@ -114,10 +114,21 @@ export default function Bin() {
         </div>
       ) : (
         <div
-          className="bg-white rounded-xl border border-gray-100 overflow-auto"
+          className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
           style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
         >
-          <table className="w-full text-[13px]">
+          <table className="w-full table-fixed text-[13px]">
+            <colgroup>
+              <col style={{ width: '11%' }} />{/* Invoice Date */}
+              <col style={{ width: '20%' }} />{/* Vendor */}
+              <col style={{ width: '12%' }} />{/* Inv. No */}
+              <col style={{ width: '11%' }} />{/* Site */}
+              <col style={{ width: '11%' }} />{/* Amount */}
+              <col style={{ width: '11%' }} />{/* Deleted By */}
+              <col style={{ width: '10%' }} />{/* Deleted On */}
+              <col style={{ width: '7%' }} />{/* Auto-purge */}
+              <col style={{ width: '7%' }} />{/* Actions */}
+            </colgroup>
             <thead className="bg-gray-50">
               <tr>
                 {['Invoice Date', 'Vendor', 'Inv. No', 'Site', 'Amount', 'Deleted By', 'Deleted On', 'Auto-purge', 'Actions'].map(h => (
@@ -135,10 +146,10 @@ export default function Bin() {
                 <tr key={inv.id} className="border-t border-gray-50 hover:bg-gray-50/50">
                   <td className="px-4 py-3 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
                   <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={inv.vendor_name}>{inv.vendor_name}</td>
-                  <td className="px-4 py-3">{inv.invoice_no}</td>
-                  <td className="px-4 py-3">{inv.site}</td>
+                  <td className="px-4 py-3 truncate">{inv.invoice_no}</td>
+                  <td className="px-4 py-3 truncate">{inv.site}</td>
                   <td className="px-4 py-3 text-right font-medium">{formatINR(Number(inv.invoice_amount))}</td>
-                  <td className="px-4 py-3 text-gray-500">{inv.deleted_by_name ?? '—'}</td>
+                  <td className="px-4 py-3 text-gray-500 truncate">{inv.deleted_by_name ?? '—'}</td>
                   <td className="px-4 py-3 whitespace-nowrap text-gray-500">
                     {inv.deleted_at ? new Date(inv.deleted_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                   </td>
