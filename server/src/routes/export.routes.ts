@@ -1,10 +1,14 @@
 // export.routes.ts
-// PDF export endpoints — ho + mgmt only
+// CSV / XLSX / PDF export endpoints — ho + mgmt only
 
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
 import { requireRole } from '../middleware/rbac';
 import { exportAging, exportInvoices, exportCashflow } from '../controllers/export.controller';
+import {
+  exportCreditNotes, exportVendors, exportVendorInvoices,
+  exportAuditLogs, exportPettyCash, exportBankTransactions, exportBin,
+} from '../controllers/tableExports.controller';
 
 const router = Router();
 
@@ -19,5 +23,12 @@ router.get('/invoices.csv', (req, res, next) => {
   return exportInvoices(req, res, next);
 });
 router.get('/cashflow', exportCashflow);
+router.get('/credit-notes', exportCreditNotes);
+router.get('/vendors', exportVendors);
+router.get('/vendor-invoices', exportVendorInvoices);
+router.get('/audit', exportAuditLogs);
+router.get('/petty-cash', exportPettyCash);
+router.get('/bank-transactions', exportBankTransactions);
+router.get('/bin', exportBin);
 
 export default router;
