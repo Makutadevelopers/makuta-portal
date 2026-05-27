@@ -22,7 +22,9 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM
 
 const bulkPaySchema = z.object({
   txn_type: z.string().min(1).max(50),
-  txn_ref: z.string().min(1).max(100),
+  // Optional here, required only for non-Cash (refine below): Cash payments carry
+  // no cheque / transaction reference, mirroring the single-payment schema.
+  txn_ref: z.string().max(100).optional(),
   txn_amount: z.number().positive().max(1e12),
   txn_date: isoDate,
   bank: z.string().max(100).nullable().optional(),
@@ -31,7 +33,10 @@ const bulkPaySchema = z.object({
     invoice_id: z.string().uuid(),
     amount: z.number().positive(),
   })).min(1).max(200),
-});
+}).refine(
+  d => d.txn_type.trim().toLowerCase() === 'cash' || !!d.txn_ref?.trim(),
+  { path: ['txn_ref'], message: 'Cheque / transaction reference is required for non-Cash payments' },
+);
 
 interface InvoiceRow {
   id: string;
@@ -70,15 +75,23 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
       return;
     }
 
+    // Cash isn't a bank instrument, so it gets no bank_transactions row (mirrors
+    // syncBankTxnForPayment, which only links cheque/NEFT/etc). Every other type
+    // creates one row that all the payments link to.
+    const isCash = data.txn_type.trim().toLowerCase() === 'cash';
+
     const result = await withTransaction(async (tx) => {
-      const txn = await tx.queryOne<BankTxnRow>(
-        `INSERT INTO bank_transactions (txn_type, txn_ref, txn_amount, txn_date, bank, remarks, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING *`,
-        [data.txn_type, data.txn_ref, data.txn_amount, data.txn_date, data.bank ?? null, data.remarks ?? null, userId]
-      );
-      if (!txn) {
-        return { status: 500, body: { error: 'Internal Server Error', message: 'Failed to create bank transaction' } };
+      let txn: BankTxnRow | null = null;
+      if (!isCash) {
+        txn = await tx.queryOne<BankTxnRow>(
+          `INSERT INTO bank_transactions (txn_type, txn_ref, txn_amount, txn_date, bank, remarks, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING *`,
+          [data.txn_type, data.txn_ref, data.txn_amount, data.txn_date, data.bank ?? null, data.remarks ?? null, userId]
+        );
+        if (!txn) {
+          return { status: 500, body: { error: 'Internal Server Error', message: 'Failed to create bank transaction' } };
+        }
       }
 
       const paymentsOut: { invoice_id: string; amount: number; invoice_no: string }[] = [];
@@ -118,7 +131,9 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
         await tx.query(
           `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, bank_txn_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [alloc.invoice_id, alloc.amount, data.txn_type, data.txn_ref, data.txn_date, data.bank ?? null, userId, txn.id]
+          [alloc.invoice_id, alloc.amount, data.txn_type,
+           isCash ? null : (data.txn_ref ?? null), data.txn_date,
+           isCash ? null : (data.bank ?? null), userId, txn?.id ?? null]
         );
 
         await tx.query(
@@ -140,12 +155,14 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
       return;
     }
 
-    const body = result.body as { txn: BankTxnRow; allocations: { invoice_id: string; amount: number; invoice_no: string }[] };
+    const body = result.body as { txn: BankTxnRow | null; allocations: { invoice_id: string; amount: number; invoice_no: string }[] };
     try {
       await logAudit({
         userId,
-        action: `Bulk payment: ${data.txn_type} ${data.txn_ref} ₹${data.txn_amount.toLocaleString('en-IN')} across ${body.allocations.length} invoice(s)`,
-        metadata: { txn_ref: data.txn_ref, txn_amount: data.txn_amount, count: body.allocations.length },
+        action: isCash
+          ? `Bulk Cash payment ₹${data.txn_amount.toLocaleString('en-IN')} across ${body.allocations.length} invoice(s)`
+          : `Bulk payment: ${data.txn_type} ${data.txn_ref} ₹${data.txn_amount.toLocaleString('en-IN')} across ${body.allocations.length} invoice(s)`,
+        metadata: { txn_ref: data.txn_ref ?? null, txn_amount: data.txn_amount, count: body.allocations.length },
       });
     } catch (err) {
       console.error('[audit] bulkPay audit log failed:', err);
