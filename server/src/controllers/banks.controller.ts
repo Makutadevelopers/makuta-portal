@@ -32,6 +32,8 @@ export async function listBanks(req: Request, res: Response, next: NextFunction)
         ? 'SELECT id, name, active, created_at, updated_at, created_by FROM banks ORDER BY name'
         : 'SELECT id, name, active, created_at, updated_at, created_by FROM banks WHERE active = TRUE ORDER BY name'
     );
+    // Reference data — revalidate-not-refetch (ETag → 304 when unchanged).
+    res.set('Cache-Control', 'no-cache');
     res.json(rows);
   } catch (err) {
     next(err);

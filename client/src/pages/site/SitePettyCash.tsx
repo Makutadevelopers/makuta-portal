@@ -298,10 +298,17 @@ export default function SitePettyCash() {
         <div className="text-gray-500 text-sm py-12 text-center">Loading…</div>
       ) : (
         <div
-          className="bg-white rounded-xl border border-gray-100 overflow-auto"
+          className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
           style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
         >
-          <table className="w-full text-[13px]">
+          <table className="w-full table-fixed text-[13px]">
+            <colgroup>
+              <col style={{ width: '15%' }} />{/* Transaction Date */}
+              <col style={{ width: '12%' }} />{/* Type */}
+              <col style={{ width: '40%' }} />{/* Description */}
+              <col style={{ width: '18%' }} />{/* By */}
+              <col style={{ width: '15%' }} />{/* Amount */}
+            </colgroup>
             <thead className="bg-gray-50">
               <tr>
                 {['Transaction Date','Type','Description','By','Amount'].map(h => (
@@ -325,8 +332,8 @@ export default function SitePettyCash() {
                       {e.event_type === 'in' ? 'Received' : 'Spent'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-700">{e.description}</td>
-                  <td className="px-4 py-3 text-gray-500">{e.by_name ?? '—'}</td>
+                  <td className="px-4 py-3 text-gray-700 truncate">{e.description}</td>
+                  <td className="px-4 py-3 text-gray-500 truncate">{e.by_name ?? '—'}</td>
                   <td className={`px-4 py-3 text-right font-medium ${e.event_type === 'in' ? 'text-green-700' : 'text-orange-700'}`}>
                     {e.event_type === 'in' ? '+' : '−'}{formatINR(Number(e.amount))}
                   </td>

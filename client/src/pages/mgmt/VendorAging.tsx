@@ -126,10 +126,21 @@ export default function VendorAging() {
 
           {/* Vendor table */}
           <div
-            className="bg-white rounded-xl border border-gray-100 overflow-auto"
+            className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
             style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
           >
-            <table className="w-full text-[13px]">
+            <table className="w-full table-fixed text-[13px]">
+              <colgroup>
+                <col style={{ width: '20%' }} />{/* Vendor */}
+                <col style={{ width: '7%' }} />{/* Terms */}
+                <col style={{ width: '8%' }} />{/* Invoices */}
+                <col style={{ width: '13%' }} />{/* Total Balance */}
+                <col style={{ width: '12%' }} />{/* Within Terms */}
+                <col style={{ width: '13%' }} />{/* Overdue Balance */}
+                <col style={{ width: '11%' }} />{/* Max Days Past Due */}
+                <col style={{ width: '8%' }} />{/* Next Due */}
+                <col style={{ width: '8%' }} />{/* Status */}
+              </colgroup>
               <thead>
                 <tr>
                   <SortTh col="vendor" label="Vendor" />

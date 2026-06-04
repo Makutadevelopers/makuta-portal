@@ -579,7 +579,7 @@ export default function InvoiceList() {
 
       {/* Bulk actions bar */}
       {selected.size > 0 && (
-        <div className="flex items-center gap-3 mb-4 px-4 py-2.5 bg-blue-50 rounded-lg border border-blue-100 flex-wrap">
+        <div className="flex items-center gap-3 mb-4 px-2.5 py-2.5 bg-blue-50 rounded-lg border border-blue-100 flex-wrap">
           <span className="text-sm font-medium text-blue-800">{selected.size} invoice{selected.size > 1 ? 's' : ''} selected</span>
           <button onClick={handleBulkFinalize} disabled={bulkLoading}
             className="px-4 py-1.5 bg-[#1a3c5e] text-white text-sm font-medium rounded-lg hover:bg-[#15304d] disabled:opacity-50">
@@ -735,14 +735,32 @@ export default function InvoiceList() {
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>
       ) : (
         <div
-          className="bg-white rounded-xl border border-gray-100 overflow-auto"
+          className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
           style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
         >
-          <table className="w-full text-[13px]">
+          <table className="w-full table-fixed text-[13px]">
+            {/* Fixed proportional widths (sum 100%) so the table can never exceed
+                the container width — no horizontal scroll. Text columns truncate. */}
+            <colgroup>
+              <col style={{ width: '3%' }} />{/* checkbox */}
+              <col style={{ width: '7%' }} />{/* Invoice Date */}
+              <col style={{ width: '7%' }} />{/* Paid Date */}
+              <col style={{ width: '12%' }} />{/* Vendor */}
+              <col style={{ width: '9%' }} />{/* Inv. No */}
+              <col style={{ width: '7%' }} />{/* PO No */}
+              <col style={{ width: '9%' }} />{/* Category */}
+              <col style={{ width: '6%' }} />{/* Site */}
+              <col style={{ width: '9%' }} />{/* Amount */}
+              <col style={{ width: '8%' }} />{/* Balance */}
+              <col style={{ width: '4%' }} />{/* Days */}
+              <col style={{ width: '11%' }} />{/* Status */}
+              <col style={{ width: '4%' }} />{/* Docs */}
+              <col style={{ width: '4%' }} />{/* Actions */}
+            </colgroup>
             <thead className="bg-gray-50">
               <tr>
                 <th
-                  className="px-4 py-2.5 w-8 bg-gray-50 sticky top-0 z-20 border-b border-gray-100"
+                  className="px-2.5 py-2.5 w-8 bg-gray-50 sticky top-0 z-20 border-b border-gray-100"
                 >
                   <input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
                     className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
@@ -751,7 +769,7 @@ export default function InvoiceList() {
                 {['Invoice Date', 'Paid Date', 'Vendor', 'Inv. No', 'PO No', 'Category', 'Site', 'Amount', 'Balance', 'Days', 'Status', 'Docs', 'Actions'].map(h => (
                   <th
                     key={h}
-                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' || h === 'Balance' ? 'text-right' : 'text-left'}`}
+                    className={`px-2.5 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' || h === 'Balance' ? 'text-right' : 'text-left'}`}
                   >
                     {h}
                   </th>
@@ -769,7 +787,7 @@ export default function InvoiceList() {
                 return (
                   <Fragment key={inv.id}>
                     <tr data-invoice-row={inv.id} className={`border-t border-gray-50 hover:bg-gray-50/50 ${selected.has(inv.id) ? 'bg-blue-50/50' : ''} ${inv.disputed ? (inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400') : ''}`}>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-3">
                         <input
                           type="checkbox"
                           checked={selected.has(inv.id)}
@@ -777,16 +795,16 @@ export default function InvoiceList() {
                           className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
                         />
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-gray-600">
+                      <td className="px-2.5 py-3 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
+                      <td className="px-2.5 py-3 whitespace-nowrap text-gray-600">
                         {inv.last_paid_date ? formatDate(inv.last_paid_date) : <span className="text-gray-300">—</span>}
                       </td>
-                      <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={inv.vendor_name}>{highlight(inv.vendor_name, search)}</td>
-                      <td className="px-4 py-3">{highlight(inv.invoice_no, search)}</td>
-                      <td className="px-4 py-3 text-gray-500 max-w-[120px] truncate" title={inv.po_number ?? ''}>{inv.po_number ? highlight(inv.po_number, search) : '—'}</td>
-                      <td className="px-4 py-3 text-gray-500">{inv.purpose}</td>
-                      <td className="px-4 py-3">{inv.site}</td>
-                      <td className={`px-4 py-3 text-right font-medium ${amountMatchesSearch(Number(inv.invoice_amount), search) ? 'bg-yellow-100' : ''}`}>
+                      <td className="px-2.5 py-3 font-medium text-gray-900 truncate" title={inv.vendor_name}>{highlight(inv.vendor_name, search)}</td>
+                      <td className="px-2.5 py-3 truncate" title={inv.invoice_no ?? ''}>{highlight(inv.invoice_no, search)}</td>
+                      <td className="px-2.5 py-3 text-gray-500 truncate" title={inv.po_number ?? ''}>{inv.po_number ? highlight(inv.po_number, search) : '—'}</td>
+                      <td className="px-2.5 py-3 text-gray-500 truncate" title={inv.purpose}>{inv.purpose}</td>
+                      <td className="px-2.5 py-3 truncate" title={inv.site}>{inv.site}</td>
+                      <td className={`px-2.5 py-3 text-right font-medium ${amountMatchesSearch(Number(inv.invoice_amount), search) ? 'bg-yellow-100' : ''}`}>
                         {formatINR(Number(inv.invoice_amount))}
                         {Number(inv.allocated_credits ?? 0) > 0 && (
                           <div className="text-[10px] font-normal text-purple-600" title={`Credit note applied: ₹${Number(inv.allocated_credits).toLocaleString('en-IN')}`}>
@@ -794,17 +812,17 @@ export default function InvoiceList() {
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-2.5 py-3 text-right">
                         {isPaid ? <span className="text-green-600">—</span>
                           : aging ? <span className="font-medium text-red-600">{formatINR(aging.balance)}</span>
                             : '—'}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-3">
                         {isPaid ? <span className="text-green-600">—</span>
                           : aging ? <span className={`text-xs font-medium ${isOverdue ? 'text-red-600' : 'text-green-600'}`}>{aging.daysLabel}</span>
                             : '—'}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-3">
                         <div className="flex items-center gap-1 flex-wrap">
                           <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                             isPaid ? 'bg-green-50 text-green-700' : isPartial ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
@@ -827,12 +845,12 @@ export default function InvoiceList() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-2.5 py-3 text-center">
                         {(inv.attachment_count ?? 0) > 0
                           ? <button onClick={() => setDocsInvoice(inv)} className="text-xs font-medium text-blue-600 hover:underline" title={`${inv.attachment_count} file(s) — click to view`}>{inv.attachment_count} file{(inv.attachment_count ?? 0) > 1 ? 's' : ''}</button>
                           : <span className="text-xs font-medium text-red-500">N/A</span>}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-2.5 py-3">
                         <ActionsMenu
                           items={[
                             ...(!inv.pushed ? [
@@ -1113,7 +1131,7 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
                   ? ['Payment Date', 'Cash', 'TDS', 'Type', 'Reference', 'Bank', '']
                   : ['Payment Date', 'Amount', 'Type', 'Reference', 'Bank', '']
                 ).map((h, i) => (
-                  <th key={i} className={`px-4 py-2.5 font-medium text-gray-500 ${h === 'Amount' || h === 'Cash' || h === 'TDS' ? 'text-right' : 'text-left'}`}>{h}</th>
+                  <th key={i} className={`px-2.5 py-2.5 font-medium text-gray-500 ${h === 'Amount' || h === 'Cash' || h === 'TDS' ? 'text-right' : 'text-left'}`}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -1123,19 +1141,19 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
                 const tdsPct = Number(p.tds_pct ?? 0);
                 return (
                   <tr key={p.id} className="border-t border-gray-50">
-                    <td className="px-4 py-3 whitespace-nowrap">{formatDate(p.payment_date)}</td>
-                    <td className="px-4 py-3 text-right font-medium text-green-700">{formatINR(Number(p.amount))}</td>
+                    <td className="px-2.5 py-3 whitespace-nowrap">{formatDate(p.payment_date)}</td>
+                    <td className="px-2.5 py-3 text-right font-medium text-green-700">{formatINR(Number(p.amount))}</td>
                     {hasAnyTds && (
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-2.5 py-3 text-right">
                         {tdsAmt > 0
                           ? <span className="font-medium text-amber-700">{formatINR(tdsAmt)} <span className="text-[10px] text-gray-400 font-normal">({tdsPct}%)</span></span>
                           : <span className="text-gray-300">—</span>}
                       </td>
                     )}
-                    <td className="px-4 py-3">{p.payment_type}</td>
-                    <td className="px-4 py-3 text-gray-500">{p.payment_ref || '—'}</td>
-                    <td className="px-4 py-3 text-gray-500">{p.bank || '—'}</td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-2.5 py-3">{p.payment_type}</td>
+                    <td className="px-2.5 py-3 text-gray-500">{p.payment_ref || '—'}</td>
+                    <td className="px-2.5 py-3 text-gray-500">{p.bank || '—'}</td>
+                    <td className="px-2.5 py-3 text-right">
                       <button
                         onClick={() => setEditing(p)}
                         className="text-xs text-blue-600 hover:text-blue-700 hover:underline"
@@ -1149,12 +1167,12 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
             </tbody>
             <tfoot className="border-t-2 border-gray-200 bg-gray-50">
               <tr>
-                <td className="px-4 py-2.5 font-medium text-gray-900">{hasAnyTds ? 'Totals' : 'Total Paid'}</td>
-                <td className="px-4 py-2.5 text-right font-semibold text-green-700">{formatINR(totalCash)}</td>
+                <td className="px-2.5 py-2.5 font-medium text-gray-900">{hasAnyTds ? 'Totals' : 'Total Paid'}</td>
+                <td className="px-2.5 py-2.5 text-right font-semibold text-green-700">{formatINR(totalCash)}</td>
                 {hasAnyTds && (
-                  <td className="px-4 py-2.5 text-right font-semibold text-amber-700">{formatINR(totalTds)}</td>
+                  <td className="px-2.5 py-2.5 text-right font-semibold text-amber-700">{formatINR(totalTds)}</td>
                 )}
-                <td colSpan={hasAnyTds ? 4 : 4} className="px-4 py-2.5 text-right text-sm">
+                <td colSpan={hasAnyTds ? 4 : 4} className="px-2.5 py-2.5 text-right text-sm">
                   {balance > 0
                     ? <span className="text-red-600 font-medium">Balance remaining: {formatINR(balance)}</span>
                     : <span className="text-green-600 font-medium">Fully settled{hasAnyTds ? ` (Cash ${formatINR(totalCash)} + TDS ${formatINR(totalTds)})` : ''}</span>}
@@ -1786,7 +1804,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
         </div>
 
         {/* Grand total */}
-        <div className="mb-4 flex items-center justify-between px-4 py-3 bg-[#1a3c5e]/5 rounded-lg">
+        <div className="mb-4 flex items-center justify-between px-2.5 py-3 bg-[#1a3c5e]/5 rounded-lg">
           <span className="text-sm font-medium text-gray-700">Total Invoice Amount</span>
           <span className="text-lg font-semibold text-[#1a3c5e]">{formatINR(totalAmount)}</span>
         </div>

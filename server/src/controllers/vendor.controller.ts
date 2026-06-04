@@ -73,6 +73,8 @@ export async function getVendors(
 ): Promise<void> {
   try {
     const vendors = await getAllVendors();
+    // Vendors change rarely — revalidate-not-refetch (ETag → 304 when unchanged).
+    res.set('Cache-Control', 'no-cache');
     res.json(vendors);
   } catch (err) {
     next(err);

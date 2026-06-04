@@ -127,10 +127,21 @@ export default function CreditNotes() {
         </div>
       ) : (
         <div
-          className="bg-white rounded-xl border border-gray-100 overflow-auto"
+          className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
           style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
         >
-          <table className="w-full text-[13px]">
+          <table className="w-full table-fixed text-[13px]">
+            <colgroup>
+              <col style={{ width: '9%' }} />{/* CN Date */}
+              <col style={{ width: '11%' }} />{/* CN No */}
+              <col style={{ width: '18%' }} />{/* Vendor */}
+              <col style={{ width: '10%' }} />{/* Site */}
+              <col style={{ width: '11%' }} />{/* Total */}
+              <col style={{ width: '11%' }} />{/* Allocated */}
+              <col style={{ width: '11%' }} />{/* Unallocated */}
+              <col style={{ width: '11%' }} />{/* Remarks */}
+              <col style={{ width: '8%' }} />{/* Actions */}
+            </colgroup>
             <thead className="bg-gray-50">
               <tr>
                 {['CN Date', 'CN No', 'Vendor', 'Site', 'Total', 'Allocated', 'Unallocated', 'Remarks', 'Actions'].map((h) => (
@@ -153,9 +164,9 @@ export default function CreditNotes() {
                   <Fragment key={cn.id}>
                     <tr className="border-t border-gray-50 hover:bg-gray-50/50">
                       <td className="px-4 py-3 whitespace-nowrap">{formatDate(cn.cn_date)}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{cn.cn_no}</td>
-                      <td className="px-4 py-3">{cn.vendor_name}</td>
-                      <td className="px-4 py-3">{cn.site}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900 truncate" title={cn.cn_no}>{cn.cn_no}</td>
+                      <td className="px-4 py-3 truncate" title={cn.vendor_name}>{cn.vendor_name}</td>
+                      <td className="px-4 py-3 truncate" title={cn.site}>{cn.site}</td>
                       <td className="px-4 py-3 text-right font-medium">{formatINR(Number(cn.total_amount))}</td>
                       <td className="px-4 py-3 text-right text-gray-600">{formatINR(allocated)}</td>
                       <td className="px-4 py-3 text-right">

@@ -407,10 +407,24 @@ export default function MyInvoices() {
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>
       ) : (
         <div
-          className="bg-white rounded-xl border border-gray-100 overflow-auto"
+          className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
           style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
         >
-          <table className="w-full text-[13px]">
+          <table className="w-full table-fixed text-[13px]">
+            <colgroup>
+              <col style={{ width: '3%' }} />{/* checkbox */}
+              <col style={{ width: '4%' }} />{/* # */}
+              <col style={{ width: '9%' }} />{/* Int. No */}
+              <col style={{ width: '8%' }} />{/* Invoice Date */}
+              <col style={{ width: '8%' }} />{/* Paid Date */}
+              <col style={{ width: '17%' }} />{/* Vendor */}
+              <col style={{ width: '10%' }} />{/* Inv. No */}
+              <col style={{ width: '9%' }} />{/* PO No */}
+              <col style={{ width: '11%' }} />{/* Category */}
+              <col style={{ width: '9%' }} />{/* Amount */}
+              <col style={{ width: '6%' }} />{/* Status */}
+              <col style={{ width: '6%' }} />{/* Actions */}
+            </colgroup>
             <thead className="bg-gray-50">
               <tr>
                 <th
@@ -465,9 +479,9 @@ export default function MyInvoices() {
                     {inv.last_paid_date ? formatDate(inv.last_paid_date) : <span className="text-gray-300">—</span>}
                   </td>
                   <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={inv.vendor_name}>{highlight(inv.vendor_name, search)}</td>
-                  <td className="px-4 py-3">{highlight(inv.invoice_no, search)}</td>
+                  <td className="px-4 py-3 truncate" title={inv.invoice_no}>{highlight(inv.invoice_no, search)}</td>
                   <td className="px-4 py-3 text-gray-500 max-w-[140px] truncate" title={inv.po_number ?? ''}>{inv.po_number ? highlight(inv.po_number, search) : '—'}</td>
-                  <td className="px-4 py-3 text-gray-500">{inv.purpose}</td>
+                  <td className="px-4 py-3 text-gray-500 truncate" title={inv.purpose}>{inv.purpose}</td>
                   <td className={`px-4 py-3 text-right font-medium ${amountMatchesSearch(Number(inv.invoice_amount), search) ? 'bg-yellow-100' : ''}`}>
                     {formatINR(Number(inv.invoice_amount))}
                     {Number(inv.allocated_credits ?? 0) > 0 && (

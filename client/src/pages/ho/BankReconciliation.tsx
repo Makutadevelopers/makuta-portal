@@ -173,11 +173,25 @@ export default function BankReconciliation() {
 
       {/* Table */}
       <div
-        className="bg-white border border-gray-100 rounded-xl overflow-auto"
+        className="bg-white border border-gray-100 rounded-xl overflow-y-auto overflow-x-hidden"
         style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
       >
         <div>
-          <table className="w-full text-sm">
+          <table className="w-full table-fixed text-sm">
+            <colgroup>
+              <col style={{ width: '5%' }} />{/* S.No */}
+              <col style={{ width: '9%' }} />{/* Transaction Date */}
+              <col style={{ width: '8%' }} />{/* Payment Type */}
+              <col style={{ width: '11%' }} />{/* Cheque / Txn ID */}
+              <col style={{ width: '17%' }} />{/* Vendor */}
+              <col style={{ width: '11%' }} />{/* Bank */}
+              <col style={{ width: '9%' }} />{/* Cheque Amount */}
+              <col style={{ width: '9%' }} />{/* Allocated */}
+              <col style={{ width: '8%' }} />{/* Balance */}
+              <col style={{ width: '5%' }} />{/* Invoices */}
+              <col style={{ width: '4%' }} />{/* Tally */}
+              <col style={{ width: '4%' }} />{/* Verified */}
+            </colgroup>
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
                 <th className="text-left px-4 py-2.5 font-medium w-12 bg-gray-50 sticky top-0 z-20 border-b border-gray-100">S.No</th>
@@ -209,9 +223,9 @@ export default function BankReconciliation() {
                       <td className="px-4 py-3 text-gray-500">{idx + 1}</td>
                       <td className="px-4 py-3 text-gray-700">{formatDate(r.txn_date)}</td>
                       <td className="px-4 py-3 text-gray-700">{r.txn_type}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{r.txn_ref}</td>
-                      <td className="px-4 py-3 text-gray-700">{vendorSummary(r.allocations)}</td>
-                      <td className="px-4 py-3 text-gray-600">{r.bank ?? '—'}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900 truncate">{r.txn_ref}</td>
+                      <td className="px-4 py-3 text-gray-700 truncate">{vendorSummary(r.allocations)}</td>
+                      <td className="px-4 py-3 text-gray-600 truncate">{r.bank ?? '—'}</td>
                       <td className="px-4 py-3 text-right font-medium text-gray-900">{formatINR(r.txn_amount)}</td>
                       <td className="px-4 py-3 text-right text-gray-700">{formatINR(r.allocated_total)}</td>
                       <td className={`px-4 py-3 text-right font-medium ${r.tally_ok ? 'text-gray-400' : 'text-amber-600'}`}>{formatINR(r.balance)}</td>

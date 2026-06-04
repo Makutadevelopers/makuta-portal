@@ -165,10 +165,24 @@ function AgingTable({ title, subtitle, rows, isOverdue, stickyTop }: {
         <span className="text-[11px] text-gray-400">Click column headers to sort</span>
       </div>
       <div
-        className="bg-white rounded-xl border border-gray-100 overflow-auto"
+        className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
         style={{ maxHeight: `calc(100vh - ${stickyTop + 200}px)` }}
       >
-        <table className="w-full text-[13px]">
+        <table className="w-full table-fixed text-[13px]">
+          {/* Fixed proportional widths (sum 100%) so the table never exceeds
+              the container width — no horizontal scroll. Text columns truncate. */}
+          <colgroup>
+            <col style={{ width: '20%' }} />{/* Vendor */}
+            <col style={{ width: '11%' }} />{/* Site */}
+            <col style={{ width: '11%' }} />{/* Category */}
+            <col style={{ width: '11%' }} />{/* Invoice No */}
+            <col style={{ width: '9%' }} />{/* Invoice Date */}
+            <col style={{ width: '6%' }} />{/* Terms */}
+            <col style={{ width: '9%' }} />{/* Due Date */}
+            <col style={{ width: '7%' }} />{/* Days */}
+            <col style={{ width: '8%' }} />{/* Invoice Amt */}
+            <col style={{ width: '8%' }} />{/* Balance */}
+          </colgroup>
           <thead className="bg-gray-50">
             <tr>
               <SortTh col="vendor_name" label="Vendor" />
@@ -187,9 +201,9 @@ function AgingTable({ title, subtitle, rows, isOverdue, stickyTop }: {
             {sorted.map(r => (
               <tr key={r.invoice_id} className="border-t border-gray-50 hover:bg-gray-50/50">
                 <td className="px-4 py-3 font-medium text-gray-900 max-w-[180px] truncate" title={r.vendor_name}>{r.vendor_name}</td>
-                <td className="px-4 py-3 text-gray-500">{r.site}</td>
-                <td className="px-4 py-3 text-gray-500">—</td>
-                <td className="px-4 py-3">{r.invoice_no}</td>
+                <td className="px-4 py-3 text-gray-500 truncate">{r.site}</td>
+                <td className="px-4 py-3 text-gray-500 truncate">—</td>
+                <td className="px-4 py-3 truncate">{r.invoice_no}</td>
                 <td className="px-4 py-3 whitespace-nowrap">{formatDate(r.invoice_date)}</td>
                 <td className="px-4 py-3 text-center text-gray-500">{r.payment_terms}d</td>
                 <td className="px-4 py-3 whitespace-nowrap">{formatDate(r.due_date)}</td>

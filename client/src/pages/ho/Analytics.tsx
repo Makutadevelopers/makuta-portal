@@ -299,14 +299,21 @@ function MonthlyChart({ chartData, singleMonth }: { chartData: ChartPoint[]; sin
 // ── Vendor-wise breakdown ───────────────────────────────────────────────────
 function VendorTable({ data, totals }: { data: AnalyticsResponse; totals: Totals }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+    <div className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden">
       <div className="px-5 py-4 border-b border-gray-100">
         <div className="text-sm font-medium text-gray-900">Vendor-wise Breakdown</div>
         <div className="text-[11px] text-gray-500 mt-0.5">
           Per vendor — invoices raised &amp; cleared, total billed, amount paid, and outstanding balance. Sorted by balance owed.
         </div>
       </div>
-      <table className="w-full text-[13px]">
+      <table className="w-full table-fixed text-[13px]">
+        <colgroup>
+          <col style={{ width: '36%' }} />{/* Vendor */}
+          <col style={{ width: '16%' }} />{/* Invoices */}
+          <col style={{ width: '16%' }} />{/* Total Invoiced */}
+          <col style={{ width: '16%' }} />{/* Paid */}
+          <col style={{ width: '16%' }} />{/* Balance */}
+        </colgroup>
         <thead className="bg-gray-50">
           <tr>
             {['Vendor', 'Invoices', 'Total Invoiced', 'Paid', 'Balance'].map((h, i) => (

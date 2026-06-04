@@ -64,12 +64,20 @@ export default function MgmtOverview() {
             </div>
 
             {/* Site-wise Position */}
-            <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
+            <div className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden">
               <div className="px-5 py-4 border-b border-gray-100">
                 <div className="text-sm font-medium text-gray-900">Site-wise Position</div>
                 <div className="text-[11px] text-gray-500 mt-0.5">Invoiced, paid and outstanding balance per project site</div>
               </div>
-              <table className="w-full text-[13px]">
+              <table className="w-full table-fixed text-[13px]">
+                <colgroup>
+                  <col style={{ width: '24%' }} />{/* Site */}
+                  <col style={{ width: '10%' }} />{/* Invoices */}
+                  <col style={{ width: '18%' }} />{/* Total Invoiced */}
+                  <col style={{ width: '16%' }} />{/* Paid */}
+                  <col style={{ width: '16%' }} />{/* Outstanding */}
+                  <col style={{ width: '16%' }} />{/* Overdue */}
+                </colgroup>
                 <thead className="bg-gray-50">
                   <tr>
                     {['Site', 'Invoices', 'Total Invoiced', 'Paid', 'Outstanding', 'Overdue'].map((h, i) => (
@@ -81,7 +89,7 @@ export default function MgmtOverview() {
                   {data.siteRows.map(r => (
                     <tr key={r.site} className="border-t border-gray-100">
                       <td className="px-5 py-3.5">
-                        <div className="font-medium text-gray-900">{r.site}</div>
+                        <div className="font-medium text-gray-900 truncate">{r.site}</div>
                         <div className="mt-1.5 h-1 rounded-full bg-gray-100 w-24">
                           <div className="h-full rounded-full bg-green-500" style={{ width: `${r.settlementPct}%` }} />
                         </div>
@@ -175,8 +183,17 @@ export default function MgmtOverview() {
                     </div>
                   </div>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-[13px]">
+                <div className="overflow-y-auto overflow-x-hidden">
+                  <table className="w-full table-fixed text-[13px]">
+                    <colgroup>
+                      <col style={{ width: '10%' }} />{/* Severity */}
+                      <col style={{ width: '20%' }} />{/* Vendor */}
+                      <col style={{ width: '12%' }} />{/* Invoice */}
+                      <col style={{ width: '12%' }} />{/* Site */}
+                      <col style={{ width: '13%' }} />{/* Amount */}
+                      <col style={{ width: '23%' }} />{/* Reason */}
+                      <col style={{ width: '10%' }} />{/* Flagged */}
+                    </colgroup>
                     <thead className="bg-gray-50">
                       <tr>
                         {['Severity', 'Vendor', 'Invoice', 'Site', 'Amount', 'Reason', 'Flagged'].map((h, i) => (
@@ -195,9 +212,9 @@ export default function MgmtOverview() {
                               inv.dispute_severity === 'major' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
                             }`}>{inv.dispute_severity}</span>
                           </td>
-                          <td className="px-4 py-3 font-medium text-gray-900">{inv.vendor_name}</td>
-                          <td className="px-4 py-3 text-gray-600">{inv.invoice_no ?? inv.internal_no ?? '—'}</td>
-                          <td className="px-4 py-3 text-gray-500">{inv.site}</td>
+                          <td className="px-4 py-3 font-medium text-gray-900 truncate">{inv.vendor_name}</td>
+                          <td className="px-4 py-3 text-gray-600 truncate">{inv.invoice_no ?? inv.internal_no ?? '—'}</td>
+                          <td className="px-4 py-3 text-gray-500 truncate">{inv.site}</td>
                           <td className="px-4 py-3 text-right font-medium">{formatINR(Number(inv.invoice_amount))}</td>
                           <td className="px-4 py-3 text-xs text-gray-600 max-w-[320px] truncate" title={inv.dispute_reason ?? ''}>{inv.dispute_reason ?? '—'}</td>
                           <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{inv.disputed_at ? formatDate(inv.disputed_at) : '—'}</td>

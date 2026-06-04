@@ -262,8 +262,14 @@ export default function SiteDashboard() {
             <div className="px-5 py-4 border-b border-gray-100">
               <div className="text-sm font-medium text-gray-900">Recent Invoices</div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="overflow-y-auto overflow-x-hidden">
+              <table className="w-full table-fixed text-sm">
+                <colgroup>
+                  <col style={{ width: '20%' }} />{/* Invoice Date */}
+                  <col style={{ width: '38%' }} />{/* Vendor */}
+                  <col style={{ width: '24%' }} />{/* Category */}
+                  <col style={{ width: '18%' }} />{/* Amount */}
+                </colgroup>
                 <thead>
                   <tr className="border-b border-gray-100 text-left">
                     <th className="px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Invoice Date</th>
@@ -276,8 +282,8 @@ export default function SiteDashboard() {
                   {recentInvoices.map(inv => (
                     <tr key={inv.id} className="hover:bg-gray-50/50">
                       <td className="px-5 py-3 text-gray-600 whitespace-nowrap">{formatDate(inv.invoice_date)}</td>
-                      <td className="px-5 py-3 text-gray-900 font-medium">{inv.vendor_name}</td>
-                      <td className="px-5 py-3 text-gray-600">{inv.purpose}</td>
+                      <td className="px-5 py-3 text-gray-900 font-medium truncate">{inv.vendor_name}</td>
+                      <td className="px-5 py-3 text-gray-600 truncate">{inv.purpose}</td>
                       <td className="px-5 py-3 text-gray-900 font-semibold text-right">{formatINR(Number(inv.invoice_amount))}</td>
                     </tr>
                   ))}
