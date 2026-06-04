@@ -11,6 +11,7 @@ import { formatINR } from '../../utils/formatters';
 import CategorySelect from '../../components/shared/CategorySelect';
 import { Vendor } from '../../types/vendor';
 import AppShell from '../../components/layout/AppShell';
+import ExportButton from '../../components/shared/ExportButton';
 import BulkImportModal from '../../components/shared/BulkImportModal';
 import { useToast } from '../../context/ToastContext';
 import { highlight } from '../../utils/searchHighlight';
@@ -124,6 +125,14 @@ export default function VendorMaster() {
           <div className="text-xs text-gray-500 mt-1">Set payment terms per vendor — used to calculate due dates in Payment Aging</div>
         </div>
         <div className="flex items-center gap-2">
+          {!isSite && (
+            <ExportButton
+              buildPath={(format) => `/export/vendors?format=${format}${search ? `&search=${encodeURIComponent(search)}` : ''}`}
+              filenameBase="vendors"
+              noun="vendor"
+              filterCount={search ? 1 : 0}
+            />
+          )}
           <button onClick={() => setShowImport(true)}
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
             Bulk Import

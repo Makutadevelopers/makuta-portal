@@ -23,6 +23,7 @@ import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
+import ExportButton from '../../components/shared/ExportButton';
 
 export default function CreditNotes() {
   const { user } = useAuth();
@@ -95,12 +96,21 @@ export default function CreditNotes() {
               Record vendor credit notes for returns, rate corrections, and discounts
             </div>
           </div>
-          <button
-            onClick={() => setShowForm((s) => !s)}
-            className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-          >
-            {showForm ? 'Cancel' : '+ New Credit Note'}
-          </button>
+          <div className="flex items-center gap-2">
+            {!isSite && (
+              <ExportButton
+                buildPath={(format) => `/export/credit-notes?format=${format}`}
+                filenameBase="credit-notes"
+                noun="credit note"
+              />
+            )}
+            <button
+              onClick={() => setShowForm((s) => !s)}
+              className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+            >
+              {showForm ? 'Cancel' : '+ New Credit Note'}
+            </button>
+          </div>
         </div>
       </div>
 
