@@ -290,12 +290,14 @@ async function fetchDashboardRaw(): Promise<RawData> {
 
 export function useDashboardData(dateRange?: { from: string; to: string } | null): DashboardData & { refresh: () => void } {
   // Shared SWR cache: the dashboard renders instantly from cache on revisit and
-  // a 30s background poll + focus refresh keeps the figures live. The date-range
+  // focus-refresh keeps the figures live. The background poll is a slow safety
+  // net (2 min) — this hook pulls three heavy endpoints (aging + cashflow + the
+  // full invoice list), so a tight 30s poll was needless load. The date-range
   // filter is applied client-side in the memo below, so the fetch key is stable.
   const { data: raw, loading, error, refresh } = useCachedQuery<RawData>(
     'dashboard:raw',
     fetchDashboardRaw,
-    { pollMs: 30_000 },
+    { pollMs: 120_000 },
   );
   const errMsg = error?.message ?? null;
 

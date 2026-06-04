@@ -7,13 +7,14 @@ const KEY = '/invoices';
 
 export function useInvoices() {
   // Shared SWR cache: revisiting any invoice-backed page renders instantly from
-  // cache while revalidating in the background, and a 20s poll + focus refresh
-  // picks up edits made elsewhere without a manual reload. Every page reading
-  // this key (list, dashboard, vendor master, site views) shares one copy.
+  // cache while revalidating in the background. Focus-refresh + post-mutation
+  // invalidation keep this current; the background poll is a slow safety net
+  // (2 min) — a tight 20s poll re-rendered the whole list every 20s and added
+  // needless API load. Every page reading this key shares one copy.
   const { data, loading, error, refresh } = useCachedQuery<Invoice[]>(
     KEY,
     getInvoices,
-    { pollMs: 20_000 },
+    { pollMs: 120_000 },
   );
   const invoices = data ?? [];
   const errMsg = error?.message ?? null;

@@ -17,6 +17,10 @@ import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 type StatusFilter = 'All' | 'Paid' | 'Partial' | 'Not Paid';
 type OrderType = 'All' | 'PO' | 'WO';
 
+// Render this vendor's invoices in batches rather than all at once (a busy
+// vendor can have hundreds). Filters/stats still run over the full set.
+const VENDOR_INVOICE_PAGE_SIZE = 50;
+
 export default function VendorDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -41,6 +45,8 @@ export default function VendorDetail() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [payInvoice, setPayInvoice] = useState<VendorDetailInvoice | null>(null);
   const [revertInvoice, setRevertInvoice] = useState<VendorDetailInvoice | null>(null);
+  // Rows committed to the DOM; "Show more" raises it, any filter change resets it.
+  const [visibleCount, setVisibleCount] = useState(VENDOR_INVOICE_PAGE_SIZE);
   const { user } = useAuth();
   const { notify } = useToast();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -129,6 +135,12 @@ export default function VendorDetail() {
     return { count, totalAmount, paidAmount, outstandingAmount, overdueAmount, oldestUnpaid };
   }, [data, statusFilter, orderType, invMode, fMonth, dateFrom, dateTo, fPaidMonth, siteFilter]);
 
+  // Snap the rendered window back to the first page whenever the filters change.
+  // Kept above the loading/error early-returns so the hook count stays stable.
+  useEffect(() => {
+    setVisibleCount(VENDOR_INVOICE_PAGE_SIZE);
+  }, [statusFilter, orderType, invMode, fMonth, dateFrom, dateTo, fPaidMonth, siteFilter]);
+
   const anyFilterActive =
     statusFilter !== 'All' || orderType !== 'All' || siteFilter !== 'All' ||
     fPaidMonth !== '' || (invMode === 'month' ? fMonth !== '' : dateFrom !== '' || dateTo !== '');
@@ -169,6 +181,10 @@ export default function VendorDetail() {
     if (siteFilter !== 'All' && inv.site !== siteFilter) return false;
     return true;
   });
+
+  // Only the first `visibleCount` rows are rendered; "Show more" reveals the rest.
+  // Selection/stats above still operate over the full `filtered` set.
+  const visible = filtered.slice(0, visibleCount);
 
   const allAttachments = invoices.flatMap(inv =>
     inv.attachments.map(att => ({ ...att, _invoiceNo: inv.invoice_no, _date: inv.invoice_date }))
@@ -528,7 +544,7 @@ export default function VendorDetail() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(inv => {
+              {visible.map(inv => {
                 const expanded = expandedInvoiceId === inv.id;
                 const hasFiles = inv.attachments.length > 0;
                 const hasPayments = inv.payments.length > 0;
@@ -727,6 +743,19 @@ export default function VendorDetail() {
                 <tr>
                   <td colSpan={isHO ? 13 : 12} className="px-4 py-10 text-center text-gray-400 text-sm">
                     {invoices.length === 0 ? 'No invoices for this vendor.' : 'No invoices match the selected filter.'}
+                  </td>
+                </tr>
+              )}
+              {visible.length < filtered.length && (
+                <tr>
+                  <td colSpan={isHO ? 13 : 12} className="px-4 py-4 text-center">
+                    <button
+                      onClick={() => setVisibleCount(c => c + VENDOR_INVOICE_PAGE_SIZE)}
+                      className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-[#1a3c5e] hover:bg-gray-50"
+                    >
+                      Show {Math.min(VENDOR_INVOICE_PAGE_SIZE, filtered.length - visible.length)} more
+                    </button>
+                    <div className="mt-2 text-xs text-gray-400">Showing {visible.length} of {filtered.length}</div>
                   </td>
                 </tr>
               )}

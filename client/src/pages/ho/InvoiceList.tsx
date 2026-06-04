@@ -6,10 +6,8 @@ import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { useVendors } from '../../hooks/useVendors';
 import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, bulkDeleteInvoices, getInvoiceHistory, AuditLogEntry, createInvoice, createInvoiceBatch, updateInvoice, deleteInvoice as deleteInvoiceApi, recomputeInvoiceStatuses } from '../../api/invoices';
 import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
-import { createPayment, getPayments, updatePayment } from '../../api/payments';
+import { getPayments, updatePayment } from '../../api/payments';
 import { bulkPayInvoices } from '../../api/reconciliation';
-import { getInvoiceCreditSuggestions, addAllocation } from '../../api/creditNotes';
-import { InvoiceCreditSuggestions } from '../../types/creditNote';
 import { createVendor } from '../../api/vendors';
 import { formatINR, formatINRPaisa, formatDate } from '../../utils/formatters';
 import { SITES, PAYMENT_TYPES } from '../../utils/constants';
@@ -31,6 +29,11 @@ import { computeInvoiceTotal } from '../../utils/invoiceMath';
 import { CreateInvoiceData } from '../../types/invoice';
 import { Vendor } from '../../types/vendor';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+
+// Render rows in batches so a multi-thousand-row list never paints all at once
+// (that froze the browser). Search/filter/sort still run over the full set —
+// only the number of rows committed to the DOM is windowed.
+const INVOICE_PAGE_SIZE = 50;
 
 export default function InvoiceList() {
   const { invoices, loading, refresh, patchInvoice, removeInvoice } = useInvoices();
@@ -57,6 +60,9 @@ export default function InvoiceList() {
   const [sortBy, setSortBy] = useState<'invoice_date' | 'created_at' | 'last_paid_date'>('created_at');
   const [showFilters, setShowFilters] = useState(false);
   const [expandedEditId, setExpandedEditId] = useState<string | null>(null);
+  // How many rows are committed to the DOM. "Show more" raises it; any change to
+  // the filter/search/sort result snaps it back to the first page (effect below).
+  const [visibleCount, setVisibleCount] = useState(INVOICE_PAGE_SIZE);
 
   // Sync search from URL query param
   useEffect(() => {
@@ -64,20 +70,13 @@ export default function InvoiceList() {
     if (q) setSearch(q);
   }, [searchParams]);
 
-  // ?focus=<id> auto-opens the inline edit form for that invoice — used by
-  // VendorDetail's Edit action so HO doesn't have to find the row manually.
+  // Reset the visible window to the top whenever the result set changes. Declared
+  // BEFORE the ?focus effect (which lives just after the `filtered` memo, since it
+  // reads `filtered`) so that, on a deep-linked mount, the focus effect's
+  // window-bump runs last and wins.
   useEffect(() => {
-    const focus = searchParams.get('focus');
-    if (!focus || invoices.length === 0) return;
-    const target = invoices.find(i => i.id === focus);
-    if (!target) return;
-    setExpandedEditId(focus);
-    // Scroll to it after the row renders.
-    requestAnimationFrame(() => {
-      const el = document.querySelector(`[data-invoice-row="${focus}"]`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
-  }, [searchParams, invoices]);
+    setVisibleCount(INVOICE_PAGE_SIZE);
+  }, [search, fSite, fStatus, fPurpose, fMonth, fPaidMonth, fMissingInvNo, invMode, dateFrom, dateTo, sortBy]);
 
   // Selection state for bulk actions
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -179,6 +178,28 @@ export default function InvoiceList() {
     }
     return result;
   }, [invoices, fSite, fStatus, fPurpose, fMonth, fPaidMonth, fMissingInvNo, search, invMode, dateFrom, dateTo, sortBy]);
+
+  // Only the first `visibleCount` rows are committed to the DOM; "Show more"
+  // raises the window. Filtering/sorting/selection all still work over `filtered`.
+  const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+
+  // ?focus=<id> auto-opens the inline edit form for that invoice — used by
+  // VendorDetail's Edit action so HO doesn't have to find the row manually.
+  // Lives here (not with the other mount effects) because it reads `filtered`.
+  useEffect(() => {
+    const focus = searchParams.get('focus');
+    if (!focus || filtered.length === 0) return;
+    const idx = filtered.findIndex(i => i.id === focus);
+    if (idx === -1) return;
+    setExpandedEditId(focus);
+    // Make sure the target row is within the rendered window before scrolling.
+    setVisibleCount(c => Math.max(c, idx + 1));
+    // Scroll to it after the row renders.
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-invoice-row="${focus}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }, [searchParams, filtered]);
 
   // Count of historical rows still missing an invoice number — surfaced as a
   // toggle chip in the filter row so HO can work through them. New entries
@@ -738,7 +759,7 @@ export default function InvoiceList() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(inv => {
+              {visible.map(inv => {
                 const aging = agingMap.get(inv.id);
                 const isPaid = inv.payment_status === 'Paid';
                 const isPartial = inv.payment_status === 'Partial';
@@ -851,6 +872,19 @@ export default function InvoiceList() {
               })}
               {filtered.length === 0 && (
                 <tr><td colSpan={14} className="px-4 py-10 text-center text-gray-400 text-sm">No invoices match your filters.</td></tr>
+              )}
+              {visible.length < filtered.length && (
+                <tr>
+                  <td colSpan={14} className="px-4 py-4 text-center">
+                    <button
+                      onClick={() => setVisibleCount(c => c + INVOICE_PAGE_SIZE)}
+                      className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-[#1a3c5e] hover:bg-gray-50"
+                    >
+                      Show {Math.min(INVOICE_PAGE_SIZE, filtered.length - visible.length)} more
+                    </button>
+                    <div className="mt-2 text-xs text-gray-400">Showing {visible.length} of {filtered.length}</div>
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
@@ -2527,10 +2561,8 @@ interface ExportMenuProps {
 
 function ExportMenu({ buildPath, filterCount, selectedCount }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const [busyFormat, setBusyFormat] = useState<'csv' | 'xlsx' | 'pdf' | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
   const { notify } = useToast();
 
   useEffect(() => {

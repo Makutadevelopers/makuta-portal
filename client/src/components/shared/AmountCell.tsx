@@ -1,1 +1,0 @@
-// TODO: AmountCell shared component

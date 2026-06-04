@@ -23,6 +23,10 @@ import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 const MINOR_LIMIT = 50000;
 
+// Render rows in batches so a large site's invoice list never paints all at once
+// (that froze the browser). Filter/search/sort still run over the full set.
+const INVOICE_PAGE_SIZE = 50;
+
 export default function MyInvoices() {
   const { user } = useAuth();
   const { invoices, loading, refresh } = useInvoices();
@@ -40,6 +44,8 @@ export default function MyInvoices() {
   const [bulkPayOpen, setBulkPayOpen] = useState(false);
   const [duplicateFrom, setDuplicateFrom] = useState<Invoice | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Rows committed to the DOM; "Show more" raises it, filter/search/sort resets it.
+  const [visibleCount, setVisibleCount] = useState(INVOICE_PAGE_SIZE);
   const { notify } = useToast();
   const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
   const selectedInvoices = useMemo(
@@ -166,6 +172,14 @@ export default function MyInvoices() {
     }
     return result;
   }, [invoices, fPurpose, fMonth, search, sortBy]);
+
+  // Window the rendered rows; "Show more" reveals the next batch.
+  const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+
+  // Snap the window back to the first page whenever the result set changes.
+  useEffect(() => {
+    setVisibleCount(INVOICE_PAGE_SIZE);
+  }, [fPurpose, fMonth, search, sortBy]);
 
   // Summary tiles — totalled from the same filtered set the table renders,
   // so changing month / category / search updates the cards in lockstep.
@@ -433,7 +447,7 @@ export default function MyInvoices() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(inv => (
+              {visible.map(inv => (
                 <Fragment key={inv.id}>
                 <tr className={`border-t border-gray-50 hover:bg-gray-50/50 ${selectedIds.has(inv.id) ? 'bg-blue-50/60' : ''} ${inv.disputed ? (inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400') : ''}`}>
                   <td className="px-4 py-3">
@@ -533,6 +547,19 @@ export default function MyInvoices() {
               ))}
               {filtered.length === 0 && (
                 <tr><td colSpan={12} className="px-4 py-10 text-center text-gray-400 text-sm">No invoices match your filters.</td></tr>
+              )}
+              {visible.length < filtered.length && (
+                <tr>
+                  <td colSpan={12} className="px-4 py-4 text-center">
+                    <button
+                      onClick={() => setVisibleCount(c => c + INVOICE_PAGE_SIZE)}
+                      className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-[#1a3c5e] hover:bg-gray-50"
+                    >
+                      Show {Math.min(INVOICE_PAGE_SIZE, filtered.length - visible.length)} more
+                    </button>
+                    <div className="mt-2 text-xs text-gray-400">Showing {visible.length} of {filtered.length}</div>
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
