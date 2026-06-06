@@ -17,6 +17,11 @@ interface CashflowResponse {
   cashflow: PivotRow[];
 }
 
+// Default to the latest 6 months — wider periods make the table hard to scan
+// and the column count grows forever. A toggle reveals the older months when
+// users actually want them.
+const RECENT_MONTH_COUNT = 6;
+
 export default function CashflowPage() {
   const [data, setData] = useState<CashflowResponse>({ expenditure: [], cashflow: [] });
   const [allCategories, setAllCategories] = useState<string[]>([]);
@@ -25,6 +30,7 @@ export default function CashflowPage() {
   const [activeTab, setActiveTab] = useState<'expenditure' | 'cashflow'>('expenditure');
   const [fSite, setFSite] = useState('All');
   const [fCategory, setFCategory] = useState('All');
+  const [showAllMonths, setShowAllMonths] = useState(false);
   const { ref: stickyHeaderRef } = useStickyHeaderHeight();
 
   const drillByVendor = fCategory !== 'All';
@@ -65,6 +71,16 @@ export default function CashflowPage() {
     return Array.from(set).sort();
   }, [rows]);
 
+  // The columns actually rendered: latest N months by default, all when the
+  // user clicks "Show older". `months` is YYYY-MM ascending, so .slice(-N)
+  // gives the most recent. Totals/colSpan/rowTotal all use this windowed set
+  // so the on-screen "Total" column matches the columns shown.
+  const visibleMonths = useMemo(
+    () => (showAllMonths ? months : months.slice(-RECENT_MONTH_COUNT)),
+    [months, showAllMonths],
+  );
+  const hiddenMonthCount = months.length - visibleMonths.length;
+
   const pivot = useMemo(() => {
     const map = new Map<string, Map<string, number>>();
     for (const r of rows) {
@@ -81,7 +97,8 @@ export default function CashflowPage() {
   }
 
   const cats = Array.from(pivot.keys()).sort();
-  const totals = months.map(m => cats.reduce((s, c) => s + (pivot.get(c)?.get(m) ?? 0), 0));
+  // Totals computed over the visible columns so they sum to the on-screen Total.
+  const totals = visibleMonths.map(m => cats.reduce((s, c) => s + (pivot.get(c)?.get(m) ?? 0), 0));
   const grandTotal = totals.reduce((s, v) => s + v, 0);
   const isEmpty = cats.length === 0 || grandTotal === 0;
 
@@ -141,52 +158,90 @@ export default function CashflowPage() {
             </button>
           </div>
 
-          {/* Pivot table */}
+          {/* Months toggle — only when there are older months to reveal */}
+          {months.length > RECENT_MONTH_COUNT && (
+            <div className="mb-3 flex items-center justify-end text-xs">
+              <button
+                onClick={() => setShowAllMonths(s => !s)}
+                className="px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50"
+              >
+                {showAllMonths
+                  ? `Showing all ${months.length} months — show recent ${RECENT_MONTH_COUNT}`
+                  : `Showing recent ${visibleMonths.length} of ${months.length} months — show ${hiddenMonthCount} older`}
+              </button>
+            </div>
+          )}
+
+          {/* Pivot table.
+             Sticky is applied on the cells themselves (not <thead>/<tfoot>) so
+             it works reliably across browsers; every sticky cell carries its
+             own opaque background. z-layers: corner cells z-30 (sticky in two
+             axes), edge cells z-20, body sticky-left/right z-10. */}
           <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto max-h-[70vh] overflow-y-auto relative
             [&_th:first-child]:shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)] [&_td:first-child]:shadow-[2px_0_4px_-2px_rgba(0,0,0,0.1)]
             [&_th:last-child]:shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.1)] [&_td:last-child]:shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.1)]">
-            <table className="w-full text-[13px]">
-              <thead className="bg-gray-50 sticky top-0 z-20">
+            <table className="w-full text-[13px] border-separate border-spacing-0">
+              <thead>
                 <tr>
-                  <th className="px-4 py-2.5 text-left font-medium text-gray-500 sticky left-0 bg-gray-50 z-30">{drillByVendor ? 'Vendor' : 'Category'}</th>
-                  {months.map(m => (
-                    <th key={m} className="px-4 py-2.5 text-right font-medium text-gray-500 whitespace-nowrap">{monthLabel(m)}</th>
+                  <th className="px-4 py-2.5 text-left font-medium text-gray-500 sticky top-0 left-0 bg-gray-50 z-30 border-b border-gray-200 whitespace-nowrap">
+                    {drillByVendor ? 'Vendor' : 'Category'}
+                  </th>
+                  {visibleMonths.map(m => (
+                    <th key={m} className="px-4 py-2.5 text-right font-medium text-gray-500 sticky top-0 bg-gray-50 z-20 border-b border-gray-200 whitespace-nowrap">
+                      {monthLabel(m)}
+                    </th>
                   ))}
-                  <th className="px-4 pl-6 py-2.5 text-right font-medium text-gray-900 sticky right-0 bg-gray-50 z-30 border-l border-gray-200">Total</th>
+                  <th className="px-4 pl-6 py-2.5 text-right font-medium text-gray-900 sticky top-0 right-0 bg-gray-50 z-30 border-l border-b border-gray-200 whitespace-nowrap">
+                    Total
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {isEmpty ? (
                   <tr>
-                    <td colSpan={months.length + 2} className="px-4 py-10 text-center text-gray-400 text-sm">
+                    <td colSpan={visibleMonths.length + 2} className="px-4 py-10 text-center text-gray-400 text-sm">
                       {activeTab === 'cashflow' ? 'No payments recorded yet for selected filters.' : 'No data for selected filters.'}
                     </td>
                   </tr>
                 ) : (
                   cats.map(c => {
                     const row = pivot.get(c)!;
-                    const rowTotal = months.reduce((s, m) => s + (row.get(m) ?? 0), 0);
+                    const rowTotal = visibleMonths.reduce((s, m) => s + (row.get(m) ?? 0), 0);
                     return (
-                      <tr key={c} className="border-t border-gray-50 hover:bg-gray-50/50">
-                        <td className="px-4 py-3 font-medium text-gray-900 sticky left-0 bg-white z-10 whitespace-nowrap">{c}</td>
-                        {months.map(m => {
+                      <tr key={c} className="hover:bg-gray-50/50">
+                        <td className="px-4 py-3 font-medium text-gray-900 sticky left-0 bg-white z-10 whitespace-nowrap border-t border-gray-50">
+                          {c}
+                        </td>
+                        {visibleMonths.map(m => {
                           const v = row.get(m) ?? 0;
-                          return <td key={m} className="px-4 py-3 text-right text-gray-700 whitespace-nowrap">{v > 0 ? formatINR(v) : '—'}</td>;
+                          return (
+                            <td key={m} className="px-4 py-3 text-right text-gray-700 whitespace-nowrap border-t border-gray-50">
+                              {v > 0 ? formatINR(v) : '—'}
+                            </td>
+                          );
                         })}
-                        <td className="px-4 pl-6 py-3 text-right font-semibold text-gray-900 whitespace-nowrap sticky right-0 bg-white z-10 border-l border-gray-100">{formatINR(rowTotal)}</td>
+                        <td className="px-4 pl-6 py-3 text-right font-semibold text-gray-900 whitespace-nowrap sticky right-0 bg-white z-10 border-l border-t border-gray-100">
+                          {formatINR(rowTotal)}
+                        </td>
                       </tr>
                     );
                   })
                 )}
               </tbody>
               {!isEmpty && (
-                <tfoot className="border-t-2 border-gray-200 bg-gray-50 sticky bottom-0 z-20">
+                <tfoot>
                   <tr>
-                    <td className="px-4 py-2.5 font-medium text-gray-900 sticky left-0 bg-gray-50 z-30">Total</td>
+                    <td className="px-4 py-2.5 font-medium text-gray-900 sticky bottom-0 left-0 bg-gray-50 z-30 border-t-2 border-gray-200 whitespace-nowrap">
+                      Total
+                    </td>
                     {totals.map((t, i) => (
-                      <td key={months[i]} className="px-4 py-2.5 text-right font-semibold text-gray-900 whitespace-nowrap">{formatINR(t)}</td>
+                      <td key={visibleMonths[i]} className="px-4 py-2.5 text-right font-semibold text-gray-900 sticky bottom-0 bg-gray-50 z-20 border-t-2 border-gray-200 whitespace-nowrap">
+                        {formatINR(t)}
+                      </td>
                     ))}
-                    <td className="px-4 pl-6 py-2.5 text-right font-bold text-gray-900 whitespace-nowrap sticky right-0 bg-gray-50 z-30 border-l border-gray-200">{formatINR(grandTotal)}</td>
+                    <td className="px-4 pl-6 py-2.5 text-right font-bold text-gray-900 sticky bottom-0 right-0 bg-gray-50 z-30 border-l border-t-2 border-gray-200 whitespace-nowrap">
+                      {formatINR(grandTotal)}
+                    </td>
                   </tr>
                 </tfoot>
               )}
