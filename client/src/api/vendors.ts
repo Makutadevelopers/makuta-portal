@@ -39,6 +39,7 @@ export interface VendorDetailInvoice {
   purpose: string;
   site: string;
   invoice_amount: number;
+  base_amount: number | string | null;
   payment_status: string;
   balance: number;
   last_paid_date: string | null;

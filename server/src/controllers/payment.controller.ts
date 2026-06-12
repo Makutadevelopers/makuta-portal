@@ -52,6 +52,7 @@ const updatePaymentSchema = z.object({
 interface InvoiceRow {
   id: string;
   invoice_amount: number;
+  base_amount: number | string | null;
   site: string;
   pushed?: boolean;
   deleted_at?: string | null;
@@ -94,7 +95,7 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
     const result = await withTransaction(async (tx) => {
       // Lock the invoice row so no other payment can pass the balance check simultaneously
       const invoice = await tx.queryOne<InvoiceRow>(
-        `SELECT id, invoice_amount, site, pushed, deleted_at, vendor_name, invoice_no
+        `SELECT id, invoice_amount, base_amount, site, pushed, deleted_at, vendor_name, invoice_no
          FROM invoices WHERE id = $1 FOR UPDATE`,
         [invoiceId]
       );
@@ -125,11 +126,14 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
       const allocated = Number(sumRows[0]?.allocated ?? 0);
       const balance = Number(invoice.invoice_amount) - alreadyPaid - allocated;
 
-      // TDS is charged on the FULL invoice amount, not on this payment's
-      // cash component. The site accountant supplies the %; we compute and
-      // freeze the rupee value here so reads don't have to re-round.
+      // TDS is charged on the taxable BASE amount (pre-GST), per Sec. 194C —
+      // CBDT clarification that TDS is deducted on the value of the supply
+      // excluding GST. Falls back to the full invoice_amount only for legacy
+      // rows that pre-date the tax-split columns and have no base_amount.
+      // The rupee value is frozen here so reads don't have to re-round.
       const tdsPctVal = data.tds_pct ?? 0;
-      const tdsAmount = Math.round(Number(invoice.invoice_amount) * tdsPctVal) / 100;
+      const tdsBase = Number(invoice.base_amount ?? invoice.invoice_amount);
+      const tdsAmount = Math.round(tdsBase * tdsPctVal) / 100;
       const settlement = data.amount + tdsAmount;
       if (settlement > balance + 0.001) {
         return {
@@ -256,7 +260,7 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
 
     const result = await withTransaction(async (tx) => {
       const invoice = await tx.queryOne<InvoiceRow>(
-        `SELECT id, invoice_amount, site, pushed, deleted_at, vendor_name, invoice_no
+        `SELECT id, invoice_amount, base_amount, site, pushed, deleted_at, vendor_name, invoice_no
          FROM invoices WHERE id = $1 FOR UPDATE`,
         [invoiceId]
       );
@@ -285,7 +289,9 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
       const allocated = Number(sumRows[0]?.allocated ?? 0);
       const headroom = Number(invoice.invoice_amount) - otherPaid - allocated;
       const tdsPctVal = data.tds_pct ?? 0;
-      const tdsAmount = Math.round(Number(invoice.invoice_amount) * tdsPctVal) / 100;
+      // TDS base is the pre-GST taxable value (see createPayment).
+      const tdsBase = Number(invoice.base_amount ?? invoice.invoice_amount);
+      const tdsAmount = Math.round(tdsBase * tdsPctVal) / 100;
       const settlement = data.amount + tdsAmount;
       if (settlement > headroom + 0.001) {
         return {

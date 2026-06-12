@@ -12,6 +12,9 @@ export interface PaymentModalInvoice {
   vendor_name: string;
   invoice_no: string | null;
   invoice_amount: number | string;
+  // Pre-GST taxable value; TDS is computed off this (Sec. 194C). Optional —
+  // legacy invoices without a tax split fall back to invoice_amount.
+  base_amount?: number | string | null;
 }
 
 interface Props {
@@ -23,10 +26,11 @@ interface Props {
 
 export default function PaymentModal({ invoice, balance, onClose, onSaved }: Props) {
   const invoiceAmount = Number(invoice.invoice_amount);
+  const tdsBase = Number(invoice.base_amount ?? invoice.invoice_amount);
   const [mode, setMode] = useState<'full' | 'part'>('full');
   const [tdsPct, setTdsPct] = useState('0');
   const numTdsPct = Math.max(0, Math.min(10, Number(tdsPct) || 0));
-  const tdsAmount = Math.round(invoiceAmount * numTdsPct) / 100;
+  const tdsAmount = Math.round(tdsBase * numTdsPct) / 100;
   const [amount, setAmount] = useState(String(Math.max(0, balance - tdsAmount)));
   const [paymentType, setPaymentType] = useState('Cheque');
   const [paymentRef, setPaymentRef] = useState('');
@@ -197,7 +201,7 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
             <div className="flex justify-between"><span>Cash to vendor</span><span className="font-medium">{formatINR(numAmount)}</span></div>
             {numTdsPct > 0 && (
               <div className="flex justify-between">
-                <span>TDS withheld ({numTdsPct}% of {formatINR(invoiceAmount)})</span>
+                <span>TDS withheld ({numTdsPct}% of {formatINR(tdsBase)} base)</span>
                 <span className="font-medium text-amber-700">{formatINR(tdsAmount)}</span>
               </div>
             )}

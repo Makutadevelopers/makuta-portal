@@ -212,6 +212,7 @@ export interface VendorDetailInvoice {
   purpose: string;
   site: string;
   invoice_amount: number;
+  base_amount: number | string | null;
   payment_status: string;
   balance: number;
   last_paid_date: string | null;
@@ -261,6 +262,7 @@ export async function getVendorDetail(
        i.purpose,
        i.site,
        i.invoice_amount,
+       i.base_amount,
        i.payment_status,
        i.invoice_amount
          -- "Settled" = cash received + TDS withheld (paid to govt on the vendor's

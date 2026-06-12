@@ -812,6 +812,7 @@ export default function VendorDetail() {
             vendor_name: vendor.name,
             invoice_no: payInvoice.invoice_no,
             invoice_amount: payInvoice.invoice_amount,
+            base_amount: payInvoice.base_amount,
           }}
           balance={Number(payInvoice.balance)}
           onClose={() => setPayInvoice(null)}

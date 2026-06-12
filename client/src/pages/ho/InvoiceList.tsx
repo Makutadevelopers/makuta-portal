@@ -1215,6 +1215,9 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
 }) {
   const { notify } = useToast();
   const invoiceAmount = Number(invoice.invoice_amount);
+  // TDS is computed off the pre-GST taxable base (Sec. 194C); fall back to
+  // invoice_amount for legacy rows without a tax split.
+  const tdsBase = Number(invoice.base_amount ?? invoice.invoice_amount);
   const headroom = invoiceAmount - otherPaid;
 
   // Some legacy rows have payment_type like "Chq 000968" (type+ref smushed
@@ -1246,7 +1249,7 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
 
   const numAmount = Number(amount) || 0;
   const numTdsPct = Math.max(0, Math.min(10, Number(tdsPct) || 0));
-  const tdsAmount = Math.round(invoiceAmount * numTdsPct) / 100;
+  const tdsAmount = Math.round(tdsBase * numTdsPct) / 100;
   const settlement = numAmount + tdsAmount;
   const overHeadroom = settlement > headroom + 0.001;
 
@@ -1310,7 +1313,7 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
             {numTdsPct > 0 && (
-              <div className="text-[11px] text-amber-700 mt-1">TDS amount: {formatINR(tdsAmount)} ({numTdsPct}% of {formatINR(invoiceAmount)})</div>
+              <div className="text-[11px] text-amber-700 mt-1">TDS amount: {formatINR(tdsAmount)} ({numTdsPct}% of {formatINR(tdsBase)} base)</div>
             )}
           </div>
           <div>
