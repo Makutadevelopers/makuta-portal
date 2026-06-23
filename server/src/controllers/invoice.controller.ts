@@ -22,6 +22,20 @@ import { normalizeVendorName } from '../services/vendor.service';
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
   .refine(v => !isNaN(new Date(v).getTime()), 'Invalid calendar date');
 
+// Additional line items — multiple per invoice, each with its own GST split.
+// Generalises the single additional_charge (migration 017). The invoice's own
+// base_amount/cgst_pct/etc (the primary line) are NOT modelled here; these are
+// the EXTRA items only. When present, the controller derives the legacy
+// additional_charge* columns from them (Σ amount, joined descriptions) so
+// exports and detail fallbacks keep working.
+const lineItemSchema = z.object({
+  description: z.string().trim().max(500).optional().default(''),
+  amount: z.number().nonnegative('Item amount must be ≥ 0').max(1e12),
+  cgst_pct: z.number().min(0).max(100).optional().default(0),
+  sgst_pct: z.number().min(0).max(100).optional().default(0),
+  igst_pct: z.number().min(0).max(100).optional().default(0),
+});
+
 const createInvoiceSchema = z.object({
   month: isoDate,
   invoice_date: isoDate,
@@ -51,6 +65,10 @@ const createInvoiceSchema = z.object({
   additional_charge_sgst_pct: z.number().min(0).max(100).optional(),
   additional_charge_igst_pct: z.number().min(0).max(100).optional(),
   additional_charge_reason: z.string().max(500).nullable().optional(),
+  // Multiple extra line items (each with its own GST). When supplied, this is
+  // the source of truth for the invoice's extra charges and the
+  // additional_charge* columns above are derived from it server-side.
+  line_items: z.array(lineItemSchema).max(50).optional(),
   remarks: z.string().max(2000).nullable().optional(),
 });
 
@@ -207,6 +225,59 @@ export async function getInvoiceById(req: Request, res: Response, next: NextFunc
   }
 }
 
+interface LineItemRow {
+  id: string;
+  line_no: number;
+  description: string;
+  amount: string | number;
+  cgst_pct: string | number;
+  sgst_pct: string | number;
+  igst_pct: string | number;
+}
+
+// GET /api/invoices/:id/line-items — the invoice's additional line items.
+// Role-scoped: site accountants only see items for invoices on their own sites.
+// Returns [] for legacy invoices that never had detail rows (the caller falls
+// back to the single additional_charge column for display).
+export async function getInvoiceLineItems(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const id = req.params.id as string;
+    const { role } = req.user!;
+
+    let visible: { id: string } | null;
+    if (role === 'site') {
+      const userSites = req.user!.sites && req.user!.sites.length > 0
+        ? req.user!.sites
+        : (req.user!.site ? [req.user!.site] : []);
+      visible = await queryOne<{ id: string }>(
+        'SELECT id FROM invoices WHERE id = $1 AND site = ANY($2) AND deleted_at IS NULL',
+        [id, userSites]
+      );
+    } else {
+      visible = await queryOne<{ id: string }>(
+        'SELECT id FROM invoices WHERE id = $1 AND deleted_at IS NULL',
+        [id]
+      );
+    }
+
+    if (!visible) {
+      res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
+      return;
+    }
+
+    const items = await query<LineItemRow>(
+      `SELECT id, line_no, description, amount, cgst_pct, sgst_pct, igst_pct
+       FROM invoice_line_items
+       WHERE invoice_id = $1
+       ORDER BY line_no, created_at`,
+      [id]
+    );
+    res.json(items);
+  } catch (err) {
+    next(err);
+  }
+}
+
 // Per-row insert pipeline shared by createInvoice (single) and
 // createInvoiceBatch (many). Runs site canonicalisation, vendor-master
 // lookup, category-match, dedup checks, INSERT, and audit log. Returns a
@@ -341,37 +412,72 @@ async function insertSingleInvoice(
   const cgstPct = data.cgst_pct ?? 0;
   const sgstPct = data.sgst_pct ?? 0;
   const igstPct = data.igst_pct ?? 0;
-  const addlCharge = data.additional_charge ?? 0;
-  const addlCgstPct = data.additional_charge_cgst_pct ?? 0;
-  const addlSgstPct = data.additional_charge_sgst_pct ?? 0;
-  const addlIgstPct = data.additional_charge_igst_pct ?? 0;
-  const addlReason = data.additional_charge_reason?.trim() || null;
+
+  // Extra charges come from either the new multi-item array (preferred) or the
+  // legacy single additional_charge fields (batch form, bulk import, old
+  // clients). When line_items is supplied, derive the legacy columns from it so
+  // exports / detail fallbacks that read additional_charge keep working.
+  const lineItems = data.line_items?.filter(li => Number(li.amount) > 0) ?? null;
+  let addlCharge: number;
+  let addlCgstPct: number;
+  let addlSgstPct: number;
+  let addlIgstPct: number;
+  let addlReason: string | null;
+  if (lineItems !== null) {
+    addlCharge = +lineItems.reduce((s, li) => s + Number(li.amount || 0), 0).toFixed(2);
+    addlReason = lineItems.map(li => (li.description || '').trim()).filter(Boolean).join('; ').slice(0, 500) || null;
+    // A single item can map cleanly onto the legacy per-rate columns; with
+    // several rates the detail view reads invoice_line_items instead.
+    addlCgstPct = lineItems.length === 1 ? Number(lineItems[0].cgst_pct) || 0 : 0;
+    addlSgstPct = lineItems.length === 1 ? Number(lineItems[0].sgst_pct) || 0 : 0;
+    addlIgstPct = lineItems.length === 1 ? Number(lineItems[0].igst_pct) || 0 : 0;
+  } else {
+    addlCharge = data.additional_charge ?? 0;
+    addlCgstPct = data.additional_charge_cgst_pct ?? 0;
+    addlSgstPct = data.additional_charge_sgst_pct ?? 0;
+    addlIgstPct = data.additional_charge_igst_pct ?? 0;
+    addlReason = data.additional_charge_reason?.trim() || null;
+  }
 
   if (addlCharge > 0 && !addlReason) {
-    return { ok: false, status: 400, message: 'Reason is required when additional charge is entered' };
+    return { ok: false, status: 400, message: 'Reason is required when an additional item / charge is entered' };
   }
 
   const seqResult = await queryOne<{ nextval: string }>("SELECT nextval('invoice_internal_seq')");
   const internalNo = `MKT-${String(seqResult!.nextval).padStart(5, '0')}`;
 
-  const invoice = await queryOne<InvoiceRow>(
-    `INSERT INTO invoices (
-      month, invoice_date, vendor_id, vendor_name, invoice_no, po_number,
-      purpose, site, invoice_amount, base_amount, cgst_pct, sgst_pct, igst_pct,
-      additional_charge, additional_charge_cgst_pct, additional_charge_sgst_pct,
-      additional_charge_igst_pct, additional_charge_reason,
-      remarks, created_by, internal_no
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-              $14, $15, $16, $17, $18, $19, $20, $21)
-    RETURNING *`,
-    [
-      data.month, data.invoice_date, data.vendor_id, data.vendor_name,
-      data.invoice_no, data.po_number ?? null, data.purpose, data.site,
-      data.invoice_amount, baseAmount, cgstPct, sgstPct, igstPct,
-      addlCharge, addlCgstPct, addlSgstPct, addlIgstPct, addlReason,
-      data.remarks ?? null, user.id, internalNo,
-    ]
-  );
+  const invoice = await withTransaction(async (tx) => {
+    const inv = await tx.queryOne<InvoiceRow>(
+      `INSERT INTO invoices (
+        month, invoice_date, vendor_id, vendor_name, invoice_no, po_number,
+        purpose, site, invoice_amount, base_amount, cgst_pct, sgst_pct, igst_pct,
+        additional_charge, additional_charge_cgst_pct, additional_charge_sgst_pct,
+        additional_charge_igst_pct, additional_charge_reason,
+        remarks, created_by, internal_no
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                $14, $15, $16, $17, $18, $19, $20, $21)
+      RETURNING *`,
+      [
+        data.month, data.invoice_date, data.vendor_id, data.vendor_name,
+        data.invoice_no, data.po_number ?? null, data.purpose, data.site,
+        data.invoice_amount, baseAmount, cgstPct, sgstPct, igstPct,
+        addlCharge, addlCgstPct, addlSgstPct, addlIgstPct, addlReason,
+        data.remarks ?? null, user.id, internalNo,
+      ]
+    );
+    if (lineItems !== null && lineItems.length > 0 && inv) {
+      for (let i = 0; i < lineItems.length; i++) {
+        const li = lineItems[i];
+        await tx.query(
+          `INSERT INTO invoice_line_items (invoice_id, line_no, description, amount, cgst_pct, sgst_pct, igst_pct)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [inv.id, i + 1, (li.description || '').trim() || 'Additional charge',
+           Number(li.amount) || 0, Number(li.cgst_pct) || 0, Number(li.sgst_pct) || 0, Number(li.igst_pct) || 0]
+        );
+      }
+    }
+    return inv;
+  });
 
   await logAudit({
     userId: user.id,
@@ -647,6 +753,19 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
       'remarks',
     ];
 
+    // Multi-item: when line_items is supplied it's the source of truth for the
+    // invoice's extra charges — derive the legacy additional_charge* columns
+    // from it so the dynamic UPDATE below persists a consistent aggregate that
+    // exports and the detail fallback can read.
+    if (data.line_items !== undefined) {
+      const items = data.line_items.filter(li => Number(li.amount) > 0);
+      data.additional_charge = +items.reduce((s, li) => s + Number(li.amount || 0), 0).toFixed(2);
+      data.additional_charge_reason = items.map(li => (li.description || '').trim()).filter(Boolean).join('; ').slice(0, 500) || null;
+      data.additional_charge_cgst_pct = items.length === 1 ? Number(items[0].cgst_pct) || 0 : 0;
+      data.additional_charge_sgst_pct = items.length === 1 ? Number(items[0].sgst_pct) || 0 : 0;
+      data.additional_charge_igst_pct = items.length === 1 ? Number(items[0].igst_pct) || 0 : 0;
+    }
+
     // If additional_charge is being set > 0, require a reason either in this
     // update or already on the row.
     if (data.additional_charge !== undefined && data.additional_charge > 0) {
@@ -686,10 +805,29 @@ export async function updateInvoice(req: Request, res: Response, next: NextFunct
     fields.push('updated_at = NOW()');
     values.push(id);
 
-    const invoice = await queryOne<InvoiceRow>(
-      `UPDATE invoices SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
-      values
-    );
+    const invoice = await withTransaction(async (tx) => {
+      const updated = await tx.queryOne<InvoiceRow>(
+        `UPDATE invoices SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+        values
+      );
+      // Replace the detail rows wholesale when line_items is supplied (a normal
+      // human edit — fine to overwrite per the human-edits-are-final rule, which
+      // only protects against automated repairs/backfills, not user edits).
+      if (data.line_items !== undefined) {
+        await tx.query('DELETE FROM invoice_line_items WHERE invoice_id = $1', [id]);
+        const items = data.line_items.filter(li => Number(li.amount) > 0);
+        for (let i = 0; i < items.length; i++) {
+          const li = items[i];
+          await tx.query(
+            `INSERT INTO invoice_line_items (invoice_id, line_no, description, amount, cgst_pct, sgst_pct, igst_pct)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [id, i + 1, (li.description || '').trim() || 'Additional charge',
+             Number(li.amount) || 0, Number(li.cgst_pct) || 0, Number(li.sgst_pct) || 0, Number(li.igst_pct) || 0]
+          );
+        }
+      }
+      return updated;
+    });
 
     await logAudit({
       userId: req.user!.id,

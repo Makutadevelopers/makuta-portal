@@ -4,7 +4,7 @@ import { downloadAuthenticated } from '../../api/client';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { useVendors } from '../../hooks/useVendors';
-import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, bulkDeleteInvoices, getInvoiceHistory, AuditLogEntry, createInvoice, createInvoiceBatch, updateInvoice, deleteInvoice as deleteInvoiceApi, recomputeInvoiceStatuses } from '../../api/invoices';
+import { pushInvoice, undoPushInvoice, bulkFinalizeInvoices, bulkDeleteInvoices, getInvoiceHistory, AuditLogEntry, createInvoice, createInvoiceBatch, updateInvoice, deleteInvoice as deleteInvoiceApi, recomputeInvoiceStatuses, getInvoiceLineItems } from '../../api/invoices';
 import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
 import { getPayments, updatePayment } from '../../api/payments';
 import { bulkPayInvoices } from '../../api/reconciliation';
@@ -13,7 +13,7 @@ import { formatINR, formatINRPaisa, formatDate } from '../../utils/formatters';
 import { SITES, PAYMENT_TYPES } from '../../utils/constants';
 import CategorySelect from '../../components/shared/CategorySelect';
 import BankSelect from '../../components/shared/BankSelect';
-import { Invoice } from '../../types/invoice';
+import { Invoice, InvoiceLineItem } from '../../types/invoice';
 import { Payment } from '../../types/payment';
 import AppShell from '../../components/layout/AppShell';
 import BulkImportModal from '../../components/shared/BulkImportModal';
@@ -25,10 +25,12 @@ import RevertPaymentModal from '../../components/shared/RevertPaymentModal';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../context/ToastContext';
 import { normaliseSearch, highlight, amountMatchesSearch } from '../../utils/searchHighlight';
-import { computeInvoiceTotal } from '../../utils/invoiceMath';
+import { computeInvoiceTotal, computeInvoiceTotalWithItems, LineItemDraft, makeLineItem } from '../../utils/invoiceMath';
+import LineItemsEditor from '../../components/shared/LineItemsEditor';
 import { CreateInvoiceData } from '../../types/invoice';
 import { Vendor } from '../../types/vendor';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useTypeaheadKeyboard } from '../../hooks/useTypeaheadKeyboard';
 
 // Render rows in batches so a multi-thousand-row list never paints all at once
 // (that froze the browser). Search/filter/sort still run over the full set —
@@ -917,6 +919,11 @@ export default function InvoiceList() {
 function InvoiceInfoPanel({ invoice, history, loading, onClose }: {
   invoice: Invoice; history: AuditLogEntry[]; loading: boolean; onClose: () => void;
 }) {
+  const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
+  useEffect(() => {
+    getInvoiceLineItems(invoice.id).then(setLineItems).catch(() => {});
+  }, [invoice.id]);
+
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl mx-4 p-4 sm:p-6 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -969,8 +976,11 @@ function InvoiceInfoPanel({ invoice, history, loading, onClose }: {
           const addIgstAmt = +(addCharge * addIgstPct / 100).toFixed(2);
           const total = Number(invoice.invoice_amount);
           const hasTax = cgstPct > 0 || sgstPct > 0 || igstPct > 0;
-          const hasAddCharge = addCharge > 0;
-          if (!hasTax && !hasAddCharge && Math.abs(base - total) < 0.01) return null;
+          const hasItems = lineItems.length > 0;
+          // Legacy single additional_charge is only shown when there are no
+          // detailed line-item rows (new invoices store the breakdown there).
+          const hasAddCharge = !hasItems && addCharge > 0;
+          if (!hasTax && !hasAddCharge && !hasItems && Math.abs(base - total) < 0.01) return null;
           return (
             <div className="mb-5">
               <div className="text-sm font-medium text-gray-900 mb-2">Amount Breakdown</div>
@@ -1010,6 +1020,44 @@ function InvoiceInfoPanel({ invoice, history, loading, onClose }: {
                         <td className="px-3 py-2 text-right">{formatINR(igstAmt)}</td>
                       </tr>
                     )}
+                    {hasItems && lineItems.map((li, i) => {
+                      const amt = Number(li.amount);
+                      const liCgst = +(amt * Number(li.cgst_pct) / 100).toFixed(2);
+                      const liSgst = +(amt * Number(li.sgst_pct) / 100).toFixed(2);
+                      const liIgst = +(amt * Number(li.igst_pct) / 100).toFixed(2);
+                      return (
+                        <Fragment key={li.id ?? i}>
+                          <tr className="border-t border-gray-100 bg-amber-50/40">
+                            <td className="px-3 py-2 text-gray-800">
+                              {li.description || `Additional item ${i + 1}`}
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-400">—</td>
+                            <td className="px-3 py-2 text-right font-medium">{formatINR(amt)}</td>
+                          </tr>
+                          {Number(li.cgst_pct) > 0 && (
+                            <tr className="border-t border-gray-100 bg-amber-50/40">
+                              <td className="px-3 py-2 pl-6 text-gray-600">CGST</td>
+                              <td className="px-3 py-2 text-right text-gray-600">{Number(li.cgst_pct).toFixed(2)} %</td>
+                              <td className="px-3 py-2 text-right">{formatINR(liCgst)}</td>
+                            </tr>
+                          )}
+                          {Number(li.sgst_pct) > 0 && (
+                            <tr className="border-t border-gray-100 bg-amber-50/40">
+                              <td className="px-3 py-2 pl-6 text-gray-600">SGST</td>
+                              <td className="px-3 py-2 text-right text-gray-600">{Number(li.sgst_pct).toFixed(2)} %</td>
+                              <td className="px-3 py-2 text-right">{formatINR(liSgst)}</td>
+                            </tr>
+                          )}
+                          {Number(li.igst_pct) > 0 && (
+                            <tr className="border-t border-gray-100 bg-amber-50/40">
+                              <td className="px-3 py-2 pl-6 text-gray-600">IGST</td>
+                              <td className="px-3 py-2 text-right text-gray-600">{Number(li.igst_pct).toFixed(2)} %</td>
+                              <td className="px-3 py-2 text-right">{formatINR(liIgst)}</td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
                     {hasAddCharge && (
                       <>
                         <tr className="border-t border-gray-100 bg-amber-50/40">
@@ -1387,6 +1435,14 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   const [pendingNewVendorName, setPendingNewVendorName] = useState<string | null>(null);
   const [localVendors, setLocalVendors] = useState<Vendor[]>(vendors);
   useEffect(() => { setLocalVendors(vendors); }, [vendors]);
+  const vendorMatches = localVendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase()));
+  const vendorKbd = useTypeaheadKeyboard({
+    items: vendorMatches,
+    open: !!vendorSearch,
+    onSelect: v => { handleVendorChange(v.id); setVendorSearch(''); },
+    onEmptyEnter: () => handleStageNewVendor(vendorSearch),
+    onClose: () => setVendorSearch(''),
+  });
   const [invoiceNo, setInvoiceNo] = useState(editInvoice?.invoice_no ?? '');
   const [poNumber, setPoNumber] = useState(editInvoice?.po_number ?? '');
   const [purpose, setPurpose] = useState(editInvoice?.purpose ?? '');
@@ -1400,21 +1456,39 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   const [sgstPct, setSgstPct] = useState(editInvoice && Number(editInvoice.sgst_pct) ? String(editInvoice.sgst_pct) : '');
   const [igstPct, setIgstPct] = useState(editInvoice && Number(editInvoice.igst_pct) ? String(editInvoice.igst_pct) : '');
 
-  const [addlChargeOn, setAddlChargeOn] = useState(!!editInvoice && Number(editInvoice.additional_charge) > 0);
-  const [addlCharge, setAddlCharge] = useState(
-    editInvoice && Number(editInvoice.additional_charge) > 0 ? String(editInvoice.additional_charge) : ''
+  // Additional line items (multiple, each with its own GST). Seeded on edit
+  // from the invoice's detail rows, falling back to the legacy single
+  // additional_charge column for invoices created before line items existed.
+  const [addlItems, setAddlItems] = useState<LineItemDraft[]>(
+    editInvoice && Number(editInvoice.additional_charge) > 0
+      ? [{
+          description: editInvoice.additional_charge_reason ?? '',
+          amount: String(editInvoice.additional_charge),
+          cgstPct: Number(editInvoice.additional_charge_cgst_pct) ? String(editInvoice.additional_charge_cgst_pct) : '',
+          sgstPct: Number(editInvoice.additional_charge_sgst_pct) ? String(editInvoice.additional_charge_sgst_pct) : '',
+          igstPct: Number(editInvoice.additional_charge_igst_pct) ? String(editInvoice.additional_charge_igst_pct) : '',
+        }]
+      : []
   );
-  const [addlGstOn, setAddlGstOn] = useState(
-    !!editInvoice && (
-      Number(editInvoice.additional_charge_cgst_pct) > 0 ||
-      Number(editInvoice.additional_charge_sgst_pct) > 0 ||
-      Number(editInvoice.additional_charge_igst_pct) > 0
-    )
-  );
-  const [addlCgstPct, setAddlCgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_cgst_pct) ? String(editInvoice.additional_charge_cgst_pct) : '');
-  const [addlSgstPct, setAddlSgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_sgst_pct) ? String(editInvoice.additional_charge_sgst_pct) : '');
-  const [addlIgstPct, setAddlIgstPct] = useState(editInvoice && Number(editInvoice.additional_charge_igst_pct) ? String(editInvoice.additional_charge_igst_pct) : '');
-  const [addlReason, setAddlReason] = useState(editInvoice?.additional_charge_reason ?? '');
+
+  // Pull the real detail rows when editing — these supersede the legacy
+  // single-column seed above once they load.
+  useEffect(() => {
+    if (!editInvoice) return;
+    getInvoiceLineItems(editInvoice.id)
+      .then(rows => {
+        if (rows.length > 0) {
+          setAddlItems(rows.map(r => ({
+            description: r.description,
+            amount: String(r.amount),
+            cgstPct: Number(r.cgst_pct) ? String(r.cgst_pct) : '',
+            sgstPct: Number(r.sgst_pct) ? String(r.sgst_pct) : '',
+            igstPct: Number(r.igst_pct) ? String(r.igst_pct) : '',
+          })));
+        }
+      })
+      .catch(() => {});
+  }, [editInvoice]);
 
   const baseNum = Number(baseAmount) || 0;
   const cgstNum = Number(cgstPct) || 0;
@@ -1423,15 +1497,10 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   const cgstAmt = +(baseNum * cgstNum / 100).toFixed(2);
   const sgstAmt = +(baseNum * sgstNum / 100).toFixed(2);
   const igstAmt = +(baseNum * igstNum / 100).toFixed(2);
-  const addlChargeNum = addlChargeOn ? (Number(addlCharge) || 0) : 0;
-  const addlCgstNum = addlChargeOn && addlGstOn ? (Number(addlCgstPct) || 0) : 0;
-  const addlSgstNum = addlChargeOn && addlGstOn ? (Number(addlSgstPct) || 0) : 0;
-  const addlIgstNum = addlChargeOn && addlGstOn ? (Number(addlIgstPct) || 0) : 0;
-  const addlCgstAmt = +(addlChargeNum * addlCgstNum / 100).toFixed(2);
-  const addlSgstAmt = +(addlChargeNum * addlSgstNum / 100).toFixed(2);
-  const addlIgstAmt = +(addlChargeNum * addlIgstNum / 100).toFixed(2);
-  const addlLineTotal = +(addlChargeNum + addlCgstAmt + addlSgstAmt + addlIgstAmt).toFixed(2);
-  const totalAmount = +(baseNum + cgstAmt + sgstAmt + igstAmt + addlLineTotal).toFixed(2);
+  const breakdown = computeInvoiceTotalWithItems({
+    baseAmount: baseNum, cgstPct: cgstNum, sgstPct: sgstNum, igstPct: igstNum, items: addlItems,
+  });
+  const totalAmount = breakdown.total;
 
   const [remarks, setRemarks] = useState(editInvoice?.remarks ?? '');
   const [saving, setSaving] = useState(false);
@@ -1504,8 +1573,9 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
     if (!invoiceNo.trim() && !invoiceNoOptional) { setError('Invoice number is required'); return; }
     if (baseNum <= 0) { setError('Enter a valid base amount'); return; }
     if (totalAmount <= 0) { setError('Total amount must be greater than zero'); return; }
-    if (addlChargeOn && addlChargeNum > 0 && !addlReason.trim()) {
-      setError('Reason is required when additional charge is entered');
+    const itemsWithAmount = addlItems.filter(li => (Number(li.amount) || 0) > 0);
+    if (itemsWithAmount.some(li => !li.description.trim())) {
+      setError('Each additional item needs a description / reason');
       return;
     }
 
@@ -1543,11 +1613,14 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
         invoice_no: invoiceNo.trim(), po_number: poNumber.trim() || null,
         purpose, site, invoice_amount: totalAmount,
         base_amount: baseNum, cgst_pct: cgstNum, sgst_pct: sgstNum, igst_pct: igstNum,
-        additional_charge: addlChargeNum,
-        additional_charge_cgst_pct: addlCgstNum,
-        additional_charge_sgst_pct: addlSgstNum,
-        additional_charge_igst_pct: addlIgstNum,
-        additional_charge_reason: addlChargeNum > 0 ? addlReason.trim() : null,
+        // Server derives the legacy additional_charge* columns from line_items.
+        line_items: itemsWithAmount.map(li => ({
+          description: li.description.trim(),
+          amount: Number(li.amount) || 0,
+          cgst_pct: Number(li.cgstPct) || 0,
+          sgst_pct: Number(li.sgstPct) || 0,
+          igst_pct: Number(li.igstPct) || 0,
+        })),
         remarks: remarks.trim() || null,
       };
 
@@ -1614,22 +1687,24 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
           <div className="relative">
             <input value={vendorSearch}
               onChange={e => { setVendorSearch(e.target.value); setVendorId(''); }}
+              onKeyDown={vendorKbd.onKeyDown}
               placeholder={vendorName || 'Type to search vendor...'}
               onFocus={() => setVendorSearch(vendorSearch || vendorName)}
               onBlur={() => setTimeout(() => setVendorSearch(''), 200)}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
             {vendorSearch && (
               <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                {localVendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase())).map(v => (
+                {vendorMatches.map((v, i) => (
                   <div key={v.id}
+                    ref={vendorKbd.itemRef(i)}
                     onMouseDown={e => e.preventDefault()}
                     onClick={() => { handleVendorChange(v.id); setVendorSearch(''); }}
-                    className="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between">
+                    className={`px-3 py-2 cursor-pointer flex items-center justify-between ${vendorKbd.isActive(i) ? 'bg-blue-50' : 'hover:bg-blue-50'}`}>
                     <span className="text-sm text-gray-900">{v.name}</span>
                     <span className="text-xs text-gray-400">{v.category} · {v.payment_terms}d</span>
                   </div>
                 ))}
-                {localVendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase())).length === 0 && (
+                {vendorMatches.length === 0 && (
                   <div className="px-3 py-2">
                     <div className="text-xs text-gray-400 mb-1">No matching vendor found</div>
                     <button
@@ -1738,73 +1813,8 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
           </div>
         </div>
 
-        {/* Additional charge */}
-        <div className="mb-4 p-4 bg-amber-50/40 rounded-lg border border-amber-100">
-          <label className="flex items-center gap-2 cursor-pointer mb-3">
-            <input type="checkbox" checked={addlChargeOn} onChange={e => setAddlChargeOn(e.target.checked)}
-              className="rounded border-gray-300" />
-            <span className="text-xs font-medium text-gray-700">Additional charge (transport, loading, etc.)</span>
-          </label>
-
-          {addlChargeOn && (
-            <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Amount (₹) *</label>
-                  <input type="number" value={addlCharge} onChange={e => setAddlCharge(e.target.value)}
-                    placeholder="0" min="0" step="0.01"
-                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200" />
-                </div>
-                <div>
-                  <label className="flex items-center gap-2 cursor-pointer mt-6">
-                    <input type="checkbox" checked={addlGstOn} onChange={e => setAddlGstOn(e.target.checked)}
-                      className="rounded border-gray-300" />
-                    <span className="text-xs text-gray-700">Apply GST to this charge</span>
-                  </label>
-                </div>
-              </div>
-
-              {addlGstOn && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">CGST %</label>
-                    <input type="number" value={addlCgstPct} onChange={e => setAddlCgstPct(e.target.value)}
-                      placeholder="0" min="0" max="100" step="0.01"
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200" />
-                    <div className="text-[11px] text-gray-400 mt-1">{formatINR(addlCgstAmt)}</div>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">SGST %</label>
-                    <input type="number" value={addlSgstPct} onChange={e => setAddlSgstPct(e.target.value)}
-                      placeholder="0" min="0" max="100" step="0.01"
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200" />
-                    <div className="text-[11px] text-gray-400 mt-1">{formatINR(addlSgstAmt)}</div>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">IGST %</label>
-                    <input type="number" value={addlIgstPct} onChange={e => setAddlIgstPct(e.target.value)}
-                      placeholder="0" min="0" max="100" step="0.01"
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200" />
-                    <div className="text-[11px] text-gray-400 mt-1">{formatINR(addlIgstAmt)}</div>
-                  </div>
-                </div>
-              )}
-
-              <div className="mb-1">
-                <label className="block text-xs text-gray-500 mb-1">Reason *</label>
-                <input value={addlReason} onChange={e => setAddlReason(e.target.value)}
-                  placeholder="e.g. Transport, loading, packing, handling..."
-                  maxLength={500}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200" />
-              </div>
-
-              <div className="mt-2 pt-2 border-t border-amber-200 flex items-center justify-between">
-                <span className="text-xs text-gray-600">Additional line total</span>
-                <span className="text-sm font-medium text-amber-800">{formatINR(addlLineTotal)}</span>
-              </div>
-            </>
-          )}
-        </div>
+        {/* Additional line items (multiple, each with its own GST) */}
+        <LineItemsEditor items={addlItems} onChange={setAddlItems} />
 
         {/* Grand total */}
         <div className="mb-4 flex items-center justify-between px-2.5 py-3 bg-[#1a3c5e]/5 rounded-lg">
@@ -2020,6 +2030,15 @@ function HOInvoiceBatchForm({ vendors, onCancel, onSaved }: {
   // Vendors flagged "invoice number optional" let every row in the batch skip
   // the invoice number (the batch shares a single vendor).
   const invoiceNoOptional = !!selectedVendor?.invoice_no_optional;
+
+  const vendorMatches = localVendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase()));
+  const vendorKbd = useTypeaheadKeyboard({
+    items: vendorMatches,
+    open: !!vendorSearch,
+    onSelect: v => { handleVendorPick(v.id); setVendorSearch(''); },
+    onEmptyEnter: () => handleStageNewVendor(vendorSearch),
+    onClose: () => setVendorSearch(''),
+  });
 
   // Whenever the vendor's locked category changes, snap every row's purpose
   // to it so the user can't submit a stale value.
@@ -2299,6 +2318,7 @@ function HOInvoiceBatchForm({ vendors, onCancel, onSaved }: {
             <div className="relative">
               <input value={vendorSearch}
                 onChange={e => { setVendorSearch(e.target.value); setVendorId(''); }}
+                onKeyDown={vendorKbd.onKeyDown}
                 placeholder={vendorName || 'Type to search vendor...'}
                 onFocus={() => setVendorSearch(vendorSearch || vendorName)}
                 onBlur={() => setTimeout(() => setVendorSearch(''), 200)}
@@ -2306,16 +2326,17 @@ function HOInvoiceBatchForm({ vendors, onCancel, onSaved }: {
                 className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:bg-gray-50" />
               {vendorSearch && (
                 <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                  {localVendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase())).map(v => (
+                  {vendorMatches.map((v, i) => (
                     <div key={v.id}
+                      ref={vendorKbd.itemRef(i)}
                       onMouseDown={e => e.preventDefault()}
                       onClick={() => { handleVendorPick(v.id); setVendorSearch(''); }}
-                      className="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between">
+                      className={`px-3 py-2 cursor-pointer flex items-center justify-between ${vendorKbd.isActive(i) ? 'bg-blue-50' : 'hover:bg-blue-50'}`}>
                       <span className="text-sm text-gray-900">{v.name}</span>
                       <span className="text-xs text-gray-400">{v.category} · {v.payment_terms}d</span>
                     </div>
                   ))}
-                  {localVendors.filter(v => v.name.toLowerCase().includes(vendorSearch.toLowerCase())).length === 0 && (
+                  {vendorMatches.length === 0 && (
                     <div className="px-3 py-2">
                       <div className="text-xs text-gray-400 mb-1">No matching vendor found</div>
                       <button type="button" onMouseDown={e => e.preventDefault()}
@@ -2686,6 +2707,9 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
   }, [invoices, agingMap]);
 
   const [allocs, setAllocs] = useState<Record<string, string>>(initialAllocs);
+  // Per-invoice TDS % withheld (sec 194C/194J). Computed on the invoice's
+  // pre-GST base_amount — same basis as the single-payment modal.
+  const [tdsPcts, setTdsPcts] = useState<Record<string, string>>({});
   const [txnType, setTxnType] = useState('Cheque');
   const [txnRef, setTxnRef] = useState('');
   const [txnAmount, setTxnAmount] = useState('');
@@ -2702,6 +2726,17 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
   function balanceFor(inv: Invoice): number {
     return Number(inv.balance ?? agingMap.get(inv.id)?.balance ?? inv.invoice_amount);
   }
+
+  function tdsBaseFor(inv: Invoice): number {
+    return Number(inv.base_amount ?? inv.invoice_amount);
+  }
+
+  function tdsAmountFor(inv: Invoice): number {
+    const pct = Math.max(0, Math.min(10, Number(tdsPcts[inv.id]) || 0));
+    return Math.round(tdsBaseFor(inv) * pct) / 100;
+  }
+
+  const tdsTotal = invoices.reduce((s, inv) => s + tdsAmountFor(inv), 0);
 
   function autoDistribute() {
     // Fill txn_amount across invoices in order, capping at each invoice balance
@@ -2723,7 +2758,11 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
     if (!tallied) { notify(`Allocations total ₹${allocTotal.toLocaleString('en-IN')} must equal txn amount ₹${txnAmtNum.toLocaleString('en-IN')}`, 'error'); return; }
 
     const allocations = invoices
-      .map(inv => ({ invoice_id: inv.id, amount: Number(allocs[inv.id] || 0) }))
+      .map(inv => ({
+        invoice_id: inv.id,
+        amount: Number(allocs[inv.id] || 0),
+        tds_pct: Math.max(0, Math.min(10, Number(tdsPcts[inv.id]) || 0)),
+      }))
       .filter(a => a.amount > 0);
 
     if (allocations.length === 0) { notify('Allocate at least one invoice', 'error'); return; }
@@ -2819,12 +2858,14 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
                   <th className="text-left px-3 py-2 font-medium">Site</th>
                   <th className="text-right px-3 py-2 font-medium">Invoice Amt</th>
                   <th className="text-right px-3 py-2 font-medium">Balance</th>
-                  <th className="text-right px-3 py-2 font-medium w-36">Allocate</th>
+                  <th className="text-right px-3 py-2 font-medium w-24">TDS %</th>
+                  <th className="text-right px-3 py-2 font-medium w-36">Allocate (cash)</th>
                 </tr>
               </thead>
               <tbody>
                 {invoices.map(inv => {
                   const bal = balanceFor(inv);
+                  const tds = tdsAmountFor(inv);
                   return (
                     <tr key={inv.id} className="border-t border-gray-50">
                       <td className="px-3 py-2 font-medium text-gray-900">{inv.invoice_no}</td>
@@ -2832,6 +2873,15 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
                       <td className="px-3 py-2 text-gray-600">{inv.site}</td>
                       <td className="px-3 py-2 text-right text-gray-700">{formatINR(Number(inv.invoice_amount))}</td>
                       <td className="px-3 py-2 text-right text-gray-700">{formatINR(bal)}</td>
+                      <td className="px-3 py-2 text-right">
+                        <input type="number" min="0" max="10" step="0.01" value={tdsPcts[inv.id] ?? ''}
+                          onChange={e => setTdsPcts(prev => ({ ...prev, [inv.id]: e.target.value }))}
+                          placeholder="0"
+                          className="w-20 px-2 py-1 border border-gray-200 rounded-md text-sm text-right" />
+                        {tds > 0 && (
+                          <div className="text-[11px] text-amber-700 mt-0.5" title="TDS withheld on base amount">−{formatINR(tds)}</div>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-right">
                         <input type="number" value={allocs[inv.id] ?? ''}
                           onChange={e => setAllocs(prev => ({ ...prev, [inv.id]: e.target.value }))}
@@ -2843,20 +2893,23 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
               </tbody>
               <tfoot className="bg-gray-50/60 text-xs">
                 <tr>
-                  <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Cheque / Txn amount</td>
+                  <td colSpan={6} className="px-3 py-2 text-right text-gray-500">Cheque / Txn amount (cash)</td>
                   <td className="px-3 py-2 text-right font-medium text-gray-900">{formatINR(txnAmtNum)}</td>
-                  <td></td>
                 </tr>
                 <tr>
-                  <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Allocated total</td>
+                  <td colSpan={6} className="px-3 py-2 text-right text-gray-500">Allocated total (cash)</td>
                   <td className="px-3 py-2 text-right font-medium text-gray-900">{formatINR(allocTotal)}</td>
-                  <td></td>
                 </tr>
                 <tr>
-                  <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Difference</td>
+                  <td colSpan={6} className="px-3 py-2 text-right text-gray-500">Difference</td>
                   <td className={`px-3 py-2 text-right font-medium ${tallied ? 'text-green-700' : 'text-amber-700'}`}>{formatINR(diff)}</td>
-                  <td></td>
                 </tr>
+                {tdsTotal > 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-2 text-right text-gray-500">TDS withheld (settles invoices, no cash)</td>
+                    <td className="px-3 py-2 text-right font-medium text-amber-700">{formatINR(tdsTotal)}</td>
+                  </tr>
+                )}
               </tfoot>
             </table>
           </div>

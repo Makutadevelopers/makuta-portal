@@ -32,6 +32,10 @@ const bulkPaySchema = z.object({
   allocations: z.array(z.object({
     invoice_id: z.string().uuid(),
     amount: z.number().positive(),
+    // TDS withheld for this invoice (sec 194C/194J etc). Computed on the
+    // invoice's pre-GST base_amount, frozen at insert time — mirrors the
+    // single-payment path. Optional; defaults to 0.
+    tds_pct: z.number().min(0).max(10).optional(),
   })).min(1).max(200),
 }).refine(
   d => d.txn_type.trim().toLowerCase() === 'cash' || !!d.txn_ref?.trim(),
@@ -41,6 +45,7 @@ const bulkPaySchema = z.object({
 interface InvoiceRow {
   id: string;
   invoice_amount: string | number;
+  base_amount: string | number | null;
   invoice_no: string;
   vendor_name: string;
   site: string;
@@ -98,7 +103,7 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
 
       for (const alloc of data.allocations) {
         const invoice = await tx.queryOne<InvoiceRow>(
-          `SELECT id, invoice_amount, invoice_no, vendor_name, site, pushed, deleted_at
+          `SELECT id, invoice_amount, base_amount, invoice_no, vendor_name, site, pushed, deleted_at
            FROM invoices WHERE id = $1 FOR UPDATE`,
           [alloc.invoice_id]
         );
@@ -118,22 +123,34 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
         const alreadyPaid = Number(sumRow[0]?.total ?? 0);
         const allocatedCredits = Number(sumRow[0]?.allocated ?? 0);
         const balance = Number(invoice.invoice_amount) - alreadyPaid - allocatedCredits;
-        if (alloc.amount > balance + 0.009) {
+
+        // TDS is withheld on top of the cash allocation and settles part of the
+        // invoice without cash changing hands — same rule as the single-payment
+        // path. Computed on the pre-GST base_amount (sec 194C), frozen here.
+        const tdsPctVal = Math.max(0, Math.min(10, alloc.tds_pct ?? 0));
+        const tdsBase = Number(invoice.base_amount ?? invoice.invoice_amount);
+        const tdsAmount = Math.round(tdsBase * tdsPctVal) / 100;
+
+        // The cheque amount is the cash leg only, so the allocation tally above
+        // is unaffected by TDS — but cash + TDS together must still fit inside
+        // the outstanding balance.
+        if (alloc.amount + tdsAmount > balance + 0.009) {
           return {
             status: 400,
             body: {
               error: 'Bad Request',
-              message: `Allocation of ₹${alloc.amount.toLocaleString('en-IN')} for invoice ${invoice.invoice_no} exceeds outstanding balance of ₹${balance.toLocaleString('en-IN')}`,
+              message: `Allocation of ₹${alloc.amount.toLocaleString('en-IN')}${tdsAmount > 0 ? ` + TDS ₹${tdsAmount.toLocaleString('en-IN')}` : ''} for invoice ${invoice.invoice_no} exceeds outstanding balance of ₹${balance.toLocaleString('en-IN')}`,
             },
           };
         }
 
         await tx.query(
-          `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, bank_txn_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, bank_txn_id, tds_pct, tds_amount)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
           [alloc.invoice_id, alloc.amount, data.txn_type,
            isCash ? null : (data.txn_ref ?? null), data.txn_date,
-           isCash ? null : (data.bank ?? null), userId, txn?.id ?? null]
+           isCash ? null : (data.bank ?? null), userId, txn?.id ?? null,
+           tdsPctVal, tdsAmount]
         );
 
         await tx.query(
@@ -324,6 +341,151 @@ export async function verifyReconciliation(req: Request, res: Response, next: Ne
     }
 
     res.json(updated[0]);
+  } catch (err) {
+    next(err);
+  }
+}
+
+const updateDateSchema = z.object({
+  txn_date: isoDate,
+});
+
+interface LinkedPaymentRow {
+  payment_id: string;
+  invoice_id: string;
+  invoice_no: string;
+  invoice_date: string;
+  old_payment_date: string;
+}
+
+// PATCH /api/reconciliation/:id/date — HO only
+//   Corrects the cheque/transaction date (e.g. when the actual bank debit lands
+//   later than the cheque was issued). The new date cascades to every payment
+//   linked to this cheque so each invoice's "Paid Date" (derived from
+//   MAX(payments.payment_date)) reflects the real debit date. payment_month is
+//   re-synced too. Rejected if the new date is before any linked invoice's date.
+//
+//   Audits: one summary row for the cheque, plus per-payment "Edited payment:
+//   date X -> Y" rows with metadata.paymentId — so future repair migrations
+//   treat each payment's date as a human edit (see CLAUDE.md).
+export async function updateReconciliationDate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    if (!z.string().uuid().safeParse(id).success) {
+      res.status(400).json({ error: 'Bad Request', message: 'Invalid transaction id' });
+      return;
+    }
+    const { txn_date: newDate } = updateDateSchema.parse(req.body);
+    const { id: userId } = req.user!;
+
+    const result = await withTransaction(async (tx) => {
+      const txn = await tx.queryOne<{ id: string; txn_ref: string; old_date: string }>(
+        `SELECT id, txn_ref, to_char(txn_date, 'YYYY-MM-DD') AS old_date
+         FROM bank_transactions WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+      if (!txn) {
+        return { status: 404, body: { error: 'Not Found', message: 'Bank transaction not found' } };
+      }
+
+      if (txn.old_date === newDate) {
+        return {
+          status: 200,
+          body: { id: txn.id, txn_ref: txn.txn_ref, txn_date: newDate, old_date: txn.old_date, payments_updated: 0, unchanged: true },
+        };
+      }
+
+      const linked = await tx.query<LinkedPaymentRow>(
+        `SELECT p.id AS payment_id, p.invoice_id, i.invoice_no,
+                to_char(i.invoice_date, 'YYYY-MM-DD') AS invoice_date,
+                to_char(p.payment_date, 'YYYY-MM-DD') AS old_payment_date
+         FROM payments p
+         JOIN invoices i ON i.id = p.invoice_id
+         WHERE p.bank_txn_id = $1`,
+        [id]
+      );
+
+      // Payment-before-invoice is an impossible business state — same rule the
+      // bulk importer enforces. ISO YYYY-MM-DD strings compare lexicographically.
+      const violation = linked.find(l => newDate < l.invoice_date);
+      if (violation) {
+        return {
+          status: 400,
+          body: {
+            error: 'Bad Request',
+            message: `Cheque date ${newDate} is before invoice ${violation.invoice_no} (dated ${violation.invoice_date}). Pick a date on or after every linked invoice's date.`,
+          },
+        };
+      }
+
+      await tx.query(
+        `UPDATE bank_transactions SET txn_date = $1 WHERE id = $2`,
+        [newDate, id]
+      );
+
+      await tx.query(
+        `UPDATE payments
+         SET payment_date = $1::date,
+             payment_month = date_trunc('month', $1::date)::date
+         WHERE bank_txn_id = $2`,
+        [newDate, id]
+      );
+
+      return {
+        status: 200,
+        body: {
+          id: txn.id,
+          txn_ref: txn.txn_ref,
+          txn_date: newDate,
+          old_date: txn.old_date,
+          payments_updated: linked.length,
+          linked,
+        },
+      };
+    });
+
+    if (result.status !== 200) {
+      res.status(result.status).json(result.body);
+      return;
+    }
+
+    const body = result.body as {
+      id: string; txn_ref: string; txn_date: string; old_date: string;
+      payments_updated: number; unchanged?: boolean; linked?: LinkedPaymentRow[];
+    };
+
+    if (!body.unchanged) {
+      try {
+        await logAudit({
+          userId,
+          action: `Edited cheque date: ${body.txn_ref} · ${body.old_date} → ${body.txn_date}`,
+          metadata: {
+            bank_txn_id: body.id,
+            old_date: body.old_date,
+            new_date: body.txn_date,
+            payments_updated: body.payments_updated,
+          },
+        });
+        for (const l of body.linked ?? []) {
+          await logAudit({
+            userId,
+            action: `Edited payment: date ${l.old_payment_date} → ${body.txn_date} (via cheque ${body.txn_ref})`,
+            invoiceId: l.invoice_id,
+            metadata: {
+              paymentId: l.payment_id,
+              bank_txn_id: body.id,
+              old_date: l.old_payment_date,
+              new_date: body.txn_date,
+              via_cheque_date_edit: true,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('[audit] updateReconciliationDate audit log failed:', err);
+      }
+    }
+
+    res.json({ id: body.id, txn_ref: body.txn_ref, txn_date: body.txn_date, old_date: body.old_date, payments_updated: body.payments_updated });
   } catch (err) {
     next(err);
   }

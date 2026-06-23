@@ -34,6 +34,8 @@ export interface BankReconciliationRow {
 export interface BulkPayAllocationInput {
   invoice_id: string;
   amount: number;
+  // TDS % withheld for this invoice (0–10). Computed on base_amount server-side.
+  tds_pct?: number;
 }
 
 export interface BulkPayInput {
@@ -48,6 +50,19 @@ export interface BulkPayInput {
 
 export function getBankReconciliation(): Promise<BankReconciliationRow[]> {
   return apiFetch<BankReconciliationRow[]>('/reconciliation');
+}
+
+export function updateBankTxnDate(id: string, txn_date: string): Promise<{
+  id: string;
+  txn_ref: string;
+  txn_date: string;
+  old_date: string;
+  payments_updated: number;
+}> {
+  return apiFetch(`/reconciliation/${id}/date`, {
+    method: 'PATCH',
+    body: JSON.stringify({ txn_date }),
+  });
 }
 
 export function verifyBankTxn(id: string, verified: boolean): Promise<{

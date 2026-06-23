@@ -50,6 +50,28 @@ export interface Invoice {
   deleted_by?: string | null;
 }
 
+// An additional line item on an invoice (multiple per invoice, each with its
+// own GST split). These are the EXTRA charges only — the invoice's own
+// base_amount/cgst_pct/etc model the primary line. Server-derived columns
+// (additional_charge = Σ amount) keep legacy displays/exports working.
+export interface InvoiceLineItem {
+  id: string;
+  line_no: number;
+  description: string;
+  amount: number;
+  cgst_pct: number;
+  sgst_pct: number;
+  igst_pct: number;
+}
+
+export interface InvoiceLineItemInput {
+  description: string;
+  amount: number;
+  cgst_pct: number;
+  sgst_pct: number;
+  igst_pct: number;
+}
+
 export interface CreateInvoiceData {
   month: string;
   invoice_date: string;
@@ -69,5 +91,8 @@ export interface CreateInvoiceData {
   additional_charge_sgst_pct?: number;
   additional_charge_igst_pct?: number;
   additional_charge_reason?: string | null;
+  // Multiple extra line items. When provided, the server derives the
+  // additional_charge* fields above from this array.
+  line_items?: InvoiceLineItemInput[];
   remarks?: string | null;
 }
