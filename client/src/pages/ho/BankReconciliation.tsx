@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import AppShell from '../../components/layout/AppShell';
 import ExportButton from '../../components/shared/ExportButton';
-import { getBankReconciliation, verifyBankTxn, BankReconciliationRow, BankTxnAllocation } from '../../api/reconciliation';
+import { getBankReconciliation, verifyBankTxn, updateBankTxnDate, BankReconciliationRow, BankTxnAllocation } from '../../api/reconciliation';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
@@ -33,7 +33,11 @@ export default function BankReconciliation() {
   const [fMonth, setFMonth] = useState('All');
   const [fVerified, setFVerified] = useState('All');
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [editingDateId, setEditingDateId] = useState<string | null>(null);
+  const [draftDate, setDraftDate] = useState('');
+  const [dateError, setDateError] = useState<string | null>(null);
   const { user } = useAuth();
+  const canEditDate = user?.role === 'ho';
   const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
   // `silent` re-fetches in the background without flashing the page spinner /
@@ -64,6 +68,33 @@ export default function BankReconciliation() {
       document.removeEventListener('visibilitychange', refresh);
     };
   }, []);
+
+  // Save an edited cheque date. The backend updates every linked payment's
+  // date too, so we re-fetch the list to refresh the derived "Paid Date" on
+  // invoice rows elsewhere.
+  async function saveDate(r: BankReconciliationRow) {
+    setDateError(null);
+    if (!draftDate || !/^\d{4}-\d{2}-\d{2}$/.test(draftDate)) {
+      setDateError('Enter a valid date');
+      return;
+    }
+    const isoOld = (r.txn_date ?? '').slice(0, 10);
+    if (draftDate === isoOld) {
+      setEditingDateId(null);
+      return;
+    }
+    setSavingId(r.id);
+    setRows(prev => prev.map(x => x.id === r.id ? { ...x, txn_date: draftDate } : x));
+    try {
+      await updateBankTxnDate(r.id, draftDate);
+      setEditingDateId(null);
+      load({ silent: true });
+    } catch (err) {
+      setRows(prev => prev.map(x => x.id === r.id ? { ...x, txn_date: r.txn_date } : x));
+      setDateError(err instanceof Error ? err.message : 'Save failed');
+    }
+    setSavingId(null);
+  }
 
   // Tick / un-tick a transaction as verified against the bank statement.
   // Optimistic: flip the row immediately, revert if the save fails.
@@ -232,7 +263,56 @@ export default function BankReconciliation() {
                       className={`border-t border-gray-50 hover:bg-gray-50/50 cursor-pointer ${isOpen ? 'bg-blue-50/40' : ''}`}
                       onClick={() => setExpanded(isOpen ? null : r.id)}>
                       <td className="px-4 py-3 text-gray-500">{idx + 1}</td>
-                      <td className="px-4 py-3 text-gray-700">{formatDate(r.txn_date)}</td>
+                      <td
+                        className="px-4 py-3 text-gray-700"
+                        onClick={canEditDate ? (e => {
+                          e.stopPropagation();
+                          if (editingDateId === r.id) return;
+                          setEditingDateId(r.id);
+                          setDraftDate((r.txn_date ?? '').slice(0, 10));
+                          setDateError(null);
+                        }) : undefined}
+                        title={canEditDate ? 'Click to change the cheque date — linked payments will follow' : undefined}
+                      >
+                        {editingDateId === r.id ? (
+                          <div className="flex flex-col gap-1" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="date"
+                                autoFocus
+                                value={draftDate}
+                                disabled={savingId === r.id}
+                                onChange={e => setDraftDate(e.target.value)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') { e.preventDefault(); saveDate(r); }
+                                  if (e.key === 'Escape') { setEditingDateId(null); setDateError(null); }
+                                }}
+                                className="px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-200"
+                              />
+                              <button
+                                onClick={() => saveDate(r)}
+                                disabled={savingId === r.id}
+                                className="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                              >
+                                {savingId === r.id ? '…' : 'Save'}
+                              </button>
+                              <button
+                                onClick={() => { setEditingDateId(null); setDateError(null); }}
+                                className="px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                            {dateError && (
+                              <div className="text-[11px] text-red-600 max-w-xs whitespace-normal">{dateError}</div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className={canEditDate ? 'cursor-pointer hover:underline decoration-dotted underline-offset-2' : undefined}>
+                            {formatDate(r.txn_date)}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-gray-700">{r.txn_type}</td>
                       <td className="px-4 py-3 font-medium text-gray-900 truncate">{r.txn_ref}</td>
                       <td className="px-4 py-3 text-gray-700 truncate">{vendorSummary(r.allocations)}</td>

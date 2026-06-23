@@ -328,3 +328,148 @@ export async function verifyReconciliation(req: Request, res: Response, next: Ne
     next(err);
   }
 }
+
+const updateDateSchema = z.object({
+  txn_date: isoDate,
+});
+
+interface LinkedPaymentRow {
+  payment_id: string;
+  invoice_id: string;
+  invoice_no: string;
+  invoice_date: string;
+  old_payment_date: string;
+}
+
+// PATCH /api/reconciliation/:id/date — HO only
+//   Corrects the cheque/transaction date (e.g. when the actual bank debit lands
+//   later than the cheque was issued). The new date cascades to every payment
+//   linked to this cheque so each invoice's "Paid Date" (derived from
+//   MAX(payments.payment_date)) reflects the real debit date. payment_month is
+//   re-synced too. Rejected if the new date is before any linked invoice's date.
+//
+//   Audits: one summary row for the cheque, plus per-payment "Edited payment:
+//   date X -> Y" rows with metadata.paymentId — so future repair migrations
+//   treat each payment's date as a human edit (see CLAUDE.md).
+export async function updateReconciliationDate(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    if (!z.string().uuid().safeParse(id).success) {
+      res.status(400).json({ error: 'Bad Request', message: 'Invalid transaction id' });
+      return;
+    }
+    const { txn_date: newDate } = updateDateSchema.parse(req.body);
+    const { id: userId } = req.user!;
+
+    const result = await withTransaction(async (tx) => {
+      const txn = await tx.queryOne<{ id: string; txn_ref: string; old_date: string }>(
+        `SELECT id, txn_ref, to_char(txn_date, 'YYYY-MM-DD') AS old_date
+         FROM bank_transactions WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+      if (!txn) {
+        return { status: 404, body: { error: 'Not Found', message: 'Bank transaction not found' } };
+      }
+
+      if (txn.old_date === newDate) {
+        return {
+          status: 200,
+          body: { id: txn.id, txn_ref: txn.txn_ref, txn_date: newDate, old_date: txn.old_date, payments_updated: 0, unchanged: true },
+        };
+      }
+
+      const linked = await tx.query<LinkedPaymentRow>(
+        `SELECT p.id AS payment_id, p.invoice_id, i.invoice_no,
+                to_char(i.invoice_date, 'YYYY-MM-DD') AS invoice_date,
+                to_char(p.payment_date, 'YYYY-MM-DD') AS old_payment_date
+         FROM payments p
+         JOIN invoices i ON i.id = p.invoice_id
+         WHERE p.bank_txn_id = $1`,
+        [id]
+      );
+
+      // Payment-before-invoice is an impossible business state — same rule the
+      // bulk importer enforces. ISO YYYY-MM-DD strings compare lexicographically.
+      const violation = linked.find(l => newDate < l.invoice_date);
+      if (violation) {
+        return {
+          status: 400,
+          body: {
+            error: 'Bad Request',
+            message: `Cheque date ${newDate} is before invoice ${violation.invoice_no} (dated ${violation.invoice_date}). Pick a date on or after every linked invoice's date.`,
+          },
+        };
+      }
+
+      await tx.query(
+        `UPDATE bank_transactions SET txn_date = $1 WHERE id = $2`,
+        [newDate, id]
+      );
+
+      await tx.query(
+        `UPDATE payments
+         SET payment_date = $1::date,
+             payment_month = date_trunc('month', $1::date)::date
+         WHERE bank_txn_id = $2`,
+        [newDate, id]
+      );
+
+      return {
+        status: 200,
+        body: {
+          id: txn.id,
+          txn_ref: txn.txn_ref,
+          txn_date: newDate,
+          old_date: txn.old_date,
+          payments_updated: linked.length,
+          linked,
+        },
+      };
+    });
+
+    if (result.status !== 200) {
+      res.status(result.status).json(result.body);
+      return;
+    }
+
+    const body = result.body as {
+      id: string; txn_ref: string; txn_date: string; old_date: string;
+      payments_updated: number; unchanged?: boolean; linked?: LinkedPaymentRow[];
+    };
+
+    if (!body.unchanged) {
+      try {
+        await logAudit({
+          userId,
+          action: `Edited cheque date: ${body.txn_ref} · ${body.old_date} → ${body.txn_date}`,
+          metadata: {
+            bank_txn_id: body.id,
+            old_date: body.old_date,
+            new_date: body.txn_date,
+            payments_updated: body.payments_updated,
+          },
+        });
+        for (const l of body.linked ?? []) {
+          await logAudit({
+            userId,
+            action: `Edited payment: date ${l.old_payment_date} → ${body.txn_date} (via cheque ${body.txn_ref})`,
+            invoiceId: l.invoice_id,
+            metadata: {
+              paymentId: l.payment_id,
+              bank_txn_id: body.id,
+              old_date: l.old_payment_date,
+              new_date: body.txn_date,
+              via_cheque_date_edit: true,
+            },
+          });
+        }
+      } catch (err) {
+        console.error('[audit] updateReconciliationDate audit log failed:', err);
+      }
+    }
+
+    res.json({ id: body.id, txn_ref: body.txn_ref, txn_date: body.txn_date, old_date: body.old_date, payments_updated: body.payments_updated });
+  } catch (err) {
+    next(err);
+  }
+}
