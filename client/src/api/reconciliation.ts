@@ -34,6 +34,8 @@ export interface BankReconciliationRow {
 export interface BulkPayAllocationInput {
   invoice_id: string;
   amount: number;
+  // TDS % withheld for this invoice (0–10). Computed on base_amount server-side.
+  tds_pct?: number;
 }
 
 export interface BulkPayInput {

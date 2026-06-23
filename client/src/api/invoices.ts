@@ -1,8 +1,14 @@
 import { apiFetch } from './client';
-import { Invoice, CreateInvoiceData, DisputeSeverity } from '../types/invoice';
+import { Invoice, CreateInvoiceData, DisputeSeverity, InvoiceLineItem } from '../types/invoice';
 
 export function getInvoices(): Promise<Invoice[]> {
   return apiFetch<Invoice[]>('/invoices');
+}
+
+// Additional line items for one invoice. Returns [] for legacy invoices that
+// only have the single additional_charge column (callers fall back to that).
+export function getInvoiceLineItems(id: string): Promise<InvoiceLineItem[]> {
+  return apiFetch<InvoiceLineItem[]>(`/invoices/${id}/line-items`);
 }
 
 // Single invoice with the same computed shape the list returns. Used to patch

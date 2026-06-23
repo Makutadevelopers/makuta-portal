@@ -32,6 +32,10 @@ const bulkPaySchema = z.object({
   allocations: z.array(z.object({
     invoice_id: z.string().uuid(),
     amount: z.number().positive(),
+    // TDS withheld for this invoice (sec 194C/194J etc). Computed on the
+    // invoice's pre-GST base_amount, frozen at insert time — mirrors the
+    // single-payment path. Optional; defaults to 0.
+    tds_pct: z.number().min(0).max(10).optional(),
   })).min(1).max(200),
 }).refine(
   d => d.txn_type.trim().toLowerCase() === 'cash' || !!d.txn_ref?.trim(),
@@ -41,6 +45,7 @@ const bulkPaySchema = z.object({
 interface InvoiceRow {
   id: string;
   invoice_amount: string | number;
+  base_amount: string | number | null;
   invoice_no: string;
   vendor_name: string;
   site: string;
@@ -98,7 +103,7 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
 
       for (const alloc of data.allocations) {
         const invoice = await tx.queryOne<InvoiceRow>(
-          `SELECT id, invoice_amount, invoice_no, vendor_name, site, pushed, deleted_at
+          `SELECT id, invoice_amount, base_amount, invoice_no, vendor_name, site, pushed, deleted_at
            FROM invoices WHERE id = $1 FOR UPDATE`,
           [alloc.invoice_id]
         );
@@ -118,22 +123,34 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
         const alreadyPaid = Number(sumRow[0]?.total ?? 0);
         const allocatedCredits = Number(sumRow[0]?.allocated ?? 0);
         const balance = Number(invoice.invoice_amount) - alreadyPaid - allocatedCredits;
-        if (alloc.amount > balance + 0.009) {
+
+        // TDS is withheld on top of the cash allocation and settles part of the
+        // invoice without cash changing hands — same rule as the single-payment
+        // path. Computed on the pre-GST base_amount (sec 194C), frozen here.
+        const tdsPctVal = Math.max(0, Math.min(10, alloc.tds_pct ?? 0));
+        const tdsBase = Number(invoice.base_amount ?? invoice.invoice_amount);
+        const tdsAmount = Math.round(tdsBase * tdsPctVal) / 100;
+
+        // The cheque amount is the cash leg only, so the allocation tally above
+        // is unaffected by TDS — but cash + TDS together must still fit inside
+        // the outstanding balance.
+        if (alloc.amount + tdsAmount > balance + 0.009) {
           return {
             status: 400,
             body: {
               error: 'Bad Request',
-              message: `Allocation of ₹${alloc.amount.toLocaleString('en-IN')} for invoice ${invoice.invoice_no} exceeds outstanding balance of ₹${balance.toLocaleString('en-IN')}`,
+              message: `Allocation of ₹${alloc.amount.toLocaleString('en-IN')}${tdsAmount > 0 ? ` + TDS ₹${tdsAmount.toLocaleString('en-IN')}` : ''} for invoice ${invoice.invoice_no} exceeds outstanding balance of ₹${balance.toLocaleString('en-IN')}`,
             },
           };
         }
 
         await tx.query(
-          `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, bank_txn_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, bank_txn_id, tds_pct, tds_amount)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
           [alloc.invoice_id, alloc.amount, data.txn_type,
            isCash ? null : (data.txn_ref ?? null), data.txn_date,
-           isCash ? null : (data.bank ?? null), userId, txn?.id ?? null]
+           isCash ? null : (data.bank ?? null), userId, txn?.id ?? null,
+           tdsPctVal, tdsAmount]
         );
 
         await tx.query(

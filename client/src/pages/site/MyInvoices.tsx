@@ -2,12 +2,14 @@ import { useState, useMemo, useEffect, useRef, Fragment, FormEvent, DragEvent, C
 import { useAuth } from '../../hooks/useAuth';
 import { useInvoices } from '../../hooks/useInvoices';
 import { useVendors } from '../../hooks/useVendors';
-import { createInvoice, updateInvoice } from '../../api/invoices';
+import { createInvoice, updateInvoice, getInvoiceLineItems } from '../../api/invoices';
 import { createVendor } from '../../api/vendors';
 import { uploadAttachment, getAttachments, deleteAttachment, Attachment } from '../../api/attachments';
 import { Invoice } from '../../types/invoice';
 import { formatINR, formatDate } from '../../utils/formatters';
 import CategorySelect from '../../components/shared/CategorySelect';
+import LineItemsEditor from '../../components/shared/LineItemsEditor';
+import { computeInvoiceTotalWithItems, LineItemDraft } from '../../utils/invoiceMath';
 import AppShell from '../../components/layout/AppShell';
 import BulkImportModal from '../../components/shared/BulkImportModal';
 import DisputeModal from '../../components/shared/DisputeModal';
@@ -20,6 +22,7 @@ import { useToast } from '../../context/ToastContext';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { normaliseSearch, highlight, amountMatchesSearch } from '../../utils/searchHighlight';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useTypeaheadKeyboard } from '../../hooks/useTypeaheadKeyboard';
 
 const MINOR_LIMIT = 50000;
 
@@ -631,6 +634,8 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
     typeof dInit?.[k] === 'string' ? (dInit[k] as string) : fallback;
   const dBool = (k: string, fallback = false) =>
     typeof dInit?.[k] === 'boolean' ? (dInit[k] as boolean) : fallback;
+  const dArr = <T,>(k: string, fallback: T[]): T[] =>
+    Array.isArray(dInit?.[k]) ? (dInit[k] as T[]) : fallback;
 
   const [vendorId, setVendorId] = useState(seed?.vendor_id ?? dStr('vendorId'));
   const [vendorName, setVendorName] = useState(seed?.vendor_name ?? dStr('vendorName'));
@@ -638,6 +643,14 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
   const [creatingVendor, setCreatingVendor] = useState(false);
   const [localVendors, setLocalVendors] = useState<Vendor[]>(vendors);
   useEffect(() => { setLocalVendors(vendors); }, [vendors]);
+  const vendorMatches = localVendors.filter(v => v.name.toLowerCase().includes(vendorName.toLowerCase()));
+  const vendorKbd = useTypeaheadKeyboard({
+    items: vendorMatches,
+    open: vendorDropdownOpen,
+    onSelect: v => { handleVendorChange(v.id); setVendorDropdownOpen(false); },
+    onEmptyEnter: () => { if (vendorName.trim()) handleCreateVendor(vendorName); },
+    onClose: () => setVendorDropdownOpen(false),
+  });
   // When duplicating, clear invoice_no — the user must assign a new one.
   const [invoiceNo, setInvoiceNo] = useState(isDuplicate ? '' : (seed?.invoice_no ?? dStr('invoiceNo')));
   const [poNumber, setPoNumber] = useState(seed?.po_number ?? dStr('poNumber'));
@@ -651,40 +664,47 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
   const [sgstPct, setSgstPct] = useState(seed && Number(seed.sgst_pct) ? String(seed.sgst_pct) : dStr('sgstPct'));
   const [igstPct, setIgstPct] = useState(seed && Number(seed.igst_pct) ? String(seed.igst_pct) : dStr('igstPct'));
 
-  const [addlChargeOn, setAddlChargeOn] = useState(
-    seed ? Number(seed.additional_charge) > 0 : dBool('addlChargeOn')
+  // Additional line items (multiple, each with its own GST). Seeded from the
+  // legacy single additional_charge column (edit/duplicate) or a saved draft;
+  // the real detail rows load below and supersede the seed when editing.
+  const [addlItems, setAddlItems] = useState<LineItemDraft[]>(
+    seed && Number(seed.additional_charge) > 0
+      ? [{
+          description: seed.additional_charge_reason ?? '',
+          amount: String(seed.additional_charge),
+          cgstPct: Number(seed.additional_charge_cgst_pct) ? String(seed.additional_charge_cgst_pct) : '',
+          sgstPct: Number(seed.additional_charge_sgst_pct) ? String(seed.additional_charge_sgst_pct) : '',
+          igstPct: Number(seed.additional_charge_igst_pct) ? String(seed.additional_charge_igst_pct) : '',
+        }]
+      : dArr<LineItemDraft>('addlItems', [])
   );
-  const [addlCharge, setAddlCharge] = useState(
-    seed && Number(seed.additional_charge) > 0 ? String(seed.additional_charge) : dStr('addlCharge')
-  );
-  const [addlGstOn, setAddlGstOn] = useState(
-    seed
-      ? Number(seed.additional_charge_cgst_pct) > 0 ||
-        Number(seed.additional_charge_sgst_pct) > 0 ||
-        Number(seed.additional_charge_igst_pct) > 0
-      : dBool('addlGstOn')
-  );
-  const [addlCgstPct, setAddlCgstPct] = useState(seed && Number(seed.additional_charge_cgst_pct) ? String(seed.additional_charge_cgst_pct) : dStr('addlCgstPct'));
-  const [addlSgstPct, setAddlSgstPct] = useState(seed && Number(seed.additional_charge_sgst_pct) ? String(seed.additional_charge_sgst_pct) : dStr('addlSgstPct'));
-  const [addlIgstPct, setAddlIgstPct] = useState(seed && Number(seed.additional_charge_igst_pct) ? String(seed.additional_charge_igst_pct) : dStr('addlIgstPct'));
-  const [addlReason, setAddlReason] = useState(seed?.additional_charge_reason ?? dStr('addlReason'));
+
+  useEffect(() => {
+    if (!editInvoice) return;
+    getInvoiceLineItems(editInvoice.id)
+      .then(rows => {
+        if (rows.length > 0) {
+          setAddlItems(rows.map(r => ({
+            description: r.description,
+            amount: String(r.amount),
+            cgstPct: Number(r.cgst_pct) ? String(r.cgst_pct) : '',
+            sgstPct: Number(r.sgst_pct) ? String(r.sgst_pct) : '',
+            igstPct: Number(r.igst_pct) ? String(r.igst_pct) : '',
+          })));
+        }
+      })
+      .catch(() => {});
+  }, [editInvoice]);
 
   const baseNum = Number(baseAmount) || 0;
   const cgstNum = Number(cgstPct) || 0;
   const sgstNum = Number(sgstPct) || 0;
   const igstNum = Number(igstPct) || 0;
-  const cgstAmt = +(baseNum * cgstNum / 100).toFixed(2);
-  const sgstAmt = +(baseNum * sgstNum / 100).toFixed(2);
-  const igstAmt = +(baseNum * igstNum / 100).toFixed(2);
-  const addlChargeNum = addlChargeOn ? (Number(addlCharge) || 0) : 0;
-  const addlCgstNum = addlChargeOn && addlGstOn ? (Number(addlCgstPct) || 0) : 0;
-  const addlSgstNum = addlChargeOn && addlGstOn ? (Number(addlSgstPct) || 0) : 0;
-  const addlIgstNum = addlChargeOn && addlGstOn ? (Number(addlIgstPct) || 0) : 0;
-  const addlCgstAmt = +(addlChargeNum * addlCgstNum / 100).toFixed(2);
-  const addlSgstAmt = +(addlChargeNum * addlSgstNum / 100).toFixed(2);
-  const addlIgstAmt = +(addlChargeNum * addlIgstNum / 100).toFixed(2);
-  const addlLineTotal = +(addlChargeNum + addlCgstAmt + addlSgstAmt + addlIgstAmt).toFixed(2);
-  const totalAmount = +(baseNum + cgstAmt + sgstAmt + igstAmt + addlLineTotal).toFixed(2);
+  const breakdown = computeInvoiceTotalWithItems({
+    baseAmount: baseNum, cgstPct: cgstNum, sgstPct: sgstNum, igstPct: igstNum, items: addlItems,
+  });
+  const { cgstAmt, sgstAmt, igstAmt } = breakdown;
+  const totalAmount = breakdown.total;
   const [remarks, setRemarks] = useState(seed?.remarks ?? dStr('remarks'));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -721,7 +741,7 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
       !!vendorId || !!vendorName.trim() ||
       !!invoiceNo.trim() || !!poNumber.trim() ||
       !!baseAmount || !!cgstPct || !!sgstPct || !!igstPct ||
-      addlChargeOn || !!addlCharge || !!addlReason.trim() ||
+      addlItems.length > 0 ||
       !!remarks.trim();
     try {
       if (hasContent) {
@@ -730,8 +750,7 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
           invoiceNo, poNumber, purpose,
           invoiceDate, month,
           baseAmount, cgstPct, sgstPct, igstPct,
-          addlChargeOn, addlCharge, addlGstOn,
-          addlCgstPct, addlSgstPct, addlIgstPct, addlReason,
+          addlItems,
           remarks,
         };
         window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
@@ -745,8 +764,7 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
     invoiceNo, poNumber, purpose,
     invoiceDate, month,
     baseAmount, cgstPct, sgstPct, igstPct,
-    addlChargeOn, addlCharge, addlGstOn,
-    addlCgstPct, addlSgstPct, addlIgstPct, addlReason,
+    addlItems,
     remarks,
   ]);
 
@@ -756,8 +774,7 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
     setInvoiceNo(''); setPoNumber(''); setPurpose('Steel');
     setInvoiceDate(today); setMonth(`${currentMonth}-01`);
     setBaseAmount(''); setCgstPct(''); setSgstPct(''); setIgstPct('');
-    setAddlChargeOn(false); setAddlCharge(''); setAddlGstOn(false);
-    setAddlCgstPct(''); setAddlSgstPct(''); setAddlIgstPct(''); setAddlReason('');
+    setAddlItems([]);
     setRemarks(''); setPendingFiles([]); setDraftRestored(false);
   }
 
@@ -811,8 +828,9 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
     if (!invoiceNo.trim() && !invoiceNoOptional) { setError('Invoice number is required'); return; }
     if (baseNum <= 0) { setError('Enter a valid base amount'); return; }
     if (totalAmount <= 0) { setError('Total amount must be greater than zero'); return; }
-    if (addlChargeOn && addlChargeNum > 0 && !addlReason.trim()) {
-      setError('Reason is required when additional charge is entered');
+    const itemsWithAmount = addlItems.filter(li => (Number(li.amount) || 0) > 0);
+    if (itemsWithAmount.some(li => !li.description.trim())) {
+      setError('Each additional item needs a description / reason');
       return;
     }
 
@@ -832,11 +850,14 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
         cgst_pct: cgstNum,
         sgst_pct: sgstNum,
         igst_pct: igstNum,
-        additional_charge: addlChargeNum,
-        additional_charge_cgst_pct: addlCgstNum,
-        additional_charge_sgst_pct: addlSgstNum,
-        additional_charge_igst_pct: addlIgstNum,
-        additional_charge_reason: addlChargeNum > 0 ? addlReason.trim() : null,
+        // Server derives the legacy additional_charge* columns from line_items.
+        line_items: itemsWithAmount.map(li => ({
+          description: li.description.trim(),
+          amount: Number(li.amount) || 0,
+          cgst_pct: Number(li.cgstPct) || 0,
+          sgst_pct: Number(li.sgstPct) || 0,
+          igst_pct: Number(li.igstPct) || 0,
+        })),
         remarks: remarks.trim() || null,
       };
 
@@ -937,6 +958,7 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
                 setVendorId('');
                 setVendorDropdownOpen(true);
               }}
+              onKeyDown={vendorKbd.onKeyDown}
               onFocus={() => setVendorDropdownOpen(true)}
               onBlur={() => setTimeout(() => setVendorDropdownOpen(false), 150)}
               placeholder="Type to search or select vendor..."
@@ -944,20 +966,19 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
             />
             {vendorDropdownOpen && (
               <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                {localVendors
-                  .filter(v => v.name.toLowerCase().includes(vendorName.toLowerCase()))
-                  .map(v => (
+                {vendorMatches.map((v, i) => (
                     <div
                       key={v.id}
+                      ref={vendorKbd.itemRef(i)}
                       onMouseDown={e => e.preventDefault()}
                       onClick={() => { handleVendorChange(v.id); setVendorDropdownOpen(false); }}
-                      className="px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center justify-between"
+                      className={`px-3 py-2 cursor-pointer flex items-center justify-between ${vendorKbd.isActive(i) ? 'bg-blue-50' : 'hover:bg-blue-50'}`}
                     >
                       <span className="text-sm text-gray-900">{v.name}</span>
                       <span className="text-xs text-gray-400">{v.category} · {v.payment_terms}d</span>
                     </div>
                   ))}
-                {vendorName.trim() && localVendors.filter(v => v.name.toLowerCase().includes(vendorName.toLowerCase())).length === 0 && (
+                {vendorName.trim() && vendorMatches.length === 0 && (
                   <div className="px-3 py-2">
                     <div className="text-xs text-gray-400 mb-1">No matching vendor found</div>
                     <button
@@ -1114,96 +1135,8 @@ function InvoiceForm({ allowedSites, vendors, editInvoice, prefillFrom, onCancel
           </div>
         </div>
 
-        {/* Additional charge */}
-        <div className="mb-4 p-4 bg-amber-50/40 rounded-lg border border-amber-100">
-          <label className="flex items-center gap-2 cursor-pointer mb-3">
-            <input
-              type="checkbox"
-              checked={addlChargeOn}
-              onChange={e => setAddlChargeOn(e.target.checked)}
-              className="rounded border-gray-300"
-            />
-            <span className="text-xs font-medium text-gray-700">Additional charge (transport, loading, etc.)</span>
-          </label>
-
-          {addlChargeOn && (
-            <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Amount (₹) *</label>
-                  <input
-                    type="number"
-                    value={addlCharge}
-                    onChange={e => setAddlCharge(e.target.value)}
-                    placeholder="0"
-                    min="0"
-                    step="0.01"
-                    className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200"
-                  />
-                </div>
-                <div>
-                  <label className="flex items-center gap-2 cursor-pointer mt-6">
-                    <input
-                      type="checkbox"
-                      checked={addlGstOn}
-                      onChange={e => setAddlGstOn(e.target.checked)}
-                      className="rounded border-gray-300"
-                    />
-                    <span className="text-xs text-gray-700">Apply GST to this charge</span>
-                  </label>
-                </div>
-              </div>
-
-              {addlGstOn && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">CGST %</label>
-                    <input
-                      type="number" value={addlCgstPct} onChange={e => setAddlCgstPct(e.target.value)}
-                      placeholder="0" min="0" max="100" step="0.01"
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200"
-                    />
-                    <div className="text-[11px] text-gray-400 mt-1">{formatINR(addlCgstAmt)}</div>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">SGST %</label>
-                    <input
-                      type="number" value={addlSgstPct} onChange={e => setAddlSgstPct(e.target.value)}
-                      placeholder="0" min="0" max="100" step="0.01"
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200"
-                    />
-                    <div className="text-[11px] text-gray-400 mt-1">{formatINR(addlSgstAmt)}</div>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">IGST %</label>
-                    <input
-                      type="number" value={addlIgstPct} onChange={e => setAddlIgstPct(e.target.value)}
-                      placeholder="0" min="0" max="100" step="0.01"
-                      className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200"
-                    />
-                    <div className="text-[11px] text-gray-400 mt-1">{formatINR(addlIgstAmt)}</div>
-                  </div>
-                </div>
-              )}
-
-              <div className="mb-1">
-                <label className="block text-xs text-gray-500 mb-1">Reason *</label>
-                <input
-                  value={addlReason}
-                  onChange={e => setAddlReason(e.target.value)}
-                  placeholder="e.g. Transport, loading, packing, handling..."
-                  maxLength={500}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-200"
-                />
-              </div>
-
-              <div className="mt-2 pt-2 border-t border-amber-200 flex items-center justify-between">
-                <span className="text-xs text-gray-600">Additional line total</span>
-                <span className="text-sm font-medium text-amber-800">{formatINR(addlLineTotal)}</span>
-              </div>
-            </>
-          )}
-        </div>
+        {/* Additional line items (multiple, each with its own GST) */}
+        <LineItemsEditor items={addlItems} onChange={setAddlItems} />
 
         {/* Grand total */}
         <div className="mb-4 flex items-center justify-between px-4 py-3 bg-[#1a3c5e]/5 rounded-lg">
