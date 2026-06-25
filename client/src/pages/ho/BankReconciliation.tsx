@@ -264,7 +264,7 @@ export default function BankReconciliation() {
                       onClick={() => setExpanded(isOpen ? null : r.id)}>
                       <td className="px-4 py-3 text-gray-500">{idx + 1}</td>
                       <td
-                        className="px-4 py-3 text-gray-700"
+                        className="px-4 py-3 text-gray-700 relative"
                         onClick={canEditDate ? (e => {
                           e.stopPropagation();
                           if (editingDateId === r.id) return;
@@ -274,9 +274,18 @@ export default function BankReconciliation() {
                         }) : undefined}
                         title={canEditDate ? 'Click to change the cheque date — linked payments will follow' : undefined}
                       >
-                        {editingDateId === r.id ? (
-                          <div className="flex flex-col gap-1" onClick={e => e.stopPropagation()}>
-                            <div className="flex items-center gap-1">
+                        {/* The date stays in the cell so the column never reflows; the
+                            editor floats above as a popover instead of being crammed
+                            into this narrow fixed-width column. */}
+                        <span className={canEditDate ? 'cursor-pointer hover:underline decoration-dotted underline-offset-2' : undefined}>
+                          {formatDate(r.txn_date)}
+                        </span>
+                        {editingDateId === r.id && (
+                          <div
+                            className="absolute z-30 left-2 top-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 w-max"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <div className="flex items-center gap-1.5">
                               <input
                                 type="date"
                                 autoFocus
@@ -287,30 +296,27 @@ export default function BankReconciliation() {
                                   if (e.key === 'Enter') { e.preventDefault(); saveDate(r); }
                                   if (e.key === 'Escape') { setEditingDateId(null); setDateError(null); }
                                 }}
-                                className="px-1.5 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                className="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-200"
                               />
                               <button
                                 onClick={() => saveDate(r)}
                                 disabled={savingId === r.id}
-                                className="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                                className="px-3 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
                               >
                                 {savingId === r.id ? '…' : 'Save'}
                               </button>
                               <button
                                 onClick={() => { setEditingDateId(null); setDateError(null); }}
                                 className="px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700"
+                                title="Cancel"
                               >
                                 ✕
                               </button>
                             </div>
                             {dateError && (
-                              <div className="text-[11px] text-red-600 max-w-xs whitespace-normal">{dateError}</div>
+                              <div className="mt-1 text-[11px] text-red-600 max-w-[240px] whitespace-normal">{dateError}</div>
                             )}
                           </div>
-                        ) : (
-                          <span className={canEditDate ? 'cursor-pointer hover:underline decoration-dotted underline-offset-2' : undefined}>
-                            {formatDate(r.txn_date)}
-                          </span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-gray-700">{r.txn_type}</td>
