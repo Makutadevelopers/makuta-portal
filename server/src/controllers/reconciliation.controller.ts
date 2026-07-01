@@ -36,6 +36,9 @@ const bulkPaySchema = z.object({
     // invoice's pre-GST base_amount, frozen at insert time — mirrors the
     // single-payment path. Optional; defaults to 0.
     tds_pct: z.number().min(0).max(10).optional(),
+    // GST-TDS withheld under GST law (statutorily 2%), computed on the same
+    // pre-GST base as TDS. Optional; defaults to 0.
+    gst_tds_pct: z.number().min(0).max(10).optional(),
   })).min(1).max(200),
 }).refine(
   d => d.txn_type.trim().toLowerCase() === 'cash' || !!d.txn_ref?.trim(),
@@ -116,7 +119,7 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
 
         const sumRow = await tx.query<{ total: string; allocated: string }>(
           `SELECT
-             COALESCE((SELECT SUM(amount + tds_amount) FROM payments WHERE invoice_id = $1), 0)::TEXT AS total,
+             COALESCE((SELECT SUM(amount + tds_amount + gst_tds_amount) FROM payments WHERE invoice_id = $1), 0)::TEXT AS total,
              COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = $1), 0)::TEXT AS allocated`,
           [alloc.invoice_id]
         );
@@ -130,27 +133,35 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
         const tdsPctVal = Math.max(0, Math.min(10, alloc.tds_pct ?? 0));
         const tdsBase = Number(invoice.base_amount ?? invoice.invoice_amount);
         const tdsAmount = Math.round(tdsBase * tdsPctVal) / 100;
+        // GST-TDS withheld on the same pre-GST base as TDS; also settles the
+        // invoice without cash changing hands.
+        const gstTdsPctVal = Math.max(0, Math.min(10, alloc.gst_tds_pct ?? 0));
+        const gstTdsAmount = Math.round(tdsBase * gstTdsPctVal) / 100;
 
         // The cheque amount is the cash leg only, so the allocation tally above
-        // is unaffected by TDS — but cash + TDS together must still fit inside
-        // the outstanding balance.
-        if (alloc.amount + tdsAmount > balance + 0.009) {
+        // is unaffected by TDS/GST-TDS — but cash + TDS + GST-TDS together must
+        // still fit inside the outstanding balance.
+        if (alloc.amount + tdsAmount + gstTdsAmount > balance + 0.009) {
+          const withheldParts = [
+            tdsAmount > 0 ? `TDS ₹${tdsAmount.toLocaleString('en-IN')}` : null,
+            gstTdsAmount > 0 ? `GST-TDS ₹${gstTdsAmount.toLocaleString('en-IN')}` : null,
+          ].filter(Boolean).join(' + ');
           return {
             status: 400,
             body: {
               error: 'Bad Request',
-              message: `Allocation of ₹${alloc.amount.toLocaleString('en-IN')}${tdsAmount > 0 ? ` + TDS ₹${tdsAmount.toLocaleString('en-IN')}` : ''} for invoice ${invoice.invoice_no} exceeds outstanding balance of ₹${balance.toLocaleString('en-IN')}`,
+              message: `Allocation of ₹${alloc.amount.toLocaleString('en-IN')}${withheldParts ? ` + ${withheldParts}` : ''} for invoice ${invoice.invoice_no} exceeds outstanding balance of ₹${balance.toLocaleString('en-IN')}`,
             },
           };
         }
 
         await tx.query(
-          `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, bank_txn_id, tds_pct, tds_amount)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, bank_txn_id, tds_pct, tds_amount, gst_tds_pct, gst_tds_amount)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
           [alloc.invoice_id, alloc.amount, data.txn_type,
            isCash ? null : (data.txn_ref ?? null), data.txn_date,
            isCash ? null : (data.bank ?? null), userId, txn?.id ?? null,
-           tdsPctVal, tdsAmount]
+           tdsPctVal, tdsAmount, gstTdsPctVal, gstTdsAmount]
         );
 
         await tx.query(

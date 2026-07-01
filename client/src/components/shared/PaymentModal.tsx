@@ -31,7 +31,13 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
   const [tdsPct, setTdsPct] = useState('0');
   const numTdsPct = Math.max(0, Math.min(10, Number(tdsPct) || 0));
   const tdsAmount = Math.round(tdsBase * numTdsPct) / 100;
-  const [amount, setAmount] = useState(String(Math.max(0, balance - tdsAmount)));
+  const [gstTdsPct, setGstTdsPct] = useState('0');
+  const numGstTdsPct = Math.max(0, Math.min(10, Number(gstTdsPct) || 0));
+  const gstTdsAmount = Math.round(tdsBase * numGstTdsPct) / 100;
+  // Both TDS and GST-TDS are withheld (no cash), so the cash leg that fully
+  // settles the invoice is balance minus every withholding.
+  const withheld = tdsAmount + gstTdsAmount;
+  const [amount, setAmount] = useState(String(Math.max(0, balance - withheld)));
   const [paymentType, setPaymentType] = useState('Cheque');
   const [paymentRef, setPaymentRef] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
@@ -43,8 +49,8 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
   const [applyingCredit, setApplyingCredit] = useState(false);
 
   useEffect(() => {
-    if (mode === 'full') setAmount(String(Math.max(0, balance - tdsAmount)));
-  }, [mode, balance, tdsAmount]);
+    if (mode === 'full') setAmount(String(Math.max(0, balance - withheld)));
+  }, [mode, balance, withheld]);
 
   useEffect(() => {
     getPayments(invoice.id).then(setPrevPayments).catch(() => {});
@@ -66,19 +72,19 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
   }
 
   const numAmount = Number(amount) || 0;
-  const settlement = numAmount + tdsAmount;
+  const settlement = numAmount + withheld;
   const balanceAfter = balance - settlement;
   const isOverpay = settlement > balance + 0.001;
 
   function handleModeChange(m: 'full' | 'part') {
     setMode(m);
-    if (m === 'full') setAmount(String(Math.max(0, balance - tdsAmount)));
+    if (m === 'full') setAmount(String(Math.max(0, balance - withheld)));
     else setAmount('');
   }
 
   async function handleSubmit() {
-    if (settlement <= 0) { setError('Enter a valid amount or TDS %'); return; }
-    if (isOverpay) { setError('Cash + TDS exceeds outstanding balance'); return; }
+    if (settlement <= 0) { setError('Enter a valid amount, TDS % or GST-TDS %'); return; }
+    if (isOverpay) { setError('Cash + TDS + GST-TDS exceeds outstanding balance'); return; }
     if (numAmount > 0 && paymentType !== 'Cash' && !paymentRef.trim()) { setError('Reference / TXN number is required'); return; }
 
     setSaving(true);
@@ -91,6 +97,7 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
         payment_date: paymentDate,
         bank: paymentType === 'Cash' ? null : (bank.trim() || null),
         tds_pct: numTdsPct,
+        gst_tds_pct: numGstTdsPct,
       });
       onSaved();
     } catch (err) {
@@ -173,18 +180,18 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div className="sm:col-span-2">
             <label className="block text-xs text-gray-500 mb-1">Cash Paid (₹)</label>
             {mode === 'full' ? (
-              <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 font-medium">{formatINRPaisa(Math.max(0, balance - tdsAmount))}</div>
+              <div className="px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 font-medium">{formatINRPaisa(Math.max(0, balance - withheld))}</div>
             ) : (
               <input type="number" value={amount} onChange={e => setAmount(e.target.value)} min="0" max={balance}
                 className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
             )}
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1" title="TDS withheld at source. Computed on the full invoice amount.">TDS %</label>
+            <label className="block text-xs text-gray-500 mb-1" title="Income-tax TDS withheld at source (Sec. 194C). Computed on the pre-GST base amount.">TDS %</label>
             <input
               type="number"
               value={tdsPct}
@@ -195,14 +202,32 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
           </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1" title="GST-TDS withheld under GST law (statutorily 2%). Computed on the same pre-GST base.">GST-TDS %</label>
+            <input
+              type="number"
+              value={gstTdsPct}
+              onChange={e => setGstTdsPct(e.target.value)}
+              min="0"
+              max="10"
+              step="0.01"
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
+          </div>
         </div>
-        {(numTdsPct > 0 || numAmount > 0) && (
+        {(numTdsPct > 0 || numGstTdsPct > 0 || numAmount > 0) && (
           <div className="mb-4 -mt-2 p-3 bg-gray-50 border border-gray-100 rounded-lg text-xs text-gray-600 space-y-1">
             <div className="flex justify-between"><span>Cash to vendor</span><span className="font-medium">{formatINR(numAmount)}</span></div>
             {numTdsPct > 0 && (
               <div className="flex justify-between">
                 <span>TDS withheld ({numTdsPct}% of {formatINR(tdsBase)} base)</span>
                 <span className="font-medium text-amber-700">{formatINR(tdsAmount)}</span>
+              </div>
+            )}
+            {numGstTdsPct > 0 && (
+              <div className="flex justify-between">
+                <span>GST-TDS withheld ({numGstTdsPct}% of {formatINR(tdsBase)} base)</span>
+                <span className="font-medium text-amber-700">{formatINR(gstTdsAmount)}</span>
               </div>
             )}
             <div className="flex justify-between border-t border-gray-200 pt-1 mt-1">
@@ -215,7 +240,7 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
             </div>
           </div>
         )}
-        {isOverpay && <div className="text-xs text-red-600 -mt-2 mb-3">Cash + TDS exceeds outstanding balance of {formatINRPaisa(balance)}</div>}
+        {isOverpay && <div className="text-xs text-red-600 -mt-2 mb-3">Cash + TDS + GST-TDS exceeds outstanding balance of {formatINRPaisa(balance)}</div>}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
           <div>

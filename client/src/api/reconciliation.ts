@@ -36,6 +36,8 @@ export interface BulkPayAllocationInput {
   amount: number;
   // TDS % withheld for this invoice (0–10). Computed on base_amount server-side.
   tds_pct?: number;
+  // GST-TDS % withheld for this invoice (0–10). Same pre-GST base as TDS.
+  gst_tds_pct?: number;
 }
 
 export interface BulkPayInput {

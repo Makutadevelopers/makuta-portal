@@ -244,7 +244,7 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
      FROM invoices i
      LEFT JOIN (
        SELECT invoice_id,
-              SUM(amount + tds_amount) AS total_paid,
+              SUM(amount + tds_amount + gst_tds_amount) AS total_paid,
               MAX(payment_date)        AS last_paid_date
        FROM payments
        GROUP BY invoice_id

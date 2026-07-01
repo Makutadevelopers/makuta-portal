@@ -202,6 +202,8 @@ export interface VendorDetailPayment {
   amount: number;
   tds_pct: number;
   tds_amount: number;
+  gst_tds_pct: number;
+  gst_tds_amount: number;
 }
 
 export interface VendorDetailInvoice {
@@ -269,7 +271,7 @@ export async function getVendorDetail(
          -- behalf) + credit notes applied — the same tally payment_status uses.
          -- Cash-only here would leave fully-settled invoices showing a phantom
          -- balance (their TDS/credit portion) that leaked into Outstanding.
-         - COALESCE((SELECT SUM(p.amount + p.tds_amount) FROM payments p WHERE p.invoice_id = i.id), 0)
+         - COALESCE((SELECT SUM(p.amount + p.tds_amount + p.gst_tds_amount) FROM payments p WHERE p.invoice_id = i.id), 0)
          - COALESCE((SELECT SUM(c.allocated_amount) FROM credit_note_allocations c WHERE c.invoice_id = i.id), 0)
        AS balance,
        (SELECT MAX(p.payment_date) FROM payments p WHERE p.invoice_id = i.id) AS last_paid_date
@@ -295,7 +297,7 @@ export async function getVendorDetail(
   const paymentRows = invoiceIds.length
     ? await query<VendorDetailPayment>(
         `SELECT id, invoice_id, payment_date, payment_type, payment_ref,
-                bank, amount, tds_pct, tds_amount
+                bank, amount, tds_pct, tds_amount, gst_tds_pct, gst_tds_amount
          FROM payments
          WHERE invoice_id = ANY($1::uuid[])
          ORDER BY payment_date ASC, created_at ASC`,

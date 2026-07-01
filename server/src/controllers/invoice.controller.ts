@@ -99,7 +99,7 @@ const SITE_PROJECTION = `
 // #1 cause of slow invoice-list responses once row counts grew.
 const AGG_JOINS = `
   LEFT JOIN (
-    SELECT invoice_id, SUM(amount + tds_amount) AS paid_sum,
+    SELECT invoice_id, SUM(amount + tds_amount + gst_tds_amount) AS paid_sum,
            MAX(payment_date) AS last_paid_date
     FROM payments
     GROUP BY invoice_id

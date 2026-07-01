@@ -294,7 +294,7 @@ export async function createExpense(req: Request, res: Response, next: NextFunct
 
         const sumRow = await tx.queryOne<{ paid: string; allocated: string }>(
           `SELECT
-             COALESCE((SELECT SUM(amount + tds_amount) FROM payments             WHERE invoice_id = $1), 0)::TEXT AS paid,
+             COALESCE((SELECT SUM(amount + tds_amount + gst_tds_amount) FROM payments             WHERE invoice_id = $1), 0)::TEXT AS paid,
              COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = $1), 0)::TEXT AS allocated`,
           [data.invoice_id]
         );

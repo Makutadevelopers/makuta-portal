@@ -1147,12 +1147,14 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
   const [editing, setEditing] = useState<Payment | null>(null);
   const totalCash = payments.reduce((s, p) => s + Number(p.amount), 0);
   const totalTds = payments.reduce((s, p) => s + Number(p.tds_amount ?? 0), 0);
-  const totalPaid = totalCash + totalTds;
+  const totalGstTds = payments.reduce((s, p) => s + Number(p.gst_tds_amount ?? 0), 0);
+  const totalWithheld = totalTds + totalGstTds;
+  const totalPaid = totalCash + totalWithheld;
   const rawBalance = Number(invoice.invoice_amount) - totalPaid;
   // Paisa shortfalls (≤ ₹1) are GST rounding noise, not real balance —
   // match the server's payment_status tolerance (see payment.service.ts).
   const balance = rawBalance <= 1 ? 0 : rawBalance;
-  const hasAnyTds = totalTds > 0;
+  const hasAnyTds = totalWithheld > 0;
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
@@ -1176,10 +1178,10 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
             <thead className="bg-gray-50">
               <tr>
                 {(hasAnyTds
-                  ? ['Payment Date', 'Cash', 'TDS', 'Type', 'Reference', 'Bank', '']
+                  ? ['Payment Date', 'Cash', 'Withheld', 'Type', 'Reference', 'Bank', '']
                   : ['Payment Date', 'Amount', 'Type', 'Reference', 'Bank', '']
                 ).map((h, i) => (
-                  <th key={i} className={`px-2.5 py-2.5 font-medium text-gray-500 ${h === 'Amount' || h === 'Cash' || h === 'TDS' ? 'text-right' : 'text-left'}`}>{h}</th>
+                  <th key={i} className={`px-2.5 py-2.5 font-medium text-gray-500 ${h === 'Amount' || h === 'Cash' || h === 'Withheld' ? 'text-right' : 'text-left'}`}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -1187,15 +1189,20 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
               {payments.map(p => {
                 const tdsAmt = Number(p.tds_amount ?? 0);
                 const tdsPct = Number(p.tds_pct ?? 0);
+                const gstTdsAmt = Number(p.gst_tds_amount ?? 0);
+                const gstTdsPct = Number(p.gst_tds_pct ?? 0);
                 return (
                   <tr key={p.id} className="border-t border-gray-50">
                     <td className="px-2.5 py-3 whitespace-nowrap">{formatDate(p.payment_date)}</td>
                     <td className="px-2.5 py-3 text-right font-medium text-green-700">{formatINR(Number(p.amount))}</td>
                     {hasAnyTds && (
                       <td className="px-2.5 py-3 text-right">
-                        {tdsAmt > 0
-                          ? <span className="font-medium text-amber-700">{formatINR(tdsAmt)} <span className="text-[10px] text-gray-400 font-normal">({tdsPct}%)</span></span>
-                          : <span className="text-gray-300">—</span>}
+                        {tdsAmt > 0 || gstTdsAmt > 0 ? (
+                          <span className="font-medium text-amber-700 space-y-0.5">
+                            {tdsAmt > 0 && <div>{formatINR(tdsAmt)} <span className="text-[10px] text-gray-400 font-normal">TDS {tdsPct}%</span></div>}
+                            {gstTdsAmt > 0 && <div>{formatINR(gstTdsAmt)} <span className="text-[10px] text-gray-400 font-normal">GST-TDS {gstTdsPct}%</span></div>}
+                          </span>
+                        ) : <span className="text-gray-300">—</span>}
                       </td>
                     )}
                     <td className="px-2.5 py-3">{p.payment_type}</td>
@@ -1218,12 +1225,12 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
                 <td className="px-2.5 py-2.5 font-medium text-gray-900">{hasAnyTds ? 'Totals' : 'Total Paid'}</td>
                 <td className="px-2.5 py-2.5 text-right font-semibold text-green-700">{formatINR(totalCash)}</td>
                 {hasAnyTds && (
-                  <td className="px-2.5 py-2.5 text-right font-semibold text-amber-700">{formatINR(totalTds)}</td>
+                  <td className="px-2.5 py-2.5 text-right font-semibold text-amber-700">{formatINR(totalWithheld)}</td>
                 )}
-                <td colSpan={hasAnyTds ? 4 : 4} className="px-2.5 py-2.5 text-right text-sm">
+                <td colSpan={4} className="px-2.5 py-2.5 text-right text-sm">
                   {balance > 0
                     ? <span className="text-red-600 font-medium">Balance remaining: {formatINR(balance)}</span>
-                    : <span className="text-green-600 font-medium">Fully settled{hasAnyTds ? ` (Cash ${formatINR(totalCash)} + TDS ${formatINR(totalTds)})` : ''}</span>}
+                    : <span className="text-green-600 font-medium">Fully settled{hasAnyTds ? ` (Cash ${formatINR(totalCash)} + Withheld ${formatINR(totalWithheld)})` : ''}</span>}
                 </td>
               </tr>
             </tfoot>
@@ -1243,7 +1250,7 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
           <EditPaymentModal
             invoice={invoice}
             payment={editing}
-            otherPaid={payments.filter(x => x.id !== editing.id).reduce((s, p) => s + Number(p.amount) + Number(p.tds_amount ?? 0), 0)}
+            otherPaid={payments.filter(x => x.id !== editing.id).reduce((s, p) => s + Number(p.amount) + Number(p.tds_amount ?? 0) + Number(p.gst_tds_amount ?? 0), 0)}
             onClose={() => setEditing(null)}
             onSaved={async () => { setEditing(null); await onPaymentChanged(); }}
           />
@@ -1293,18 +1300,21 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
   const [paymentDate, setPaymentDate] = useState(String(payment.payment_date).slice(0, 10));
   const [bank, setBank] = useState(payment.bank ?? '');
   const [tdsPct, setTdsPct] = useState(String(payment.tds_pct ?? 0));
+  const [gstTdsPct, setGstTdsPct] = useState(String(payment.gst_tds_pct ?? 0));
   const [saving, setSaving] = useState(false);
 
   const numAmount = Number(amount) || 0;
   const numTdsPct = Math.max(0, Math.min(10, Number(tdsPct) || 0));
   const tdsAmount = Math.round(tdsBase * numTdsPct) / 100;
-  const settlement = numAmount + tdsAmount;
+  const numGstTdsPct = Math.max(0, Math.min(10, Number(gstTdsPct) || 0));
+  const gstTdsAmount = Math.round(tdsBase * numGstTdsPct) / 100;
+  const settlement = numAmount + tdsAmount + gstTdsAmount;
   const overHeadroom = settlement > headroom + 0.001;
 
   async function handleSubmit() {
-    if (settlement <= 0) { notify('Amount or TDS must be greater than 0'); return; }
+    if (settlement <= 0) { notify('Amount, TDS or GST-TDS must be greater than 0'); return; }
     if (overHeadroom) {
-      notify(`Cash + TDS exceeds invoice headroom of ${formatINRPaisa(headroom)}`);
+      notify(`Cash + TDS + GST-TDS exceeds invoice headroom of ${formatINRPaisa(headroom)}`);
       return;
     }
     if (numAmount > 0 && paymentType !== 'Cash' && !paymentRef.trim()) {
@@ -1320,6 +1330,7 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
         payment_date: paymentDate,
         bank: paymentType === 'Cash' ? null : (bank.trim() || null),
         tds_pct: numTdsPct,
+        gst_tds_pct: numGstTdsPct,
       });
       notify('Payment updated');
       await onSaved();
@@ -1351,10 +1362,10 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
               onChange={e => setAmount(e.target.value)}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
-            {overHeadroom && <div className="text-xs text-red-600 mt-1">Cash + TDS exceeds invoice headroom</div>}
+            {overHeadroom && <div className="text-xs text-red-600 mt-1">Cash + TDS + GST-TDS exceeds invoice headroom</div>}
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1" title="TDS withheld. Computed on the full invoice amount.">TDS %</label>
+            <label className="block text-xs text-gray-500 mb-1" title="Income-tax TDS withheld (Sec. 194C). Computed on the pre-GST base amount.">TDS %</label>
             <input
               type="number" step="0.01" min="0" max="10" value={tdsPct}
               onChange={e => setTdsPct(e.target.value)}
@@ -1362,6 +1373,17 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
             />
             {numTdsPct > 0 && (
               <div className="text-[11px] text-amber-700 mt-1">TDS amount: {formatINR(tdsAmount)} ({numTdsPct}% of {formatINR(tdsBase)} base)</div>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1" title="GST-TDS withheld under GST law (statutorily 2%). Computed on the same pre-GST base.">GST-TDS %</label>
+            <input
+              type="number" step="0.01" min="0" max="10" value={gstTdsPct}
+              onChange={e => setGstTdsPct(e.target.value)}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
+            {numGstTdsPct > 0 && (
+              <div className="text-[11px] text-amber-700 mt-1">GST-TDS amount: {formatINR(gstTdsAmount)} ({numGstTdsPct}% of {formatINR(tdsBase)} base)</div>
             )}
           </div>
           <div>
@@ -2710,6 +2732,8 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
   // Per-invoice TDS % withheld (sec 194C/194J). Computed on the invoice's
   // pre-GST base_amount — same basis as the single-payment modal.
   const [tdsPcts, setTdsPcts] = useState<Record<string, string>>({});
+  // Per-invoice GST-TDS % withheld (GST law, statutorily 2%). Same pre-GST base.
+  const [gstTdsPcts, setGstTdsPcts] = useState<Record<string, string>>({});
   const [txnType, setTxnType] = useState('Cheque');
   const [txnRef, setTxnRef] = useState('');
   const [txnAmount, setTxnAmount] = useState('');
@@ -2736,16 +2760,44 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
     return Math.round(tdsBaseFor(inv) * pct) / 100;
   }
 
+  function gstTdsAmountFor(inv: Invoice): number {
+    const pct = Math.max(0, Math.min(10, Number(gstTdsPcts[inv.id]) || 0));
+    return Math.round(tdsBaseFor(inv) * pct) / 100;
+  }
+
+  // Total withheld (no cash) for an invoice — cash + this must fit the balance.
+  function withheldFor(inv: Invoice): number {
+    return tdsAmountFor(inv) + gstTdsAmountFor(inv);
+  }
+
   const tdsTotal = invoices.reduce((s, inv) => s + tdsAmountFor(inv), 0);
+  const gstTdsTotal = invoices.reduce((s, inv) => s + gstTdsAmountFor(inv), 0);
+
+  // Changing a withholding % reduces the cash leg to the full-settle figure
+  // (balance − withheld) so cash + TDS + GST-TDS lands exactly on the balance —
+  // this is what keeps "allocation + TDS exceeds outstanding balance" from
+  // firing when a user adds a withholding after the cash was pre-filled.
+  function setWithholding(inv: Invoice, kind: 'tds' | 'gst', value: string) {
+    const nextTds = kind === 'tds' ? value : (tdsPcts[inv.id] ?? '');
+    const nextGst = kind === 'gst' ? value : (gstTdsPcts[inv.id] ?? '');
+    const base = tdsBaseFor(inv);
+    const tdsAmt = Math.round(base * Math.max(0, Math.min(10, Number(nextTds) || 0))) / 100;
+    const gstAmt = Math.round(base * Math.max(0, Math.min(10, Number(nextGst) || 0))) / 100;
+    const cash = Math.max(0, balanceFor(inv) - tdsAmt - gstAmt);
+    if (kind === 'tds') setTdsPcts(prev => ({ ...prev, [inv.id]: value }));
+    else setGstTdsPcts(prev => ({ ...prev, [inv.id]: value }));
+    setAllocs(prev => ({ ...prev, [inv.id]: String(Number(cash.toFixed(2))) }));
+  }
 
   function autoDistribute() {
-    // Fill txn_amount across invoices in order, capping at each invoice balance
+    // Fill txn_amount across invoices in order. The cash leg is capped at
+    // balance − withheld so cash + TDS + GST-TDS never exceeds the balance.
     let remaining = txnAmtNum;
     const next: Record<string, string> = {};
     for (const inv of invoices) {
       if (remaining <= 0) { next[inv.id] = '0'; continue; }
-      const bal = Math.max(0, balanceFor(inv));
-      const take = Math.min(bal, remaining);
+      const cashRoom = Math.max(0, balanceFor(inv) - withheldFor(inv));
+      const take = Math.min(cashRoom, remaining);
       next[inv.id] = String(Number(take.toFixed(2)));
       remaining -= take;
     }
@@ -2762,6 +2814,7 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
         invoice_id: inv.id,
         amount: Number(allocs[inv.id] || 0),
         tds_pct: Math.max(0, Math.min(10, Number(tdsPcts[inv.id]) || 0)),
+        gst_tds_pct: Math.max(0, Math.min(10, Number(gstTdsPcts[inv.id]) || 0)),
       }))
       .filter(a => a.amount > 0);
 
@@ -2858,7 +2911,8 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
                   <th className="text-left px-3 py-2 font-medium">Site</th>
                   <th className="text-right px-3 py-2 font-medium">Invoice Amt</th>
                   <th className="text-right px-3 py-2 font-medium">Balance</th>
-                  <th className="text-right px-3 py-2 font-medium w-24">TDS %</th>
+                  <th className="text-right px-3 py-2 font-medium w-20">TDS %</th>
+                  <th className="text-right px-3 py-2 font-medium w-20">GST-TDS %</th>
                   <th className="text-right px-3 py-2 font-medium w-36">Allocate (cash)</th>
                 </tr>
               </thead>
@@ -2866,6 +2920,7 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
                 {invoices.map(inv => {
                   const bal = balanceFor(inv);
                   const tds = tdsAmountFor(inv);
+                  const gstTds = gstTdsAmountFor(inv);
                   return (
                     <tr key={inv.id} className="border-t border-gray-50">
                       <td className="px-3 py-2 font-medium text-gray-900">{inv.invoice_no}</td>
@@ -2875,11 +2930,20 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
                       <td className="px-3 py-2 text-right text-gray-700">{formatINR(bal)}</td>
                       <td className="px-3 py-2 text-right">
                         <input type="number" min="0" max="10" step="0.01" value={tdsPcts[inv.id] ?? ''}
-                          onChange={e => setTdsPcts(prev => ({ ...prev, [inv.id]: e.target.value }))}
+                          onChange={e => setWithholding(inv, 'tds', e.target.value)}
                           placeholder="0"
-                          className="w-20 px-2 py-1 border border-gray-200 rounded-md text-sm text-right" />
+                          className="w-16 px-2 py-1 border border-gray-200 rounded-md text-sm text-right" />
                         {tds > 0 && (
                           <div className="text-[11px] text-amber-700 mt-0.5" title="TDS withheld on base amount">−{formatINR(tds)}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <input type="number" min="0" max="10" step="0.01" value={gstTdsPcts[inv.id] ?? ''}
+                          onChange={e => setWithholding(inv, 'gst', e.target.value)}
+                          placeholder="0"
+                          className="w-16 px-2 py-1 border border-gray-200 rounded-md text-sm text-right" />
+                        {gstTds > 0 && (
+                          <div className="text-[11px] text-amber-700 mt-0.5" title="GST-TDS withheld on base amount">−{formatINR(gstTds)}</div>
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">
@@ -2893,21 +2957,27 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
               </tbody>
               <tfoot className="bg-gray-50/60 text-xs">
                 <tr>
-                  <td colSpan={6} className="px-3 py-2 text-right text-gray-500">Cheque / Txn amount (cash)</td>
+                  <td colSpan={7} className="px-3 py-2 text-right text-gray-500">Cheque / Txn amount (cash)</td>
                   <td className="px-3 py-2 text-right font-medium text-gray-900">{formatINR(txnAmtNum)}</td>
                 </tr>
                 <tr>
-                  <td colSpan={6} className="px-3 py-2 text-right text-gray-500">Allocated total (cash)</td>
+                  <td colSpan={7} className="px-3 py-2 text-right text-gray-500">Allocated total (cash)</td>
                   <td className="px-3 py-2 text-right font-medium text-gray-900">{formatINR(allocTotal)}</td>
                 </tr>
                 <tr>
-                  <td colSpan={6} className="px-3 py-2 text-right text-gray-500">Difference</td>
+                  <td colSpan={7} className="px-3 py-2 text-right text-gray-500">Difference</td>
                   <td className={`px-3 py-2 text-right font-medium ${tallied ? 'text-green-700' : 'text-amber-700'}`}>{formatINR(diff)}</td>
                 </tr>
                 {tdsTotal > 0 && (
                   <tr>
-                    <td colSpan={6} className="px-3 py-2 text-right text-gray-500">TDS withheld (settles invoices, no cash)</td>
+                    <td colSpan={7} className="px-3 py-2 text-right text-gray-500">TDS withheld (settles invoices, no cash)</td>
                     <td className="px-3 py-2 text-right font-medium text-amber-700">{formatINR(tdsTotal)}</td>
+                  </tr>
+                )}
+                {gstTdsTotal > 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-3 py-2 text-right text-gray-500">GST-TDS withheld (settles invoices, no cash)</td>
+                    <td className="px-3 py-2 text-right font-medium text-amber-700">{formatINR(gstTdsTotal)}</td>
                   </tr>
                 )}
               </tfoot>

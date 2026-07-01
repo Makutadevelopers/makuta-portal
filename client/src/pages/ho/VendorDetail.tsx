@@ -720,6 +720,15 @@ export default function VendorDetail() {
                                           </span>
                                         </>
                                       )}
+                                      {Number(p.gst_tds_amount) > 0 && (
+                                        <>
+                                          <span className="text-gray-300">·</span>
+                                          <span className="text-amber-600">
+                                            GST-TDS {formatINR(Number(p.gst_tds_amount))}
+                                            {Number(p.gst_tds_pct) > 0 ? ` (${Number(p.gst_tds_pct)}%)` : ''}
+                                          </span>
+                                        </>
+                                      )}
                                     </div>
                                     <span className="font-medium text-green-700 whitespace-nowrap">
                                       {formatINR(Number(p.amount))}

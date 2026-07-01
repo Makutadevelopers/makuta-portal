@@ -29,6 +29,8 @@ export interface VendorDetailPayment {
   amount: number;
   tds_pct: number;
   tds_amount: number;
+  gst_tds_pct: number;
+  gst_tds_amount: number;
 }
 
 export interface VendorDetailInvoice {

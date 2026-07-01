@@ -88,7 +88,7 @@ export async function exportCreditNotes(req: Request, res: Response, next: NextF
 // floored at 0 — matches the balance the app shows everywhere.
 const BALANCE_EXPR = `GREATEST(
   i.invoice_amount
-    - COALESCE((SELECT SUM(amount + tds_amount) FROM payments WHERE invoice_id = i.id), 0)
+    - COALESCE((SELECT SUM(amount + tds_amount + gst_tds_amount) FROM payments WHERE invoice_id = i.id), 0)
     - COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = i.id), 0),
   0)`;
 
@@ -178,7 +178,7 @@ export async function exportVendorInvoices(req: Request, res: Response, next: Ne
     const rows = await query<VendorInvoiceExportRow>(
       `SELECT TO_CHAR(i.invoice_date, 'YYYY-MM-DD') AS invoice_date, i.invoice_no, i.po_number,
               i.purpose, i.site, i.invoice_amount::text,
-              COALESCE((SELECT SUM(amount + tds_amount) FROM payments WHERE invoice_id = i.id), 0)::text AS total_paid,
+              COALESCE((SELECT SUM(amount + tds_amount + gst_tds_amount) FROM payments WHERE invoice_id = i.id), 0)::text AS total_paid,
               ${BALANCE_EXPR}::text AS balance,
               i.payment_status,
               TO_CHAR((SELECT MAX(payment_date) FROM payments WHERE invoice_id = i.id), 'YYYY-MM-DD') AS last_paid_date

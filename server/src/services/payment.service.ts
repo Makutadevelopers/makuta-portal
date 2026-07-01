@@ -29,12 +29,12 @@ export function paymentStatusCase(alias: string): string {
   // payments.tds_amount defaults to 0 (migration 027) so pre-TDS rows
   // and TDS-aware rows both work without special-casing.
   return `CASE
-    WHEN (SELECT COALESCE(SUM(amount + tds_amount), 0) FROM payments WHERE invoice_id = ${alias}.id)
+    WHEN (SELECT COALESCE(SUM(amount + tds_amount + gst_tds_amount), 0) FROM payments WHERE invoice_id = ${alias}.id)
          >= ${alias}.invoice_amount
             - (SELECT COALESCE(SUM(allocated_amount), 0) FROM credit_note_allocations WHERE invoice_id = ${alias}.id)
             - 1
       THEN 'Paid'
-    WHEN (SELECT COALESCE(SUM(amount + tds_amount), 0) FROM payments WHERE invoice_id = ${alias}.id) > 0
+    WHEN (SELECT COALESCE(SUM(amount + tds_amount + gst_tds_amount), 0) FROM payments WHERE invoice_id = ${alias}.id) > 0
       OR (SELECT COALESCE(SUM(allocated_amount), 0) FROM credit_note_allocations WHERE invoice_id = ${alias}.id) > 0
       THEN 'Partial'
     ELSE 'Not Paid'

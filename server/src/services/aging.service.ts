@@ -63,7 +63,7 @@ export async function getAgingData(siteFilter?: string): Promise<{
        -- TDS settles the invoice from the vendor's POV, so it counts toward
        -- total_paid here (same rule as paymentStatusCase). Cashflow reports
        -- still sum just amount because TDS doesn't leave the business.
-       SELECT invoice_id, SUM(amount + tds_amount) AS total_paid
+       SELECT invoice_id, SUM(amount + tds_amount + gst_tds_amount) AS total_paid
        FROM payments
        GROUP BY invoice_id
      ) p ON p.invoice_id = i.id
