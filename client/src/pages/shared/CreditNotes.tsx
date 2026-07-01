@@ -22,6 +22,7 @@ import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
+import { useTypeaheadKeyboard } from '../../hooks/useTypeaheadKeyboard';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import ExportButton from '../../components/shared/ExportButton';
 
@@ -287,6 +288,14 @@ function CreditNoteForm({
     if (v) setVendorName(v.name);
   }
 
+  const vendorMatches = vendors.filter((v) => v.name.toLowerCase().includes(vendorSearch.toLowerCase()));
+  const vendorKbd = useTypeaheadKeyboard({
+    items: vendorMatches,
+    open: !!vendorSearch,
+    onSelect: (v) => { handleVendorSelect(v.id); setVendorSearch(''); },
+    onClose: () => setVendorSearch(''),
+  });
+
   function addAllocationRow() {
     setAllocations((a) => [...a, { invoice_id: '', allocated_amount: '' }]);
   }
@@ -396,21 +405,21 @@ function CreditNoteForm({
                   setVendorName('');
                 }
               }}
+              onKeyDown={vendorKbd.onKeyDown}
               placeholder={vendorName || 'Type to search vendor...'}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
             {vendorSearch && (
               <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                {vendors
-                  .filter((v) => v.name.toLowerCase().includes(vendorSearch.toLowerCase()))
-                  .map((v) => (
+                {vendorMatches.map((v, i) => (
                     <div
                       key={v.id}
+                      ref={vendorKbd.itemRef(i)}
                       onMouseDown={() => {
                         handleVendorSelect(v.id);
                         setVendorSearch('');
                       }}
-                      className="px-3 py-2 hover:bg-blue-50 cursor-pointer"
+                      className={`px-3 py-2 cursor-pointer ${vendorKbd.isActive(i) ? 'bg-blue-50' : 'hover:bg-blue-50'}`}
                     >
                       <span className="text-sm text-gray-900">{v.name}</span>
                     </div>
