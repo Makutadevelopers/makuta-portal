@@ -282,7 +282,7 @@ export default function BankReconciliation() {
                         </span>
                         {editingDateId === r.id && (
                           <div
-                            className="absolute z-30 left-2 top-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 w-max"
+                            className="absolute z-40 left-2 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 w-max"
                             onClick={e => e.stopPropagation()}
                           >
                             <div className="flex items-center gap-1.5">
