@@ -6,6 +6,8 @@ import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useIsMobile } from '../../hooks/useIsMobile';
+import { MobileCard, CardField } from '../../components/ui/MobileCard';
 
 export default function PaymentAging() {
   const [site, setSite] = useState('All');
@@ -178,6 +180,7 @@ function AgingTable({ title, subtitle, rows, isOverdue, stickyTop }: {
   // overlapping it. The <th> itself uses top:0 inside the scroll context.
   title: string; subtitle: string; rows: AgingRow[]; isOverdue: boolean; stickyTop: number;
 }) {
+  const isMobile = useIsMobile();
   const [sortCol, setSortCol] = useState<string>('due_date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(isOverdue ? 'desc' : 'asc');
 
@@ -213,8 +216,38 @@ function AgingTable({ title, subtitle, rows, isOverdue, stickyTop }: {
           <span className={`text-sm font-medium ${accent}`}>{title}</span>
           <span className="text-xs text-gray-400 ml-3">{subtitle}</span>
         </div>
-        <span className="text-[11px] text-gray-400">Click column headers to sort</span>
+        {!isMobile && <span className="text-[11px] text-gray-400">Click column headers to sort</span>}
       </div>
+      {isMobile ? (
+        <div className="space-y-2">
+          {sorted.map(r => (
+            <MobileCard
+              key={r.invoice_id}
+              header={
+                <>
+                  <span className="font-medium text-gray-900 truncate" title={r.vendor_name}>{r.vendor_name}</span>
+                  <span className="text-red-600 font-medium whitespace-nowrap">{formatINR(Number(r.balance))}</span>
+                </>
+              }
+            >
+              <CardField label="Invoice No" value={r.invoice_no} />
+              <CardField label="Invoice Date" value={formatDate(r.invoice_date)} />
+              <CardField label="Due Date" value={formatDate(r.due_date)} />
+              <CardField
+                label={isOverdue ? 'Days Past Due' : 'Days Left'}
+                value={isOverdue ? `${r.days_past_due} days` : `${r.days_left} days`}
+                valueClass={`font-medium ${isOverdue ? 'text-red-600' : 'text-green-600'}`}
+              />
+              <CardField label="Site" value={r.site} />
+              <CardField label="Category" value="—" />
+              <CardField label="Invoice Amt" value={formatINR(Number(r.invoice_amount))} />
+            </MobileCard>
+          ))}
+          {rows.length === 0 && (
+            <div className="px-4 py-10 text-center text-gray-400 text-sm">No invoices in this category.</div>
+          )}
+        </div>
+      ) : (
       <div
         className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
         style={{ maxHeight: `calc(100vh - ${stickyTop + 200}px)` }}
@@ -281,6 +314,7 @@ function AgingTable({ title, subtitle, rows, isOverdue, stickyTop }: {
           )}
         </table>
       </div>
+      )}
     </div>
   );
 }

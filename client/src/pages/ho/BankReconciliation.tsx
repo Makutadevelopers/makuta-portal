@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, ReactNode, useEffect, useMemo, useState } from 'react';
 import AppShell from '../../components/layout/AppShell';
 import ExportButton from '../../components/shared/ExportButton';
 import { getBankReconciliation, verifyBankTxn, updateBankTxnDate, BankReconciliationRow, BankTxnAllocation } from '../../api/reconciliation';
@@ -6,6 +6,8 @@ import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useAuth } from '../../hooks/useAuth';
+import { useIsMobile } from '../../hooks/useIsMobile';
+import { MobileCard, CardField } from '../../components/ui/MobileCard';
 
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -38,6 +40,7 @@ export default function BankReconciliation() {
   const [dateError, setDateError] = useState<string | null>(null);
   const { user } = useAuth();
   const canEditDate = user?.role === 'ho';
+  const isMobile = useIsMobile();
   const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
   // `silent` re-fetches in the background without flashing the page spinner /
@@ -145,6 +148,150 @@ export default function BankReconciliation() {
   const untally = filtered.filter(r => !r.tally_ok).length;
   const verifiedCount = filtered.filter(r => r.verified_at).length;
 
+  // ---- Per-row rendering shared by the desktop table and the mobile cards ----
+  // Enter edit mode for a row's cheque date (same state the table uses).
+  function beginEditDate(r: BankReconciliationRow) {
+    if (editingDateId === r.id) return;
+    setEditingDateId(r.id);
+    setDraftDate((r.txn_date ?? '').slice(0, 10));
+    setDateError(null);
+  }
+
+  // The floating date-editor popover. Rendered inside a `relative` wrapper by
+  // both layouts so its `absolute` positioning/logic stays exactly as before.
+  function renderDateEditor(r: BankReconciliationRow): ReactNode {
+    if (editingDateId !== r.id) return null;
+    return (
+      <div
+        className="absolute z-40 left-2 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 w-max"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-1.5">
+          <input
+            type="date"
+            autoFocus
+            value={draftDate}
+            disabled={savingId === r.id}
+            onChange={e => setDraftDate(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); saveDate(r); }
+              if (e.key === 'Escape') { setEditingDateId(null); setDateError(null); }
+            }}
+            className="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-200"
+          />
+          <button
+            onClick={() => saveDate(r)}
+            disabled={savingId === r.id}
+            className="px-3 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {savingId === r.id ? '…' : 'Save'}
+          </button>
+          <button
+            onClick={() => { setEditingDateId(null); setDateError(null); }}
+            className="px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700"
+            title="Cancel"
+          >
+            ✕
+          </button>
+        </div>
+        {dateError && (
+          <div className="mt-1 text-[11px] text-red-600 max-w-[240px] whitespace-normal">{dateError}</div>
+        )}
+      </div>
+    );
+  }
+
+  // The Tallied / Mismatch pill.
+  function renderTallyBadge(r: BankReconciliationRow): ReactNode {
+    return r.tally_ok ? (
+      <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-green-50 text-green-700">Tallied</span>
+    ) : (
+      <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-amber-50 text-amber-700">Mismatch</span>
+    );
+  }
+
+  // The verified checkbox — shares toggleVerified() with the table.
+  function renderVerifiedCheckbox(r: BankReconciliationRow): ReactNode {
+    return (
+      <label
+        className="inline-flex items-center justify-center cursor-pointer"
+        title={r.verified_at
+          ? `Verified${r.verified_by_name ? ` by ${r.verified_by_name}` : ''} on ${formatDate(r.verified_at)}`
+          : 'Tick once checked against the bank statement'}
+        onClick={e => e.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          checked={!!r.verified_at}
+          disabled={savingId === r.id}
+          onChange={() => toggleVerified(r)}
+          className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-200 cursor-pointer disabled:opacity-50"
+        />
+      </label>
+    );
+  }
+
+  // The expanded per-invoice allocations block (identical for table + card).
+  function renderAllocations(r: BankReconciliationRow): ReactNode {
+    return (
+      <>
+        <div className="text-xs font-medium text-gray-500 mb-2">Invoices paid by this transaction</div>
+        {r.allocations.length === 0 ? (
+          <div className="text-xs text-gray-400">No linked invoices.</div>
+        ) : (
+          <table className="w-full text-xs bg-white rounded-lg border border-gray-100">
+            <thead className="text-gray-500">
+              <tr>
+                <th className="text-left px-3 py-2 font-medium">Invoice No</th>
+                <th className="text-left px-3 py-2 font-medium">Vendor</th>
+                <th className="text-left px-3 py-2 font-medium">Site</th>
+                <th className="text-right px-3 py-2 font-medium">Invoice Amount</th>
+                <th className="text-right px-3 py-2 font-medium">Allocated</th>
+                <th className="text-center px-3 py-2 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.allocations.map(a => (
+                <tr key={a.payment_id} className="border-t border-gray-50">
+                  <td className="px-3 py-2 font-medium text-gray-900">{a.invoice_no}</td>
+                  <td className="px-3 py-2 text-gray-700">{a.vendor_name}</td>
+                  <td className="px-3 py-2 text-gray-600">{a.site}</td>
+                  <td className="px-3 py-2 text-right text-gray-700">{formatINR(a.invoice_amount)}</td>
+                  <td className="px-3 py-2 text-right font-medium text-gray-900">{formatINR(a.allocated_amount)}</td>
+                  <td className="px-3 py-2 text-center">
+                    <span className={`inline-flex px-2 py-0.5 text-[10px] rounded-full ${
+                      a.payment_status === 'Paid' ? 'bg-green-50 text-green-700' :
+                      a.payment_status === 'Partial' ? 'bg-amber-50 text-amber-700' :
+                      'bg-gray-50 text-gray-600'
+                    }`}>{a.payment_status}</span>
+                  </td>
+                </tr>
+              ))}
+              <tr className="border-t-2 border-gray-200 bg-gray-50/60">
+                <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Cheque / Txn Amount</td>
+                <td className="px-3 py-2 text-right font-medium text-gray-900">{formatINR(r.txn_amount)}</td>
+                <td></td>
+              </tr>
+              <tr className="bg-gray-50/60">
+                <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Allocated Total</td>
+                <td className="px-3 py-2 text-right font-medium text-gray-900">{formatINR(r.allocated_total)}</td>
+                <td></td>
+              </tr>
+              <tr className="bg-gray-50/60">
+                <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Balance (un-allocated)</td>
+                <td className={`px-3 py-2 text-right font-medium ${r.tally_ok ? 'text-green-700' : 'text-amber-700'}`}>{formatINR(r.balance)}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+        {r.remarks && (
+          <div className="mt-3 text-xs text-gray-500"><span className="font-medium">Remarks:</span> {r.remarks}</div>
+        )}
+      </>
+    );
+  }
+
   return (
     <AppShell>
       <div
@@ -213,7 +360,79 @@ export default function BankReconciliation() {
         <Kpi label="Verified vs statement" value={`${verifiedCount} / ${filtered.length}`} tone={filtered.length > 0 && verifiedCount === filtered.length ? 'ok' : 'neutral'} />
       </div>
 
-      {/* Table */}
+      {/* Mobile: card list. Desktop: the wide table below. */}
+      {isMobile ? (
+        <div className="space-y-2">
+          {loading ? (
+            <div className="px-4 py-10 text-center text-sm text-gray-400">Loading...</div>
+          ) : filtered.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-gray-400">No transactions yet</div>
+          ) : filtered.map(r => {
+            const isOpen = expanded === r.id;
+            return (
+              <MobileCard
+                key={r.id}
+                selected={isOpen}
+                accentClass={!r.tally_ok ? 'border-l-4 border-amber-400' : undefined}
+                header={
+                  <>
+                    <button
+                      type="button"
+                      className="min-w-0 text-left"
+                      onClick={() => setExpanded(isOpen ? null : r.id)}
+                    >
+                      <div className="font-medium text-gray-900 truncate">{r.txn_ref}</div>
+                      <div className="text-xs text-gray-500 truncate">{vendorSummary(r.allocations)}</div>
+                    </button>
+                    <div className="font-medium text-gray-900 text-right flex-shrink-0">{formatINR(r.txn_amount)}</div>
+                  </>
+                }
+              >
+                <div className="relative">
+                  <CardField
+                    label="Transaction Date"
+                    value={
+                      <span
+                        className={canEditDate ? 'cursor-pointer hover:underline decoration-dotted underline-offset-2' : undefined}
+                        onClick={canEditDate ? (e => { e.stopPropagation(); beginEditDate(r); }) : undefined}
+                      >
+                        {formatDate(r.txn_date)}
+                      </span>
+                    }
+                  />
+                  {renderDateEditor(r)}
+                </div>
+                <CardField label="Payment Type" value={r.txn_type} />
+                <CardField label="Bank" value={r.bank ?? '—'} />
+                <CardField label="Allocated" value={formatINR(r.allocated_total)} />
+                <CardField
+                  label="Balance"
+                  value={formatINR(r.balance)}
+                  valueClass={r.tally_ok ? 'text-gray-400' : 'text-amber-600 font-medium'}
+                />
+                <CardField label="Tally" value={renderTallyBadge(r)} />
+                <div className="flex items-center justify-between gap-3 text-xs pt-1">
+                  <button
+                    type="button"
+                    className="text-blue-600"
+                    onClick={() => setExpanded(isOpen ? null : r.id)}
+                  >
+                    {r.allocation_count} {r.allocation_count === 1 ? 'invoice' : 'invoices'} {isOpen ? '▲' : '▼'}
+                  </button>
+                  <span className="inline-flex items-center gap-1.5 text-gray-400">
+                    Verified {renderVerifiedCheckbox(r)}
+                  </span>
+                </div>
+                {isOpen && (
+                  <div className="mt-2 rounded-lg bg-gray-50/80 p-3">
+                    {renderAllocations(r)}
+                  </div>
+                )}
+              </MobileCard>
+            );
+          })}
+        </div>
+      ) : (
       <div
         className="bg-white border border-gray-100 rounded-xl overflow-y-auto overflow-x-hidden"
         style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
@@ -265,13 +484,7 @@ export default function BankReconciliation() {
                       <td className="px-4 py-3 text-gray-500">{idx + 1}</td>
                       <td
                         className="px-4 py-3 text-gray-700 relative"
-                        onClick={canEditDate ? (e => {
-                          e.stopPropagation();
-                          if (editingDateId === r.id) return;
-                          setEditingDateId(r.id);
-                          setDraftDate((r.txn_date ?? '').slice(0, 10));
-                          setDateError(null);
-                        }) : undefined}
+                        onClick={canEditDate ? (e => { e.stopPropagation(); beginEditDate(r); }) : undefined}
                         title={canEditDate ? 'Click to change the cheque date — linked payments will follow' : undefined}
                       >
                         {/* The date stays in the cell so the column never reflows; the
@@ -280,44 +493,7 @@ export default function BankReconciliation() {
                         <span className={canEditDate ? 'cursor-pointer hover:underline decoration-dotted underline-offset-2' : undefined}>
                           {formatDate(r.txn_date)}
                         </span>
-                        {editingDateId === r.id && (
-                          <div
-                            className="absolute z-40 left-2 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 w-max"
-                            onClick={e => e.stopPropagation()}
-                          >
-                            <div className="flex items-center gap-1.5">
-                              <input
-                                type="date"
-                                autoFocus
-                                value={draftDate}
-                                disabled={savingId === r.id}
-                                onChange={e => setDraftDate(e.target.value)}
-                                onKeyDown={e => {
-                                  if (e.key === 'Enter') { e.preventDefault(); saveDate(r); }
-                                  if (e.key === 'Escape') { setEditingDateId(null); setDateError(null); }
-                                }}
-                                className="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-200"
-                              />
-                              <button
-                                onClick={() => saveDate(r)}
-                                disabled={savingId === r.id}
-                                className="px-3 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-                              >
-                                {savingId === r.id ? '…' : 'Save'}
-                              </button>
-                              <button
-                                onClick={() => { setEditingDateId(null); setDateError(null); }}
-                                className="px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700"
-                                title="Cancel"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                            {dateError && (
-                              <div className="mt-1 text-[11px] text-red-600 max-w-[240px] whitespace-normal">{dateError}</div>
-                            )}
-                          </div>
-                        )}
+                        {renderDateEditor(r)}
                       </td>
                       <td className="px-4 py-3 text-gray-700">{r.txn_type}</td>
                       <td className="px-4 py-3 font-medium text-gray-900 truncate">{r.txn_ref}</td>
@@ -328,86 +504,16 @@ export default function BankReconciliation() {
                       <td className={`px-4 py-3 text-right font-medium ${r.tally_ok ? 'text-gray-400' : 'text-amber-600'}`}>{formatINR(r.balance)}</td>
                       <td className="px-4 py-3 text-center text-gray-600">{r.allocation_count}</td>
                       <td className="px-4 py-3 text-center">
-                        {r.tally_ok ? (
-                          <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-green-50 text-green-700">Tallied</span>
-                        ) : (
-                          <span className="inline-flex items-center px-2 py-0.5 text-[11px] rounded-full bg-amber-50 text-amber-700">Mismatch</span>
-                        )}
+                        {renderTallyBadge(r)}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <label
-                          className="inline-flex items-center justify-center cursor-pointer"
-                          title={r.verified_at
-                            ? `Verified${r.verified_by_name ? ` by ${r.verified_by_name}` : ''} on ${formatDate(r.verified_at)}`
-                            : 'Tick once checked against the bank statement'}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={!!r.verified_at}
-                            disabled={savingId === r.id}
-                            onChange={() => toggleVerified(r)}
-                            className="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-200 cursor-pointer disabled:opacity-50"
-                          />
-                        </label>
+                        {renderVerifiedCheckbox(r)}
                       </td>
                     </tr>
                     {isOpen && (
                       <tr className="bg-gray-50/80">
                         <td colSpan={12} className="px-6 py-4">
-                          <div className="text-xs font-medium text-gray-500 mb-2">Invoices paid by this transaction</div>
-                          {r.allocations.length === 0 ? (
-                            <div className="text-xs text-gray-400">No linked invoices.</div>
-                          ) : (
-                            <table className="w-full text-xs bg-white rounded-lg border border-gray-100">
-                              <thead className="text-gray-500">
-                                <tr>
-                                  <th className="text-left px-3 py-2 font-medium">Invoice No</th>
-                                  <th className="text-left px-3 py-2 font-medium">Vendor</th>
-                                  <th className="text-left px-3 py-2 font-medium">Site</th>
-                                  <th className="text-right px-3 py-2 font-medium">Invoice Amount</th>
-                                  <th className="text-right px-3 py-2 font-medium">Allocated</th>
-                                  <th className="text-center px-3 py-2 font-medium">Status</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {r.allocations.map(a => (
-                                  <tr key={a.payment_id} className="border-t border-gray-50">
-                                    <td className="px-3 py-2 font-medium text-gray-900">{a.invoice_no}</td>
-                                    <td className="px-3 py-2 text-gray-700">{a.vendor_name}</td>
-                                    <td className="px-3 py-2 text-gray-600">{a.site}</td>
-                                    <td className="px-3 py-2 text-right text-gray-700">{formatINR(a.invoice_amount)}</td>
-                                    <td className="px-3 py-2 text-right font-medium text-gray-900">{formatINR(a.allocated_amount)}</td>
-                                    <td className="px-3 py-2 text-center">
-                                      <span className={`inline-flex px-2 py-0.5 text-[10px] rounded-full ${
-                                        a.payment_status === 'Paid' ? 'bg-green-50 text-green-700' :
-                                        a.payment_status === 'Partial' ? 'bg-amber-50 text-amber-700' :
-                                        'bg-gray-50 text-gray-600'
-                                      }`}>{a.payment_status}</span>
-                                    </td>
-                                  </tr>
-                                ))}
-                                <tr className="border-t-2 border-gray-200 bg-gray-50/60">
-                                  <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Cheque / Txn Amount</td>
-                                  <td className="px-3 py-2 text-right font-medium text-gray-900">{formatINR(r.txn_amount)}</td>
-                                  <td></td>
-                                </tr>
-                                <tr className="bg-gray-50/60">
-                                  <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Allocated Total</td>
-                                  <td className="px-3 py-2 text-right font-medium text-gray-900">{formatINR(r.allocated_total)}</td>
-                                  <td></td>
-                                </tr>
-                                <tr className="bg-gray-50/60">
-                                  <td colSpan={4} className="px-3 py-2 text-right text-gray-500">Balance (un-allocated)</td>
-                                  <td className={`px-3 py-2 text-right font-medium ${r.tally_ok ? 'text-green-700' : 'text-amber-700'}`}>{formatINR(r.balance)}</td>
-                                  <td></td>
-                                </tr>
-                              </tbody>
-                            </table>
-                          )}
-                          {r.remarks && (
-                            <div className="mt-3 text-xs text-gray-500"><span className="font-medium">Remarks:</span> {r.remarks}</div>
-                          )}
+                          {renderAllocations(r)}
                         </td>
                       </tr>
                     )}
@@ -418,6 +524,7 @@ export default function BankReconciliation() {
           </table>
         </div>
       </div>
+      )}
     </AppShell>
   );
 }

@@ -3,10 +3,13 @@ import { useDashboardData } from '../../hooks/useDashboardData';
 import { useInvoices } from '../../hooks/useInvoices';
 import { formatINR, formatDate } from '../../utils/formatters';
 import AppShell from '../../components/layout/AppShell';
+import { useIsMobile } from '../../hooks/useIsMobile';
+import { MobileCard, CardField } from '../../components/ui/MobileCard';
 
 export default function MgmtOverview() {
   const data = useDashboardData();
   const { invoices } = useInvoices();
+  const isMobile = useIsMobile();
 
   const disputeSummary = useMemo(() => {
     const disputed = invoices.filter(i => i.disputed);
@@ -69,6 +72,55 @@ export default function MgmtOverview() {
                 <div className="text-sm font-medium text-gray-900">Site-wise Position</div>
                 <div className="text-[11px] text-gray-500 mt-0.5">Invoiced, paid and outstanding balance per project site</div>
               </div>
+              {isMobile ? (
+                <div className="p-3 space-y-2">
+                  {data.siteRows.map(r => (
+                    <MobileCard
+                      key={r.site}
+                      header={
+                        <>
+                          <div className="min-w-0">
+                            <div className="font-medium text-gray-900 truncate">{r.site}</div>
+                            <div className="mt-1.5 h-1 rounded-full bg-gray-100 w-24">
+                              <div className="h-full rounded-full bg-green-500" style={{ width: `${r.settlementPct}%` }} />
+                            </div>
+                            <div className="text-[10px] text-gray-400 mt-0.5">{r.settlementPct}% settled</div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className="text-[10px] text-gray-400">Outstanding</div>
+                            <div className="text-[15px] font-semibold text-[#1a3c5e]">{formatINR(r.outstanding)}</div>
+                          </div>
+                        </>
+                      }
+                    >
+                      <CardField label="Invoices" value={r.invoiceCount} />
+                      <CardField label="Total Invoiced" value={formatINR(r.totalInvoiced)} valueClass="font-medium text-gray-900" />
+                      <CardField label="Paid" value={formatINR(r.totalPaid)} valueClass="font-medium text-green-700" />
+                      <CardField
+                        label="Overdue"
+                        value={r.overdue > 0 ? formatINR(r.overdue) : '—'}
+                        valueClass={r.overdue > 0 ? 'font-medium text-red-600' : 'text-gray-400'}
+                      />
+                    </MobileCard>
+                  ))}
+                  <MobileCard
+                    header={
+                      <>
+                        <div className="font-medium text-gray-900">All Sites</div>
+                        <div className="text-right flex-shrink-0">
+                          <div className="text-[10px] text-gray-400">Outstanding</div>
+                          <div className="text-[15px] font-semibold text-[#1a3c5e]">{formatINR(data.kpis.outstanding)}</div>
+                        </div>
+                      </>
+                    }
+                  >
+                    <CardField label="Invoices" value={data.kpis.invoiceCount} />
+                    <CardField label="Total Invoiced" value={formatINR(data.kpis.totalInvoiced)} valueClass="font-semibold text-gray-900" />
+                    <CardField label="Paid" value={formatINR(data.kpis.totalPaid)} valueClass="font-semibold text-green-700" />
+                    <CardField label="Overdue" value={formatINR(data.kpis.overdueAmount)} valueClass="font-semibold text-red-600" />
+                  </MobileCard>
+                </div>
+              ) : (
               <table className="w-full table-fixed text-[13px]">
                 <colgroup>
                   <col style={{ width: '24%' }} />{/* Site */}
@@ -116,6 +168,7 @@ export default function MgmtOverview() {
                   </tr>
                 </tfoot>
               </table>
+              )}
             </div>
 
             {/* Due soon + Overdue */}
@@ -183,6 +236,35 @@ export default function MgmtOverview() {
                     </div>
                   </div>
                 </div>
+                {isMobile ? (
+                  <div className="p-3 space-y-2">
+                    {[...disputeSummary.major, ...disputeSummary.minor].map(inv => (
+                      <MobileCard
+                        key={inv.id}
+                        accentClass={inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400'}
+                        header={
+                          <>
+                            <div className="font-medium text-gray-900 truncate min-w-0">{inv.vendor_name}</div>
+                            <div className="text-[15px] font-semibold text-gray-900 flex-shrink-0">{formatINR(Number(inv.invoice_amount))}</div>
+                          </>
+                        }
+                      >
+                        <CardField
+                          label="Severity"
+                          value={
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+                              inv.dispute_severity === 'major' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                            }`}>{inv.dispute_severity}</span>
+                          }
+                        />
+                        <CardField label="Invoice" value={inv.invoice_no ?? inv.internal_no ?? '—'} />
+                        <CardField label="Site" value={inv.site} />
+                        <CardField label="Reason" value={inv.dispute_reason ?? '—'} />
+                        <CardField label="Flagged" value={inv.disputed_at ? formatDate(inv.disputed_at) : '—'} />
+                      </MobileCard>
+                    ))}
+                  </div>
+                ) : (
                 <div className="overflow-y-auto overflow-x-hidden">
                   <table className="w-full table-fixed text-[13px]">
                     <colgroup>
@@ -223,6 +305,7 @@ export default function MgmtOverview() {
                     </tbody>
                   </table>
                 </div>
+                )}
               </div>
             )}
           </div>

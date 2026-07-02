@@ -14,6 +14,8 @@ import { useConfirm } from '../../components/ui/ConfirmDialog';
 import PaymentModal from '../../components/shared/PaymentModal';
 import RevertPaymentModal from '../../components/shared/RevertPaymentModal';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
+import { useIsMobile } from '../../hooks/useIsMobile';
+import { MobileCard, CardField } from '../../components/ui/MobileCard';
 
 type StatusFilter = 'All' | 'Paid' | 'Partial' | 'Not Paid';
 type OrderType = 'All' | 'PO' | 'WO';
@@ -52,6 +54,7 @@ export default function VendorDetail() {
   const { notify } = useToast();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const isHO = user?.role === 'ho';
+  const isMobile = useIsMobile();
 
   // `background: true` reloads without the page spinner — used by the on-focus
   // refresh so figures update in place when returning from an edit elsewhere.
@@ -252,6 +255,165 @@ export default function VendorDetail() {
     if (status === 'Paid') return 'bg-green-50 text-green-700 border-green-200';
     if (status === 'Partial') return 'bg-amber-50 text-amber-700 border-amber-200';
     return 'bg-red-50 text-red-700 border-red-200';
+  }
+
+  // Status badge JSX — shared by the desktop cell and the mobile card so the
+  // markup never drifts between the two layouts.
+  function statusBadgeEl(status: string) {
+    return (
+      <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-medium border ${statusBadge(status)}`}>
+        {status}
+      </span>
+    );
+  }
+
+  // Per-row actions. HO-only (site never sees Edit/Pay/Revert/Delete here — the
+  // per-row Delete action is hidden for the site role per project rules, and the
+  // whole menu is gated on isHO to match the desktop table). Returns null for
+  // non-HO so both layouts render nothing.
+  function rowActionsMenu(inv: VendorDetailInvoice) {
+    if (!isHO) return null;
+    if (deletingId === inv.id) {
+      return <span className="text-xs text-gray-400">Deleting…</span>;
+    }
+    return (
+      <ActionsMenu
+        items={[
+          {
+            label: 'Edit',
+            color: 'text-gray-700',
+            onClick: () => navigate(`/invoices?focus=${inv.id}`),
+          },
+          ...(inv.payment_status !== 'Paid' ? [{
+            label: inv.payment_status === 'Not Paid' ? 'Mark Paid' : 'Add Payment',
+            color: 'text-green-600',
+            onClick: () => setPayInvoice(inv),
+          }] : []),
+          ...(inv.payment_status !== 'Not Paid' ? [{
+            label: 'Mark as Not Paid',
+            color: 'text-red-600',
+            onClick: () => setRevertInvoice(inv),
+          }] : []),
+          {
+            label: 'Delete',
+            color: 'text-red-500',
+            onClick: () => handleDelete(inv.id, inv.invoice_no),
+          },
+        ]}
+      />
+    );
+  }
+
+  // Expanded payment + attachment detail — the same content rendered inside the
+  // desktop detail row and below a mobile card when expanded.
+  function expandedDetail(inv: VendorDetailInvoice) {
+    const hasFiles = inv.attachments.length > 0;
+    const hasPayments = inv.payments.length > 0;
+    return (
+      <>
+        {hasPayments && (
+          <div>
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">
+              Payments for invoice {inv.invoice_no || '—'}
+            </div>
+            <div className="space-y-1.5">
+              {inv.payments.map(p => (
+                <div
+                  key={p.id}
+                  className="flex items-center justify-between gap-3 px-3 py-2 bg-white rounded-lg border border-gray-100 text-xs"
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1 text-gray-600 flex-wrap">
+                    <span className="font-medium text-gray-900 whitespace-nowrap">
+                      {formatDate(p.payment_date)}
+                    </span>
+                    <span className="text-gray-300">·</span>
+                    <span>{p.payment_type}</span>
+                    {p.payment_ref && (
+                      <>
+                        <span className="text-gray-300">·</span>
+                        <span>Ref {p.payment_ref}</span>
+                      </>
+                    )}
+                    {p.bank && (
+                      <>
+                        <span className="text-gray-300">·</span>
+                        <span>{p.bank}</span>
+                      </>
+                    )}
+                    {Number(p.tds_amount) > 0 && (
+                      <>
+                        <span className="text-gray-300">·</span>
+                        <span className="text-amber-600">
+                          TDS {formatINR(Number(p.tds_amount))}
+                          {Number(p.tds_pct) > 0 ? ` (${Number(p.tds_pct)}%)` : ''}
+                        </span>
+                      </>
+                    )}
+                    {Number(p.gst_tds_amount) > 0 && (
+                      <>
+                        <span className="text-gray-300">·</span>
+                        <span className="text-amber-600">
+                          GST-TDS {formatINR(Number(p.gst_tds_amount))}
+                          {Number(p.gst_tds_pct) > 0 ? ` (${Number(p.gst_tds_pct)}%)` : ''}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <span className="font-medium text-green-700 whitespace-nowrap">
+                    {formatINR(Number(p.amount))}
+                  </span>
+                </div>
+              ))}
+              <div className="border-t border-gray-200 mt-2 pt-2 flex justify-between text-xs font-medium px-3">
+                <span>Total paid</span>
+                <span className="text-green-700">
+                  {formatINR(Number(inv.invoice_amount) - Number(inv.balance))}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+        {hasFiles && (
+          <div>
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">
+              Attachments for invoice {inv.invoice_no || '—'}
+            </div>
+            <div className="space-y-1.5">
+              {inv.attachments.map(att => (
+                <div
+                  key={att.id}
+                  className="flex items-center justify-between gap-2 px-3 py-2 bg-white rounded-lg border border-gray-100"
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className="text-red-500">&#128196;</span>
+                    <span className="text-sm font-medium text-gray-900 truncate">{att.file_name}</span>
+                    <span className="text-xs text-gray-400 flex-shrink-0">
+                      {att.file_size ? `${Math.round(att.file_size / 1024)} KB` : ''}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <a
+                      href={att.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded"
+                    >
+                      View
+                    </a>
+                    <a
+                      href={`${att.url}${att.url.includes('?') ? '&' : '?'}download=1`}
+                      className="px-2 py-1 text-xs text-green-600 hover:bg-green-50 rounded"
+                    >
+                      Download
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </>
+    );
   }
 
   const scopeSub = anyFilterActive ? 'filtered view' : 'all time';
@@ -538,7 +700,104 @@ export default function VendorDetail() {
           </div>
         )}
 
-        {/* Invoice Table */}
+        {/* Invoice list — mobile card list below the `sm` breakpoint, wide table above */}
+        {isMobile ? (
+          <div className="space-y-2">
+            {filtered.length > 0 && (
+              <label className="flex items-center gap-2 px-1 pb-1 text-xs text-gray-500">
+                <input
+                  type="checkbox"
+                  aria-label="Select all visible invoices"
+                  checked={allFilteredSelected}
+                  ref={el => { if (el) el.indeterminate = !allFilteredSelected && someFilteredSelected; }}
+                  onChange={toggleAllFiltered}
+                  className="cursor-pointer accent-[#1a3c5e]"
+                />
+                Select all ({filtered.length})
+              </label>
+            )}
+            {visible.map(inv => {
+              const expanded = expandedInvoiceId === inv.id;
+              const hasFiles = inv.attachments.length > 0;
+              const hasPayments = inv.payments.length > 0;
+              const canExpand = hasFiles || hasPayments;
+              return (
+                <Fragment key={inv.id}>
+                  <MobileCard
+                    selected={selectedIds.has(inv.id)}
+                    header={
+                      <>
+                        <div className="flex items-start gap-2 min-w-0">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select invoice ${inv.invoice_no || inv.id}`}
+                            checked={selectedIds.has(inv.id)}
+                            onChange={() => toggleRow(inv.id)}
+                            className="mt-0.5 cursor-pointer accent-[#1a3c5e]"
+                          />
+                          <div className="min-w-0">
+                            <div className="font-medium text-gray-900 truncate" title={inv.invoice_no || undefined}>
+                              {inv.invoice_no || '—'}
+                            </div>
+                            <div className="text-[11px] text-gray-400 truncate">
+                              {formatDate(inv.invoice_date)} · {inv.site}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-1.5 flex-shrink-0">
+                          <div className="text-right">
+                            <div className="font-semibold text-gray-900">{formatINR(Number(inv.invoice_amount))}</div>
+                          </div>
+                          {rowActionsMenu(inv)}
+                        </div>
+                      </>
+                    }
+                  >
+                    {statusBadgeEl(inv.payment_status)}
+                    <CardField label="Paid date" value={inv.last_paid_date ? formatDate(inv.last_paid_date) : '—'} />
+                    <CardField label="PO no" value={inv.po_number || '—'} />
+                    <CardField label="Category" value={inv.purpose} />
+                    <CardField
+                      label="Balance"
+                      value={formatINR(Number(inv.balance))}
+                      valueClass={Number(inv.balance) > 0 ? 'text-red-600 font-medium' : 'text-green-600 font-medium'}
+                    />
+                    {canExpand && (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedInvoiceId(expanded ? null : inv.id)}
+                        className="text-xs text-blue-600 hover:underline pt-0.5"
+                      >
+                        {expanded ? 'Hide details' : `Details${hasFiles ? ` · ${inv.attachments.length} file${inv.attachments.length !== 1 ? 's' : ''}` : ''}`}
+                      </button>
+                    )}
+                  </MobileCard>
+                  {expanded && canExpand && (
+                    <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 space-y-4">
+                      {expandedDetail(inv)}
+                    </div>
+                  )}
+                </Fragment>
+              );
+            })}
+            {filtered.length === 0 && (
+              <div className="py-10 text-center text-gray-400 text-sm">
+                {invoices.length === 0 ? 'No invoices for this vendor.' : 'No invoices match the selected filter.'}
+              </div>
+            )}
+            {visible.length < filtered.length && (
+              <div className="py-4 text-center">
+                <button
+                  onClick={() => setVisibleCount(c => c + VENDOR_INVOICE_PAGE_SIZE)}
+                  className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-[#1a3c5e] hover:bg-gray-50"
+                >
+                  Show {Math.min(VENDOR_INVOICE_PAGE_SIZE, filtered.length - visible.length)} more
+                </button>
+                <div className="mt-2 text-xs text-gray-400">Showing {visible.length} of {filtered.length}</div>
+              </div>
+            )}
+          </div>
+        ) : (
         <div className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden">
           <table className="w-full table-fixed text-[13px]">
             {/* Fixed proportional widths (sum 100%) so the table never exceeds
@@ -629,9 +888,7 @@ export default function VendorDetail() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-medium border ${statusBadge(inv.payment_status)}`}>
-                          {inv.payment_status}
-                        </span>
+                        {statusBadgeEl(inv.payment_status)}
                       </td>
                       <td className="px-4 py-3 text-right">
                         {hasFiles ? (
@@ -648,141 +905,14 @@ export default function VendorDetail() {
                       </td>
                       {isHO && (
                         <td className="px-4 py-3 text-right">
-                          {deletingId === inv.id ? (
-                            <span className="text-xs text-gray-400">Deleting…</span>
-                          ) : (
-                            <ActionsMenu
-                              items={[
-                                {
-                                  label: 'Edit',
-                                  color: 'text-gray-700',
-                                  onClick: () => navigate(`/invoices?focus=${inv.id}`),
-                                },
-                                ...(inv.payment_status !== 'Paid' ? [{
-                                  label: inv.payment_status === 'Not Paid' ? 'Mark Paid' : 'Add Payment',
-                                  color: 'text-green-600',
-                                  onClick: () => setPayInvoice(inv),
-                                }] : []),
-                                ...(inv.payment_status !== 'Not Paid' ? [{
-                                  label: 'Mark as Not Paid',
-                                  color: 'text-red-600',
-                                  onClick: () => setRevertInvoice(inv),
-                                }] : []),
-                                {
-                                  label: 'Delete',
-                                  color: 'text-red-500',
-                                  onClick: () => handleDelete(inv.id, inv.invoice_no),
-                                },
-                              ]}
-                            />
-                          )}
+                          {rowActionsMenu(inv)}
                         </td>
                       )}
                     </tr>
                     {expanded && canExpand && (
                       <tr className="bg-gray-50/60 border-t border-gray-100">
                         <td colSpan={isHO ? 13 : 12} className="px-4 py-3 space-y-4">
-                          {hasPayments && (
-                            <div>
-                              <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">
-                                Payments for invoice {inv.invoice_no || '—'}
-                              </div>
-                              <div className="space-y-1.5">
-                                {inv.payments.map(p => (
-                                  <div
-                                    key={p.id}
-                                    className="flex items-center justify-between gap-3 px-3 py-2 bg-white rounded-lg border border-gray-100 text-xs"
-                                  >
-                                    <div className="flex items-center gap-2 min-w-0 flex-1 text-gray-600 flex-wrap">
-                                      <span className="font-medium text-gray-900 whitespace-nowrap">
-                                        {formatDate(p.payment_date)}
-                                      </span>
-                                      <span className="text-gray-300">·</span>
-                                      <span>{p.payment_type}</span>
-                                      {p.payment_ref && (
-                                        <>
-                                          <span className="text-gray-300">·</span>
-                                          <span>Ref {p.payment_ref}</span>
-                                        </>
-                                      )}
-                                      {p.bank && (
-                                        <>
-                                          <span className="text-gray-300">·</span>
-                                          <span>{p.bank}</span>
-                                        </>
-                                      )}
-                                      {Number(p.tds_amount) > 0 && (
-                                        <>
-                                          <span className="text-gray-300">·</span>
-                                          <span className="text-amber-600">
-                                            TDS {formatINR(Number(p.tds_amount))}
-                                            {Number(p.tds_pct) > 0 ? ` (${Number(p.tds_pct)}%)` : ''}
-                                          </span>
-                                        </>
-                                      )}
-                                      {Number(p.gst_tds_amount) > 0 && (
-                                        <>
-                                          <span className="text-gray-300">·</span>
-                                          <span className="text-amber-600">
-                                            GST-TDS {formatINR(Number(p.gst_tds_amount))}
-                                            {Number(p.gst_tds_pct) > 0 ? ` (${Number(p.gst_tds_pct)}%)` : ''}
-                                          </span>
-                                        </>
-                                      )}
-                                    </div>
-                                    <span className="font-medium text-green-700 whitespace-nowrap">
-                                      {formatINR(Number(p.amount))}
-                                    </span>
-                                  </div>
-                                ))}
-                                <div className="border-t border-gray-200 mt-2 pt-2 flex justify-between text-xs font-medium px-3">
-                                  <span>Total paid</span>
-                                  <span className="text-green-700">
-                                    {formatINR(Number(inv.invoice_amount) - Number(inv.balance))}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                          {hasFiles && (
-                          <div>
-                          <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">
-                            Attachments for invoice {inv.invoice_no || '—'}
-                          </div>
-                          <div className="space-y-1.5">
-                            {inv.attachments.map(att => (
-                              <div
-                                key={att.id}
-                                className="flex items-center justify-between gap-2 px-3 py-2 bg-white rounded-lg border border-gray-100"
-                              >
-                                <div className="flex items-center gap-2 min-w-0 flex-1">
-                                  <span className="text-red-500">&#128196;</span>
-                                  <span className="text-sm font-medium text-gray-900 truncate">{att.file_name}</span>
-                                  <span className="text-xs text-gray-400 flex-shrink-0">
-                                    {att.file_size ? `${Math.round(att.file_size / 1024)} KB` : ''}
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-1 flex-shrink-0">
-                                  <a
-                                    href={att.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded"
-                                  >
-                                    View
-                                  </a>
-                                  <a
-                                    href={`${att.url}${att.url.includes('?') ? '&' : '?'}download=1`}
-                                    className="px-2 py-1 text-xs text-green-600 hover:bg-green-50 rounded"
-                                  >
-                                    Download
-                                  </a>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          </div>
-                          )}
+                          {expandedDetail(inv)}
                         </td>
                       </tr>
                     )}
@@ -812,6 +942,7 @@ export default function VendorDetail() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {payInvoice && (
