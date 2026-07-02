@@ -30,6 +30,8 @@ import LineItemsEditor from '../../components/shared/LineItemsEditor';
 import { CreateInvoiceData } from '../../types/invoice';
 import { Vendor } from '../../types/vendor';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
+import { useIsMobile } from '../../hooks/useIsMobile';
+import { MobileCard, CardField } from '../../components/ui/MobileCard';
 import { useTypeaheadKeyboard } from '../../hooks/useTypeaheadKeyboard';
 
 // Render rows in batches so a multi-thousand-row list never paints all at once
@@ -184,6 +186,82 @@ export default function InvoiceList() {
   // Only the first `visibleCount` rows are committed to the DOM; "Show more"
   // raises the window. Filtering/sorting/selection all still work over `filtered`.
   const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+
+  const isMobile = useIsMobile();
+
+  // Per-invoice status badges, docs cell, actions menu, and inline edit form are
+  // shared verbatim between the desktop table cells and the mobile cards so the
+  // two layouts stay in lockstep.
+  const statusBadges = (inv: Invoice) => {
+    const isPaid = inv.payment_status === 'Paid';
+    const isPartial = inv.payment_status === 'Partial';
+    return (
+      <div className="flex items-center gap-1 flex-wrap">
+        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+          isPaid ? 'bg-green-50 text-green-700' : isPartial ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
+        }`}>{inv.payment_status}</span>
+        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+          inv.pushed ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
+        }`}>{inv.pushed ? 'Master' : 'Draft'}</span>
+        {inv.minor_payment && (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-50 text-orange-600">site</span>
+        )}
+        {inv.disputed && (
+          <span
+            className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+              inv.dispute_severity === 'major' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+            }`}
+            title={inv.dispute_reason ?? ''}
+          >
+            Disputed · {inv.dispute_severity}
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const docsCell = (inv: Invoice) => (
+    (inv.attachment_count ?? 0) > 0
+      ? <button onClick={() => setDocsInvoice(inv)} className="text-xs font-medium text-blue-600 hover:underline" title={`${inv.attachment_count} file(s) — click to view`}>{inv.attachment_count} file{(inv.attachment_count ?? 0) > 1 ? 's' : ''}</button>
+      : <span className="text-xs font-medium text-red-500">N/A</span>
+  );
+
+  const rowActionsMenu = (inv: Invoice) => {
+    const isPaid = inv.payment_status === 'Paid';
+    const isPartial = inv.payment_status === 'Partial';
+    const isNotPaid = inv.payment_status === 'Not Paid';
+    return (
+      <ActionsMenu
+        items={[
+          ...(!inv.pushed ? [
+            { label: 'Edit', color: 'text-gray-700', onClick: () => setExpandedEditId(expandedEditId === inv.id ? null : inv.id) },
+            { label: 'Finalize', color: 'text-blue-600', onClick: () => handlePush(inv.id) },
+            { label: 'Delete', color: 'text-red-500', onClick: () => handleDelete(inv) },
+          ] : [
+            { label: 'Undo Finalize', color: 'text-orange-600', onClick: () => handleUndo(inv.id) },
+          ]),
+          ...(isNotPaid ? [{ label: 'Mark Paid', color: 'text-green-600', onClick: () => setPayInvoice(inv) }] : []),
+          ...(isPartial ? [
+            { label: 'Add Payment', color: 'text-green-600', onClick: () => setPayInvoice(inv) },
+            { label: 'Payment History', color: 'text-gray-600', onClick: () => openHistory(inv) },
+          ] : []),
+          ...(isPaid ? [{ label: 'Payment History', color: 'text-gray-600', onClick: () => openHistory(inv) }] : []),
+          ...((isPaid || isPartial) ? [{ label: 'Mark as Not Paid', color: 'text-red-600', onClick: () => setRevertInvoice(inv) }] : []),
+          { label: 'Info / Audit', color: 'text-purple-600', onClick: () => openInfo(inv) },
+        ]}
+      />
+    );
+  };
+
+  const editForm = (inv: Invoice) => (
+    <HOInvoiceForm
+      key={inv.id}
+      vendors={vendors}
+      editInvoice={inv}
+      onCancel={() => setExpandedEditId(null)}
+      onSaved={() => { setExpandedEditId(null); notify('Invoice updated'); patchInvoice(inv.id); }}
+    />
+  );
 
   // ?focus=<id> auto-opens the inline edit form for that invoice — used by
   // VendorDetail's Edit action so HO doesn't have to find the row manually.
@@ -461,8 +539,8 @@ export default function InvoiceList() {
             </button>
             {showFilters && (
               <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowFilters(false)} />
-                <div className="absolute left-0 top-11 z-50 w-80 bg-white border border-gray-200 rounded-xl shadow-xl p-4 space-y-3">
+                <div className="fixed inset-0 z-40 bg-black/20 sm:bg-transparent" onClick={() => setShowFilters(false)} />
+                <div className="fixed inset-x-2 bottom-2 z-50 w-auto max-h-[80vh] overflow-y-auto sm:absolute sm:inset-x-auto sm:bottom-auto sm:left-0 sm:top-11 sm:w-80 sm:max-h-none sm:overflow-visible bg-white border border-gray-200 rounded-xl shadow-xl p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-medium text-gray-900">Filters</div>
                     {activeChips.length > 0 && (
@@ -735,6 +813,92 @@ export default function InvoiceList() {
 
       {loading ? (
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>
+      ) : isMobile ? (
+        <div className="space-y-2">
+          {selectableIds.length > 0 && (
+            <label className="flex items-center gap-2 px-1 pb-1 text-xs text-gray-500">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleSelectAll}
+                className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
+              />
+              Select all drafts ({selectableIds.length})
+            </label>
+          )}
+          {visible.map(inv => {
+            const aging = agingMap.get(inv.id);
+            const isPaid = inv.payment_status === 'Paid';
+            const isOverdue = aging && aging.daysNum > 0;
+            return (
+              <Fragment key={inv.id}>
+                <MobileCard
+                  selected={selected.has(inv.id)}
+                  accentClass={inv.disputed ? (inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400') : ''}
+                  header={
+                    <>
+                      <div className="flex items-start gap-2 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={selected.has(inv.id)}
+                          onChange={() => toggleSelect(inv.id)}
+                          className="mt-0.5 rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
+                        />
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900 truncate" title={inv.vendor_name}>{highlight(inv.vendor_name, search)}</div>
+                          <div className="text-[11px] text-gray-400 truncate">
+                            {inv.invoice_no ? highlight(inv.invoice_no, search) : '—'} · {inv.site}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-1.5 flex-shrink-0">
+                        <div className="text-right">
+                          <div className="font-semibold text-gray-900">{formatINR(Number(inv.invoice_amount))}</div>
+                          {Number(inv.allocated_credits ?? 0) > 0 && (
+                            <div className="text-[10px] text-purple-600">− CN {formatINR(Number(inv.allocated_credits))}</div>
+                          )}
+                        </div>
+                        {rowActionsMenu(inv)}
+                      </div>
+                    </>
+                  }
+                >
+                  {statusBadges(inv)}
+                  <CardField label="Invoice date" value={formatDate(inv.invoice_date)} />
+                  {inv.last_paid_date && <CardField label="Paid date" value={formatDate(inv.last_paid_date)} />}
+                  {inv.po_number && <CardField label="PO no" value={inv.po_number} />}
+                  <CardField label="Category" value={inv.purpose} />
+                  {!isPaid && aging && (
+                    <>
+                      <CardField label="Balance" value={formatINR(aging.balance)} valueClass="text-red-600 font-medium" />
+                      <CardField label="Days" value={aging.daysLabel} valueClass={isOverdue ? 'text-red-600' : 'text-green-600'} />
+                    </>
+                  )}
+                  <CardField label="Docs" value={docsCell(inv)} />
+                </MobileCard>
+                {expandedEditId === inv.id && (
+                  <div className="rounded-xl border border-blue-100 bg-blue-50/30 p-3">
+                    {editForm(inv)}
+                  </div>
+                )}
+              </Fragment>
+            );
+          })}
+          {filtered.length === 0 && (
+            <div className="py-10 text-center text-gray-400 text-sm">No invoices match your filters.</div>
+          )}
+          {visible.length < filtered.length && (
+            <div className="pt-2 text-center">
+              <button
+                onClick={() => setVisibleCount(c => c + INVOICE_PAGE_SIZE)}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-[#1a3c5e] hover:bg-gray-50"
+              >
+                Show {Math.min(INVOICE_PAGE_SIZE, filtered.length - visible.length)} more
+              </button>
+              <div className="mt-2 text-xs text-gray-400">Showing {visible.length} of {filtered.length}</div>
+            </div>
+          )}
+        </div>
       ) : (
         <div
           className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
@@ -782,8 +946,6 @@ export default function InvoiceList() {
               {visible.map(inv => {
                 const aging = agingMap.get(inv.id);
                 const isPaid = inv.payment_status === 'Paid';
-                const isPartial = inv.payment_status === 'Partial';
-                const isNotPaid = inv.payment_status === 'Not Paid';
                 const isOverdue = aging && aging.daysNum > 0;
 
                 return (
@@ -825,65 +987,19 @@ export default function InvoiceList() {
                             : '—'}
                       </td>
                       <td className="px-2.5 py-3">
-                        <div className="flex items-center gap-1 flex-wrap">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                            isPaid ? 'bg-green-50 text-green-700' : isPartial ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-700'
-                          }`}>{inv.payment_status}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                            inv.pushed ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
-                          }`}>{inv.pushed ? 'Master' : 'Draft'}</span>
-                          {inv.minor_payment && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-50 text-orange-600">site</span>
-                          )}
-                          {inv.disputed && (
-                            <span
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                inv.dispute_severity === 'major' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                              }`}
-                              title={inv.dispute_reason ?? ''}
-                            >
-                              Disputed · {inv.dispute_severity}
-                            </span>
-                          )}
-                        </div>
+                        {statusBadges(inv)}
                       </td>
                       <td className="px-2.5 py-3 text-center">
-                        {(inv.attachment_count ?? 0) > 0
-                          ? <button onClick={() => setDocsInvoice(inv)} className="text-xs font-medium text-blue-600 hover:underline" title={`${inv.attachment_count} file(s) — click to view`}>{inv.attachment_count} file{(inv.attachment_count ?? 0) > 1 ? 's' : ''}</button>
-                          : <span className="text-xs font-medium text-red-500">N/A</span>}
+                        {docsCell(inv)}
                       </td>
                       <td className="px-2.5 py-3">
-                        <ActionsMenu
-                          items={[
-                            ...(!inv.pushed ? [
-                              { label: 'Edit', color: 'text-gray-700', onClick: () => setExpandedEditId(expandedEditId === inv.id ? null : inv.id) },
-                              { label: 'Finalize', color: 'text-blue-600', onClick: () => handlePush(inv.id) },
-                              { label: 'Delete', color: 'text-red-500', onClick: () => handleDelete(inv) },
-                            ] : [
-                              { label: 'Undo Finalize', color: 'text-orange-600', onClick: () => handleUndo(inv.id) },
-                            ]),
-                            ...(isNotPaid ? [{ label: 'Mark Paid', color: 'text-green-600', onClick: () => setPayInvoice(inv) }] : []),
-                            ...(isPartial ? [
-                              { label: 'Add Payment', color: 'text-green-600', onClick: () => setPayInvoice(inv) },
-                              { label: 'Payment History', color: 'text-gray-600', onClick: () => openHistory(inv) },
-                            ] : []),
-                            ...(isPaid ? [{ label: 'Payment History', color: 'text-gray-600', onClick: () => openHistory(inv) }] : []),
-                            ...((isPaid || isPartial) ? [{ label: 'Mark as Not Paid', color: 'text-red-600', onClick: () => setRevertInvoice(inv) }] : []),
-                            { label: 'Info / Audit', color: 'text-purple-600', onClick: () => openInfo(inv) },
-                          ]}
-                        />
+                        {rowActionsMenu(inv)}
                       </td>
                     </tr>
                     {expandedEditId === inv.id && (
                       <tr className="border-t border-blue-100 bg-blue-50/30">
                         <td colSpan={14} className="px-2 py-4">
-                          <HOInvoiceForm
-                            key={inv.id}
-                            vendors={vendors}
-                            editInvoice={inv}
-                            onCancel={() => setExpandedEditId(null)}
-                            onSaved={() => { setExpandedEditId(null); notify('Invoice updated'); patchInvoice(inv.id); }}
-                          />
+                          {editForm(inv)}
                         </td>
                       </tr>
                     )}

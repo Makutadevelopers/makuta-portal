@@ -23,6 +23,8 @@ import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { normaliseSearch, highlight, amountMatchesSearch } from '../../utils/searchHighlight';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useTypeaheadKeyboard } from '../../hooks/useTypeaheadKeyboard';
+import { useIsMobile } from '../../hooks/useIsMobile';
+import { MobileCard, CardField } from '../../components/ui/MobileCard';
 
 const MINOR_LIMIT = 50000;
 
@@ -179,6 +181,75 @@ export default function MyInvoices() {
   // Window the rendered rows; "Show more" reveals the next batch.
   const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
 
+  const isMobile = useIsMobile();
+
+  // Per-invoice status badges, row actions, and the inline edit form are shared
+  // verbatim between the desktop table cells and the mobile cards so the two
+  // layouts can never drift apart.
+  const statusBadges = (inv: Invoice) => (
+    <div className="flex items-center gap-1 flex-wrap">
+      <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+        inv.pushed ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
+      }`}>{inv.pushed ? 'Finalized' : 'Draft'}</span>
+      {inv.disputed && (
+        <span
+          className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+            inv.dispute_severity === 'major' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+          }`}
+          title={inv.dispute_reason ?? ''}
+        >
+          Disputed · {inv.dispute_severity}
+        </span>
+      )}
+      {inv.payment_status && (() => {
+        const label = inv.payment_status === 'Not Paid' ? 'Pending' : inv.payment_status;
+        const tone =
+          inv.payment_status === 'Paid'    ? 'bg-green-50 text-green-700'   :
+          inv.payment_status === 'Partial' ? 'bg-amber-50 text-amber-700'   :
+                                             'bg-gray-100 text-gray-600';
+        return <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${tone}`}>{label}</span>;
+      })()}
+    </div>
+  );
+
+  const rowActions = (inv: Invoice) => (
+    <div className="flex items-center gap-3">
+      {!inv.pushed && (
+        <span
+          onClick={() => setExpandedEditId(expandedEditId === inv.id ? null : inv.id)}
+          className="text-xs text-blue-600 cursor-pointer hover:underline"
+        >{expandedEditId === inv.id ? 'Close' : 'Edit'}</span>
+      )}
+      {!inv.pushed
+        && inv.payment_status !== 'Paid'
+        && Number(inv.effective_payable ?? inv.invoice_amount) <= MINOR_LIMIT && (
+        <span
+          onClick={() => setPayInv(inv)}
+          className="text-xs text-green-700 cursor-pointer hover:underline"
+          title="Pay this invoice from your petty cash float"
+        >Pay</span>
+      )}
+      {!inv.pushed && (inv.payment_status === 'Paid' || inv.payment_status === 'Partial') && (
+        <span
+          onClick={() => setRevertInv(inv)}
+          className="text-xs text-red-600 cursor-pointer hover:underline"
+          title="Reverse payments (cheque bounce / wrong entry) — sets invoice back to Not Paid"
+        >Mark Not Paid</span>
+      )}
+    </div>
+  );
+
+  const editForm = (inv: Invoice) => (
+    <InvoiceForm
+      key={`edit-${inv.id}`}
+      allowedSites={user?.sites && user.sites.length > 0 ? user.sites : (user?.site ? [user.site] : [])}
+      vendors={vendors}
+      editInvoice={inv}
+      onCancel={() => setExpandedEditId(null)}
+      onSaved={() => { setExpandedEditId(null); notify('Invoice updated'); refresh(); }}
+    />
+  );
+
   // Snap the window back to the first page whenever the result set changes.
   useEffect(() => {
     setVisibleCount(INVOICE_PAGE_SIZE);
@@ -328,13 +399,13 @@ export default function MyInvoices() {
           value={fPurpose}
           onChange={setFPurpose}
           includeAll
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
+          className="w-full sm:w-auto px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
         />
         <input
           type="month"
           value={fMonth}
           onChange={e => setFMonth(e.target.value)}
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200"
+          className="w-full sm:w-auto px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200"
           title={
             sortBy === 'last_paid_date' ? 'Filter by paid month'
             : sortBy === 'created_at' ? 'Filter by added month'
@@ -353,7 +424,7 @@ export default function MyInvoices() {
         <select
           value={sortBy}
           onChange={e => setSortBy(e.target.value as 'invoice_date' | 'created_at' | 'last_paid_date')}
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
+          className="w-full sm:w-auto px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
           title="Sort order"
         >
           <option value="invoice_date">Latest invoice date first</option>
@@ -408,6 +479,83 @@ export default function MyInvoices() {
 
       {loading ? (
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>
+      ) : isMobile ? (
+        <div className="space-y-2">
+          {(() => {
+            const eligible = filtered.filter(i => !i.pushed && i.payment_status !== 'Paid');
+            if (eligible.length === 0) return null;
+            const allSelected = eligible.every(i => selectedIds.has(i.id));
+            return (
+              <label className="flex items-center gap-2 px-1 pb-1 text-xs text-gray-500">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={() => { if (allSelected) clearSelection(); else setSelectedIds(new Set(eligible.map(i => i.id))); }}
+                  className="rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
+                />
+                Select all draft, unpaid ({eligible.length})
+              </label>
+            );
+          })()}
+          {visible.map(inv => (
+            <Fragment key={inv.id}>
+              <MobileCard
+                selected={selectedIds.has(inv.id)}
+                accentClass={inv.disputed ? (inv.dispute_severity === 'major' ? 'border-l-4 border-l-red-500' : 'border-l-4 border-l-amber-400') : ''}
+                header={
+                  <>
+                    <div className="flex items-start gap-2 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(inv.id)}
+                        onChange={() => toggleSelected(inv.id)}
+                        className="mt-0.5 rounded border-gray-300 text-[#1a3c5e] focus:ring-blue-200"
+                      />
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-900 truncate" title={inv.vendor_name}>{highlight(inv.vendor_name, search)}</div>
+                        <div className="text-[11px] text-gray-400 font-mono truncate">
+                          {inv.internal_no ?? '—'}{inv.invoice_no ? ` · ${inv.invoice_no}` : ''}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="font-semibold text-gray-900">{formatINR(Number(inv.invoice_amount))}</div>
+                      {Number(inv.allocated_credits ?? 0) > 0 && (
+                        <div className="text-[10px] text-purple-600">− CN {formatINR(Number(inv.allocated_credits))}</div>
+                      )}
+                    </div>
+                  </>
+                }
+              >
+                {statusBadges(inv)}
+                <CardField label="Invoice date" value={formatDate(inv.invoice_date)} />
+                {inv.last_paid_date && <CardField label="Paid date" value={formatDate(inv.last_paid_date)} />}
+                {inv.po_number && <CardField label="PO no" value={inv.po_number} />}
+                <CardField label="Category" value={inv.purpose} />
+                <div className="pt-1">{rowActions(inv)}</div>
+              </MobileCard>
+              {expandedEditId === inv.id && (
+                <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3">
+                  {editForm(inv)}
+                </div>
+              )}
+            </Fragment>
+          ))}
+          {filtered.length === 0 && (
+            <div className="py-10 text-center text-gray-400 text-sm">No invoices match your filters.</div>
+          )}
+          {visible.length < filtered.length && (
+            <div className="pt-2 text-center">
+              <button
+                onClick={() => setVisibleCount(c => c + INVOICE_PAGE_SIZE)}
+                className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-medium text-[#1a3c5e] hover:bg-gray-50"
+              >
+                Show {Math.min(INVOICE_PAGE_SIZE, filtered.length - visible.length)} more
+              </button>
+              <div className="mt-2 text-xs text-gray-400">Showing {visible.length} of {filtered.length}</div>
+            </div>
+          )}
+        </div>
       ) : (
         <div
           className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
@@ -494,69 +642,16 @@ export default function MyInvoices() {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1 flex-wrap">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                        inv.pushed ? 'bg-green-50 text-green-600' : 'bg-orange-50 text-orange-600'
-                      }`}>{inv.pushed ? 'Finalized' : 'Draft'}</span>
-                      {inv.disputed && (
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                            inv.dispute_severity === 'major' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                          }`}
-                          title={inv.dispute_reason ?? ''}
-                        >
-                          Disputed · {inv.dispute_severity}
-                        </span>
-                      )}
-                      {inv.payment_status && (() => {
-                        const label = inv.payment_status === 'Not Paid' ? 'Pending' : inv.payment_status;
-                        const tone =
-                          inv.payment_status === 'Paid'    ? 'bg-green-50 text-green-700'   :
-                          inv.payment_status === 'Partial' ? 'bg-amber-50 text-amber-700'   :
-                                                             'bg-gray-100 text-gray-600';
-                        return <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${tone}`}>{label}</span>;
-                      })()}
-                    </div>
+                    {statusBadges(inv)}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      {!inv.pushed && (
-                        <span
-                          onClick={() => setExpandedEditId(expandedEditId === inv.id ? null : inv.id)}
-                          className="text-xs text-blue-600 cursor-pointer hover:underline"
-                        >{expandedEditId === inv.id ? 'Close' : 'Edit'}</span>
-                      )}
-                      {!inv.pushed
-                        && inv.payment_status !== 'Paid'
-                        && Number(inv.effective_payable ?? inv.invoice_amount) <= MINOR_LIMIT && (
-                        <span
-                          onClick={() => setPayInv(inv)}
-                          className="text-xs text-green-700 cursor-pointer hover:underline"
-                          title="Pay this invoice from your petty cash float"
-                        >Pay</span>
-                      )}
-                      {!inv.pushed && (inv.payment_status === 'Paid' || inv.payment_status === 'Partial') && (
-                        <span
-                          onClick={() => setRevertInv(inv)}
-                          className="text-xs text-red-600 cursor-pointer hover:underline"
-                          title="Reverse payments (cheque bounce / wrong entry) — sets invoice back to Not Paid"
-                        >Mark Not Paid</span>
-                      )}
-                      {/* Duplicate action hidden for now — re-enable if/when needed. */}
-                    </div>
+                    {rowActions(inv)}
                   </td>
                 </tr>
                 {expandedEditId === inv.id && (
                   <tr className="bg-gray-50/60 border-t border-gray-100">
                     <td colSpan={12} className="px-4 py-4">
-                      <InvoiceForm
-                        key={`edit-${inv.id}`}
-                        allowedSites={user?.sites && user.sites.length > 0 ? user.sites : (user?.site ? [user.site] : [])}
-                        vendors={vendors}
-                        editInvoice={inv}
-                        onCancel={() => setExpandedEditId(null)}
-                        onSaved={() => { setExpandedEditId(null); notify('Invoice updated'); refresh(); }}
-                      />
+                      {editForm(inv)}
                     </td>
                   </tr>
                 )}
