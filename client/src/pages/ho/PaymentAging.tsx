@@ -9,14 +9,26 @@ import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
 export default function PaymentAging() {
   const [site, setSite] = useState('All');
+  const [vendorFilter, setVendorFilter] = useState('');
+  const [activeTab, setActiveTab] = useState<'within' | 'overdue'>('within');
   const [exporting, setExporting] = useState(false);
   const { notify } = useToast();
   const { withinTerms, overdue, loading } = useAgingCalc(site);
   const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
-  const totalOutstanding = [...withinTerms, ...overdue].reduce((s, r) => s + Number(r.balance), 0);
-  const withinTotal = withinTerms.reduce((s, r) => s + Number(r.balance), 0);
-  const overdueTotal = overdue.reduce((s, r) => s + Number(r.balance), 0);
+  // Vendor filter (client-side): case-insensitive substring so it works both
+  // as a free-text search and an exact pick from the datalist below.
+  const vq = vendorFilter.trim().toLowerCase();
+  const matchesVendor = (r: AgingRow) => !vq || r.vendor_name.toLowerCase().includes(vq);
+  const filteredWithin = withinTerms.filter(matchesVendor);
+  const filteredOverdue = overdue.filter(matchesVendor);
+
+  // Unique vendor names present in the aging data, for the search datalist.
+  const vendorOptions = [...new Set([...withinTerms, ...overdue].map(r => r.vendor_name))].sort((a, b) => a.localeCompare(b));
+
+  const totalOutstanding = [...filteredWithin, ...filteredOverdue].reduce((s, r) => s + Number(r.balance), 0);
+  const withinTotal = filteredWithin.reduce((s, r) => s + Number(r.balance), 0);
+  const overdueTotal = filteredOverdue.reduce((s, r) => s + Number(r.balance), 0);
 
   async function handleExport() {
     setExporting(true);
@@ -42,6 +54,29 @@ export default function PaymentAging() {
             <div className="text-xs text-gray-500 mt-1">Due dates are calculated from each vendor's individual payment terms</div>
           </div>
           <div className="flex items-center gap-2">
+            <div className="relative">
+              <input
+                type="text"
+                value={vendorFilter}
+                onChange={e => setVendorFilter(e.target.value)}
+                list="aging-vendor-list"
+                placeholder="Search / select vendor…"
+                className="w-56 pl-3 pr-7 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              />
+              <datalist id="aging-vendor-list">
+                {vendorOptions.map(v => <option key={v} value={v} />)}
+              </datalist>
+              {vendorFilter && (
+                <button
+                  type="button"
+                  onClick={() => setVendorFilter('')}
+                  title="Clear vendor filter"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-sm px-1"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
             <select value={site} onChange={e => setSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
               <option value="All">All Sites</option>
               {SITES.map(s => <option key={s}>{s}</option>)}
@@ -62,42 +97,58 @@ export default function PaymentAging() {
         <div className="text-gray-500 text-sm py-12 text-center">Loading...</div>
       ) : (
         <>
-          {/* Summary cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+          {/* Summary cards — reflect the active vendor filter */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
             <div className="bg-white rounded-xl border border-gray-100 p-5">
               <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Total Outstanding</div>
               <div className="text-2xl font-semibold text-gray-900">{formatINR(totalOutstanding)}</div>
-              <div className="text-xs text-gray-400 mt-1">{withinTerms.length + overdue.length} invoices pending</div>
+              <div className="text-xs text-gray-400 mt-1">{filteredWithin.length + filteredOverdue.length} invoices pending{vq ? ' · filtered' : ''}</div>
             </div>
             <div className="bg-green-50 rounded-xl border border-green-100 p-5">
               <div className="text-xs font-medium text-green-700 uppercase tracking-wider mb-2">Within Terms</div>
               <div className="text-2xl font-semibold text-green-700">{formatINR(withinTotal)}</div>
-              <div className="text-xs text-green-600 mt-1">{withinTerms.length} — payment not yet due</div>
+              <div className="text-xs text-green-600 mt-1">{filteredWithin.length} — payment not yet due</div>
             </div>
             <div className="bg-red-50 rounded-xl border border-red-100 p-5">
               <div className="text-xs font-medium text-red-700 uppercase tracking-wider mb-2">Overdue</div>
               <div className="text-2xl font-semibold text-red-600">{formatINR(overdueTotal)}</div>
-              <div className="text-xs text-red-500 mt-1">{overdue.length} — past vendor due date</div>
+              <div className="text-xs text-red-500 mt-1">{filteredOverdue.length} — past vendor due date</div>
             </div>
           </div>
 
-          {/* Within Terms table */}
-          <AgingTable
-            title="Within Terms — payment not yet due"
-            subtitle={`${withinTerms.length} invoices · ${formatINR(withinTotal)}`}
-            rows={withinTerms}
-            isOverdue={false}
-            stickyTop={stickyHeaderHeight}
-          />
+          {/* Tabs to switch between the two aging tables */}
+          <div className="flex items-center gap-1 mb-4">
+            <button
+              onClick={() => setActiveTab('within')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg ${activeTab === 'within' ? 'bg-[#1a3c5e] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              Within Terms ({filteredWithin.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('overdue')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg ${activeTab === 'overdue' ? 'bg-[#1a3c5e] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              Overdue ({filteredOverdue.length})
+            </button>
+          </div>
 
-          {/* Overdue table */}
-          <AgingTable
-            title="Overdue — past vendor due date"
-            subtitle={`${overdue.length} invoices · ${formatINR(overdueTotal)}`}
-            rows={overdue}
-            isOverdue={true}
-            stickyTop={stickyHeaderHeight}
-          />
+          {activeTab === 'within' ? (
+            <AgingTable
+              title="Within Terms — payment not yet due"
+              subtitle={`${filteredWithin.length} invoices · ${formatINR(withinTotal)}${vq ? ` · ${vendorFilter.trim()}` : ''}`}
+              rows={filteredWithin}
+              isOverdue={false}
+              stickyTop={stickyHeaderHeight}
+            />
+          ) : (
+            <AgingTable
+              title="Overdue — past vendor due date"
+              subtitle={`${filteredOverdue.length} invoices · ${formatINR(overdueTotal)}${vq ? ` · ${vendorFilter.trim()}` : ''}`}
+              rows={filteredOverdue}
+              isOverdue={true}
+              stickyTop={stickyHeaderHeight}
+            />
+          )}
         </>
       )}
     </AppShell>
