@@ -10,7 +10,7 @@ import { env } from '../config/env';
 export interface JwtPayload {
   id: string;
   name: string;
-  role: 'ho' | 'site' | 'mgmt';
+  role: 'ho' | 'site' | 'mgmt' | 'project_manager';
   site: string | null;       // primary/first site — kept for backwards compat
   sites: string[];           // all sites the user can access (source of truth)
   title: string | null;
@@ -79,4 +79,34 @@ export function userHasSite(user: JwtPayload | undefined, site: string | null | 
   if (!user || !site) return false;
   if (user.role === 'ho' || user.role === 'mgmt') return true;
   return Array.isArray(user.sites) && user.sites.includes(site);
+}
+
+/**
+ * Returns true if this user's data views must be FILTERED to their assigned
+ * sites[]. Site accountants and project managers are both site-scoped; HO and
+ * MD see every site.
+ *
+ * This answers "which ROWS?" and is deliberately separate from "which COLUMNS?"
+ * — a site accountant gets a restricted projection (badge + balance, no aging)
+ * while a project manager gets the full HO projection, but BOTH are row-scoped
+ * to their sites. Use `role === 'site'` (not this helper) when the question is
+ * about hiding amounts/aging.
+ */
+export function isSiteScoped(user: JwtPayload | undefined): boolean {
+  return user?.role === 'site' || user?.role === 'project_manager';
+}
+
+/**
+ * Returns the list of sites a user's data must be constrained to, or
+ * `undefined` if the user has cross-site visibility (HO / MD — no restriction).
+ *
+ * For site-scoped roles (site accountant, project manager) this is their
+ * assigned sites[] (falling back to the legacy single `site`). An EMPTY array
+ * means "assigned to nothing" — callers must treat that as a hard constraint
+ * that returns no rows, never as "unrestricted".
+ */
+export function scopedSites(user: JwtPayload | undefined): string[] | undefined {
+  if (!user) return [];
+  if (!isSiteScoped(user)) return undefined;
+  return user.sites && user.sites.length > 0 ? user.sites : (user.site ? [user.site] : []);
 }

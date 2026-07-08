@@ -60,8 +60,11 @@ type TxClient = {
  * row (reused when it already exists, else created); a row left with no linked
  * payments is deleted so it never surfaces as an un-tallied orphan.
  *
- * Invariant maintained: bank_transactions.txn_amount == SUM(amount) of its
- * linked payments — the same tally Bank Reconciliation checks.
+ * Invariant maintained: bank_transactions.txn_amount == SUM(amount +
+ * gst_added_amount) of its linked payments — the actual money that left the
+ * bank (cash to vendor + any GST added at payment), the same tally Bank
+ * Reconciliation checks. Withheld TDS/GST-TDS are excluded: they never leave
+ * the bank as part of the cheque.
  *
  * Call AFTER the payment row has been inserted/updated, inside the same
  * transaction. `previousTxnId` is the txn the payment was linked to before this
@@ -131,7 +134,7 @@ export async function syncBankTxnForPayment(
  */
 export async function resyncBankTxnAmount(tx: TxClient, txnId: string): Promise<void> {
   const agg = await tx.queryOne<{ cnt: string; total: string }>(
-    `SELECT COUNT(*)::text AS cnt, COALESCE(SUM(amount), 0)::text AS total
+    `SELECT COUNT(*)::text AS cnt, COALESCE(SUM(amount + gst_added_amount), 0)::text AS total
        FROM payments WHERE bank_txn_id = $1`,
     [txnId],
   );

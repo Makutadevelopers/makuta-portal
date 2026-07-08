@@ -7,7 +7,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 
-type Role = 'ho' | 'site' | 'mgmt';
+type Role = 'ho' | 'site' | 'mgmt' | 'project_manager';
 
 export function requireRole(allowed: Role[]) {
   return (req: Request, res: Response, next: NextFunction): void => {

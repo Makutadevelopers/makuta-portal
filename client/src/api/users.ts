@@ -4,7 +4,7 @@ export interface UserRecord {
   id: string;
   name: string;
   email: string;
-  role: 'ho' | 'site' | 'mgmt';
+  role: 'ho' | 'site' | 'mgmt' | 'project_manager';
   site: string | null;            // primary site = sites[0]
   sites: string[];                // all assigned sites
   title: string | null;

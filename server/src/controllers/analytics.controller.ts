@@ -13,6 +13,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { query } from '../db/query';
+import { scopedSites } from '../middleware/auth';
 
 interface MonthlyRow {
   month: string;
@@ -44,12 +45,20 @@ export async function getAnalytics(req: Request, res: Response, next: NextFuncti
     const site = (req.query.site as string) || 'All';
     const month = (req.query.month as string) || 'All'; // 'YYYY-MM' or 'All'
 
+    // Project managers are hard-capped to their assigned sites; ho/mgmt are not.
+    const allowedSites = scopedSites(req.user);
+    if (allowedSites && site !== 'All' && !allowedSites.includes(site)) {
+      res.status(403).json({ error: 'Forbidden', message: 'You are not assigned to this site' });
+      return;
+    }
+
     // Build a WHERE clause + positional params for the subset of filters a
     // given query should honour. Each query gets its own params array because
-    // placeholders are positional ($1, $2, …).
-    function buildWhere(opts: { site: boolean; month: boolean }): { where: string; params: string[] } {
+    // placeholders are positional ($1, $2, …). The role site-cap is appended to
+    // EVERY query so a project manager's totals never include other sites.
+    function buildWhere(opts: { site: boolean; month: boolean }): { where: string; params: (string | string[])[] } {
       const conds = ['i.deleted_at IS NULL'];
-      const params: string[] = [];
+      const params: (string | string[])[] = [];
       if (opts.site && site !== 'All') {
         conds.push(`i.site = $${params.length + 1}`);
         params.push(site);
@@ -57,6 +66,10 @@ export async function getAnalytics(req: Request, res: Response, next: NextFuncti
       if (opts.month && month !== 'All') {
         conds.push(`TO_CHAR(i.invoice_date, 'YYYY-MM') = $${params.length + 1}`);
         params.push(month);
+      }
+      if (allowedSites) {
+        conds.push(`i.site = ANY($${params.length + 1}::text[])`);
+        params.push(allowedSites);
       }
       return { where: `WHERE ${conds.join(' AND ')}`, params };
     }

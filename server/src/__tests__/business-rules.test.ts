@@ -403,7 +403,7 @@ describe('Overpayment Prevention', () => {
 });
 
 describe('Role-Based Access Control', () => {
-  type Role = 'ho' | 'site' | 'mgmt';
+  type Role = 'ho' | 'site' | 'mgmt' | 'project_manager';
 
   function isAllowed(userRole: Role, allowedRoles: Role[]): boolean {
     return allowedRoles.includes(userRole);
@@ -432,6 +432,16 @@ describe('Role-Based Access Control', () => {
   it('ho can create invoices', () => expect(isAllowed('ho', ['ho', 'site'])).toBe(true));
   it('site can create invoices', () => expect(isAllowed('site', ['ho', 'site'])).toBe(true));
   it('mgmt CANNOT create invoices', () => expect(isAllowed('mgmt', ['ho', 'site'])).toBe(false));
+
+  // Project manager — read-only, multi-site expenditure viewer.
+  // Reads the finance surfaces (aging/analytics/cashflow/payments) but is
+  // excluded from EVERY write guard.
+  it('project_manager can view payment aging', () => expect(isAllowed('project_manager', ['ho', 'mgmt', 'project_manager'])).toBe(true));
+  it('project_manager can view analytics/cashflow', () => expect(isAllowed('project_manager', ['ho', 'mgmt', 'project_manager'])).toBe(true));
+  it('project_manager CANNOT create invoices', () => expect(isAllowed('project_manager', ['ho', 'site'])).toBe(false));
+  it('project_manager CANNOT process payments', () => expect(isAllowed('project_manager', ['ho', 'site'])).toBe(false));
+  it('project_manager CANNOT log petty cash expenses', () => expect(isAllowed('project_manager', ['ho', 'site'])).toBe(false));
+  it('project_manager CANNOT manage vendors', () => expect(isAllowed('project_manager', ['ho'])).toBe(false));
 });
 
 describe('Filename Sanitization', () => {

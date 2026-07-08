@@ -26,12 +26,26 @@ export interface AgingRow {
  * Get aging data for all unpaid/partial invoices joined with vendor payment terms.
  * Returns two arrays: withinTerms and overdue.
  */
-export async function getAgingData(siteFilter?: string): Promise<{
+export async function getAgingData(siteFilter?: string, allowedSites?: string[]): Promise<{
   withinTerms: AgingRow[];
   overdue: AgingRow[];
 }> {
-  const siteClause = siteFilter && siteFilter !== 'All' ? 'AND i.site = $1' : '';
-  const params = siteFilter && siteFilter !== 'All' ? [siteFilter] : [];
+  // Two independent constraints:
+  //  - siteFilter: the UI's site dropdown ('All' or one site).
+  //  - allowedSites: a hard role-scope cap (project managers see only their
+  //    assigned sites). When provided it ALWAYS applies, even for 'All', so a
+  //    scoped user can never widen past their assignment. undefined = no cap.
+  const clauses: string[] = [];
+  const params: (string | string[])[] = [];
+  if (siteFilter && siteFilter !== 'All') {
+    params.push(siteFilter);
+    clauses.push(`AND i.site = $${params.length}`);
+  }
+  if (allowedSites) {
+    params.push(allowedSites);
+    clauses.push(`AND i.site = ANY($${params.length})`);
+  }
+  const siteClause = clauses.join('\n     ');
 
   // L6: Use DATE math (not NOW() timestamps) so the day-count is stable
   // regardless of server timezone. CURRENT_DATE is the server-local date.

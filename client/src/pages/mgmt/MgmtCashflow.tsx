@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { apiFetch } from '../../api/client';
 import { useVendors } from '../../hooks/useVendors';
+import { useAuth } from '../../hooks/useAuth';
 import { formatINR } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
@@ -19,6 +20,10 @@ interface CashflowResponse {
 }
 
 export default function MgmtCashflow() {
+  const { user } = useAuth();
+  // Project managers only see their assigned sites in the picker; other roles
+  // see all. The server scopes the data to the PM's sites regardless.
+  const visibleSites = user?.role === 'project_manager' && user.sites?.length ? user.sites : SITES;
   const [data, setData] = useState<CashflowResponse>({ expenditure: [], cashflow: [] });
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,7 +107,7 @@ export default function MgmtCashflow() {
           <div className="flex items-center gap-3 flex-wrap">
             <select value={fSite} onChange={e => setFSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
               <option value="All">All Sites</option>
-              {SITES.map(s => <option key={s}>{s}</option>)}
+              {visibleSites.map(s => <option key={s}>{s}</option>)}
             </select>
             <select value={fCategory} onChange={e => setFCategory(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
               <option value="All">All Categories</option>

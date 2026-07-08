@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { query, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
 import { notifyPaymentEdited } from '../services/email.service';
-import { userHasSite } from '../middleware/auth';
+import { userHasSite, isSiteScoped } from '../middleware/auth';
 import { paymentStatusCase, syncBankTxnForPayment, resyncBankTxnAmount } from '../services/payment.service';
 
 const MINOR_LIMIT = 50000;
@@ -26,6 +26,10 @@ const tdsPct = z.number().min(0, 'TDS % cannot be negative').max(10, 'TDS % cann
 // GST-TDS (CGST+SGST) withheld under GST law — statutorily 2%. Capped at 10 to
 // match the TDS field; computed on the same pre-GST base. See migration 050.
 const gstTdsPct = z.number().min(0, 'GST-TDS % cannot be negative').max(10, 'GST-TDS % cannot exceed 10').optional();
+// GST ADDED at payment (the opposite of GST-TDS withholding): extra cash paid to
+// the vendor on top of the invoice, computed on the after-TDS base. GST slabs go
+// up to 28%, so cap at 28. NOT part of invoice settlement. See migration 052.
+const gstAddedPct = z.number().min(0, 'GST % cannot be negative').max(28, 'GST % cannot exceed 28').optional();
 
 const createPaymentSchema = z.object({
   amount: z.number().nonnegative('Amount cannot be negative').max(1e12, 'Amount too large'),
@@ -37,6 +41,7 @@ const createPaymentSchema = z.object({
   bank: z.string().max(100).nullable().optional(),
   tds_pct: tdsPct,
   gst_tds_pct: gstTdsPct,
+  gst_added_pct: gstAddedPct,
 }).refine(d => d.amount > 0 || (d.tds_pct ?? 0) > 0 || (d.gst_tds_pct ?? 0) > 0, {
   message: 'Amount, TDS % or GST-TDS % must be greater than zero',
 });
@@ -50,6 +55,7 @@ const updatePaymentSchema = z.object({
   bank: z.string().max(100).nullable().optional(),
   tds_pct: tdsPct,
   gst_tds_pct: gstTdsPct,
+  gst_added_pct: gstAddedPct,
 }).refine(d => d.amount > 0 || (d.tds_pct ?? 0) > 0 || (d.gst_tds_pct ?? 0) > 0, {
   message: 'Amount, TDS % or GST-TDS % must be greater than zero',
 });
@@ -79,6 +85,8 @@ interface PaymentRow {
   tds_amount: number;
   gst_tds_pct: number;
   gst_tds_amount: number;
+  gst_added_pct: number;
+  gst_added_amount: number;
   bank_txn_id: string | null;
 }
 
@@ -145,6 +153,13 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
       // and, like TDS, settles the invoice without cash changing hands.
       const gstTdsPctVal = data.gst_tds_pct ?? 0;
       const gstTdsAmount = Math.round(tdsBase * gstTdsPctVal) / 100;
+      // GST ADDED at payment: extra cash paid to the vendor on top of the
+      // invoice, computed on the base AFTER income-tax TDS (new base = base −
+      // TDS). Unlike TDS/GST-TDS this is NOT a withholding and does NOT settle
+      // the invoice — it only inflates the cheque (see bank-txn amount below).
+      const gstAddedPctVal = data.gst_added_pct ?? 0;
+      const gstAddedAmount = Math.round((tdsBase - tdsAmount) * gstAddedPctVal) / 100;
+      // Settlement excludes gstAddedAmount — cash + withholdings only.
       const settlement = data.amount + tdsAmount + gstTdsAmount;
       if (settlement > balance + 0.001) {
         const withheldParts = [
@@ -161,10 +176,10 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
       }
 
       const payment = await tx.queryOne<PaymentRow>(
-        `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, tds_pct, tds_amount, gst_tds_pct, gst_tds_amount)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, tds_pct, tds_amount, gst_tds_pct, gst_tds_amount, gst_added_pct, gst_added_amount)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING *`,
-        [invoiceId, data.amount, data.payment_type, data.payment_ref ?? null, data.payment_date, data.bank ?? null, userId, tdsPctVal, tdsAmount, gstTdsPctVal, gstTdsAmount]
+        [invoiceId, data.amount, data.payment_type, data.payment_ref ?? null, data.payment_date, data.bank ?? null, userId, tdsPctVal, tdsAmount, gstTdsPctVal, gstTdsAmount, gstAddedPctVal, gstAddedAmount]
       );
       if (!payment) {
         return { status: 500, body: { error: 'Internal Server Error', message: 'Failed to record payment' } };
@@ -208,6 +223,7 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
           newBalance,
           tdsAmount,
           gstTdsAmount,
+          gstAddedAmount,
           vendorName: invoice.vendor_name,
           invoiceNo: invoice.invoice_no,
         },
@@ -220,12 +236,13 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
     }
 
     // Non-blocking audit + email outside the transaction
-    const { payment, newStatus, newBalance, tdsAmount, gstTdsAmount, vendorName, invoiceNo } = result.body as {
+    const { payment, newStatus, newBalance, tdsAmount, gstTdsAmount, gstAddedAmount, vendorName, invoiceNo } = result.body as {
       payment: PaymentRow;
       newStatus: string;
       newBalance: number;
       tdsAmount: number;
       gstTdsAmount: number;
+      gstAddedAmount: number;
       vendorName: string;
       invoiceNo: string | null;
     };
@@ -236,12 +253,15 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
     const gstTdsSuffix = gstTdsAmount > 0
       ? ` · GST-TDS ${(data.gst_tds_pct ?? 0).toString()}% (₹${gstTdsAmount.toLocaleString('en-IN')})`
       : '';
+    const gstAddedSuffix = gstAddedAmount > 0
+      ? ` · GST added ${(data.gst_added_pct ?? 0).toString()}% (₹${gstAddedAmount.toLocaleString('en-IN')})`
+      : '';
     try {
       await logAudit({
         userId,
-        action: `${isPartial ? 'Part payment' : 'Full payment'}: ₹${data.amount.toLocaleString('en-IN')} via ${data.payment_type}${tdsSuffix}${gstTdsSuffix}${isPartial ? ` · Balance ₹${newBalance.toLocaleString('en-IN')}` : ''}`,
+        action: `${isPartial ? 'Part payment' : 'Full payment'}: ₹${data.amount.toLocaleString('en-IN')} via ${data.payment_type}${tdsSuffix}${gstTdsSuffix}${gstAddedSuffix}${isPartial ? ` · Balance ₹${newBalance.toLocaleString('en-IN')}` : ''}`,
         invoiceId,
-        metadata: { amount: data.amount, type: data.payment_type, ref: data.payment_ref, tds_pct: data.tds_pct ?? 0, tds_amount: tdsAmount, gst_tds_pct: data.gst_tds_pct ?? 0, gst_tds_amount: gstTdsAmount },
+        metadata: { amount: data.amount, type: data.payment_type, ref: data.payment_ref, tds_pct: data.tds_pct ?? 0, tds_amount: tdsAmount, gst_tds_pct: data.gst_tds_pct ?? 0, gst_tds_amount: gstTdsAmount, gst_added_pct: data.gst_added_pct ?? 0, gst_added_amount: gstAddedAmount },
       });
     } catch (auditErr) {
       console.error('[audit] createPayment audit log failed:', auditErr);
@@ -256,6 +276,20 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
 export async function getPayments(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const invoiceId = req.params.id as string;
+
+    // Scope: site-scoped roles (project manager) may only view payments for
+    // invoices on their assigned sites. 404 (not 403) so an out-of-scope
+    // invoice's existence isn't revealed. ho/mgmt skip the check.
+    if (isSiteScoped(req.user)) {
+      const [inv] = await query<{ site: string }>(
+        'SELECT site FROM invoices WHERE id = $1 AND deleted_at IS NULL',
+        [invoiceId]
+      );
+      if (!inv || !userHasSite(req.user, inv.site)) {
+        res.status(404).json({ error: 'Not Found', message: 'Invoice not found' });
+        return;
+      }
+    }
 
     const payments = await query<PaymentRow>(
       'SELECT * FROM payments WHERE invoice_id = $1 ORDER BY payment_date',
@@ -315,6 +349,10 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
       // GST-TDS withheld on the same pre-GST base (see createPayment).
       const gstTdsPctVal = data.gst_tds_pct ?? 0;
       const gstTdsAmount = Math.round(tdsBase * gstTdsPctVal) / 100;
+      // GST added at payment (extra cash, on the after-TDS base). Not part of
+      // settlement/headroom — see createPayment.
+      const gstAddedPctVal = data.gst_added_pct ?? 0;
+      const gstAddedAmount = Math.round((tdsBase - tdsAmount) * gstAddedPctVal) / 100;
       const settlement = data.amount + tdsAmount + gstTdsAmount;
       if (settlement > headroom + 0.001) {
         const withheldParts = [
@@ -341,10 +379,12 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
                tds_pct = $6,
                tds_amount = $7,
                gst_tds_pct = $8,
-               gst_tds_amount = $9
-         WHERE id = $10 AND invoice_id = $11
+               gst_tds_amount = $9,
+               gst_added_pct = $10,
+               gst_added_amount = $11
+         WHERE id = $12 AND invoice_id = $13
          RETURNING *`,
-        [data.amount, data.payment_type, data.payment_ref ?? null, data.payment_date, data.bank ?? null, tdsPctVal, tdsAmount, gstTdsPctVal, gstTdsAmount, paymentId, invoiceId]
+        [data.amount, data.payment_type, data.payment_ref ?? null, data.payment_date, data.bank ?? null, tdsPctVal, tdsAmount, gstTdsPctVal, gstTdsAmount, gstAddedPctVal, gstAddedAmount, paymentId, invoiceId]
       );
 
       // Re-link the bank_transactions row to match the edited details (a changed
@@ -417,6 +457,9 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
       }
       if (Number(before.gst_tds_pct ?? 0) !== Number(payment.gst_tds_pct ?? 0)) {
         diffs.push(`GST-TDS ${Number(before.gst_tds_pct ?? 0)}% (₹${Number(before.gst_tds_amount ?? 0).toLocaleString('en-IN')}) → ${Number(payment.gst_tds_pct)}% (₹${Number(payment.gst_tds_amount).toLocaleString('en-IN')})`);
+      }
+      if (Number(before.gst_added_pct ?? 0) !== Number(payment.gst_added_pct ?? 0)) {
+        diffs.push(`GST added ${Number(before.gst_added_pct ?? 0)}% (₹${Number(before.gst_added_amount ?? 0).toLocaleString('en-IN')}) → ${Number(payment.gst_added_pct)}% (₹${Number(payment.gst_added_amount).toLocaleString('en-IN')})`);
       }
       const summary = diffs.length ? diffs.join(' · ') : 'no field changes';
       await logAudit({

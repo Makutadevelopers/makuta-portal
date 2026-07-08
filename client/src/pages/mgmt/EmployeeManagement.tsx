@@ -10,7 +10,13 @@ const ROLES: { value: string; label: string }[] = [
   { value: 'ho', label: 'Head Office' },
   { value: 'mgmt', label: 'Management' },
   { value: 'site', label: 'Site Accountant' },
+  { value: 'project_manager', label: 'Project Manager' },
 ];
+
+// Roles that are scoped to specific sites and therefore require ≥1 assigned
+// site. Site accountants enter data for their sites; project managers view
+// (read-only) expenditure for theirs. HO/MD are cross-site and take no sites.
+const roleNeedsSites = (r: string) => r === 'site' || r === 'project_manager';
 
 export default function EmployeeManagement() {
   const { notify } = useToast();
@@ -128,12 +134,12 @@ export default function EmployeeManagement() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (form.role === 'site' && form.sites.length === 0) {
-      notify('Pick at least one site for a site accountant', 'error');
+    if (roleNeedsSites(form.role) && form.sites.length === 0) {
+      notify('Pick at least one site for this role', 'error');
       return;
     }
     try {
-      const sitesPayload = form.role === 'site' ? form.sites : [];
+      const sitesPayload = roleNeedsSites(form.role) ? form.sites : [];
       if (editUser) {
         await updateUser(editUser.id, {
           name: form.name,
@@ -197,8 +203,9 @@ export default function EmployeeManagement() {
       ho: 'bg-blue-100 text-blue-800',
       mgmt: 'bg-purple-100 text-purple-800',
       site: 'bg-green-100 text-green-800',
+      project_manager: 'bg-teal-100 text-teal-800',
     };
-    const labels: Record<string, string> = { ho: 'HO', mgmt: 'MD', site: 'Site' };
+    const labels: Record<string, string> = { ho: 'HO', mgmt: 'MD', site: 'Site', project_manager: 'PM' };
     return <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium ${colors[role] || 'bg-gray-100'}`}>{labels[role] || role}</span>;
   };
 
@@ -221,7 +228,7 @@ export default function EmployeeManagement() {
 
           {/* Filter tabs */}
           <div className="flex gap-2 mb-0">
-            {[{ v: 'all', l: `All (${users.length})` }, { v: 'ho', l: `HO (${users.filter(u => u.role === 'ho').length})` }, { v: 'mgmt', l: `MD (${users.filter(u => u.role === 'mgmt').length})` }, { v: 'site', l: `Site (${users.filter(u => u.role === 'site').length})` }].map(f => (
+            {[{ v: 'all', l: `All (${users.length})` }, { v: 'ho', l: `HO (${users.filter(u => u.role === 'ho').length})` }, { v: 'mgmt', l: `MD (${users.filter(u => u.role === 'mgmt').length})` }, { v: 'site', l: `Site (${users.filter(u => u.role === 'site').length})` }, { v: 'project_manager', l: `PM (${users.filter(u => u.role === 'project_manager').length})` }].map(f => (
               <button key={f.v} onClick={() => setFilter(f.v)}
                 className={`px-3 py-1.5 text-xs rounded-lg font-medium ${filter === f.v ? 'bg-[#1a3c5e] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
                 {f.l}
@@ -393,7 +400,7 @@ export default function EmployeeManagement() {
                     {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
                 </div>
-                {form.role === 'site' && (
+                {roleNeedsSites(form.role) && (
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">
                       Sites * <span className="text-gray-400 font-normal">(tick all that this person handles)</span>

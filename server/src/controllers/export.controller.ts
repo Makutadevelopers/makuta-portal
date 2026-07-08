@@ -7,6 +7,7 @@ import { Request, Response, NextFunction } from 'express';
 import PDFDocument from 'pdfkit';
 import * as XLSX from 'xlsx';
 import { getAgingData } from '../services/aging.service';
+import { scopedSites } from '../middleware/auth';
 import { query } from '../db/query';
 
 function formatINR(n: number): string {
@@ -20,7 +21,13 @@ function fmtDate(d: string): string {
 export async function exportAging(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const site = (req.query.site as string) || 'All';
-    const data = await getAgingData(site);
+    // Project managers are hard-capped to their assigned sites; ho/mgmt are not.
+    const allowedSites = scopedSites(req.user);
+    if (allowedSites && site !== 'All' && !allowedSites.includes(site)) {
+      res.status(403).json({ error: 'Forbidden', message: 'You are not assigned to this site' });
+      return;
+    }
+    const data = await getAgingData(site, allowedSites);
     const allRows = [...data.overdue, ...data.withinTerms];
 
     const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 40 });
@@ -209,6 +216,15 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
     }
   }
 
+  // Role scope cap — applies to BOTH branches above (including ?ids=…), so a
+  // project manager can never export invoices outside their assigned sites even
+  // by hand-picking IDs. undefined for ho/mgmt (cross-site). Empty array = none.
+  const allowedSites = scopedSites(req.user);
+  if (allowedSites) {
+    conds.push(`i.site = ANY($${p++}::text[])`);
+    params.push(allowedSites);
+  }
+
   const orderBy =
     sortBy === 'invoice_date' ? 'i.invoice_date DESC, i.sl_no DESC'
     : sortBy === 'last_paid_date' ? 'p.last_paid_date DESC NULLS LAST, i.created_at DESC'
@@ -231,7 +247,10 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
        COALESCE(i.additional_charge, 0)               AS additional_charge,
        i.invoice_amount,
        COALESCE(p.total_paid, 0)                      AS total_paid,
-       (i.invoice_amount - COALESCE(p.total_paid, 0)) AS balance,
+       -- Balance nets off cash paid + TDS withheld AND credit notes applied,
+       -- matching aging.service.ts / the invoice list. Credit notes settle part
+       -- of the payable without cash, so omitting them shows a phantom balance.
+       (i.invoice_amount - COALESCE(p.total_paid, 0) - COALESCE(c.total_credits, 0)) AS balance,
        i.payment_status,
        i.pushed,
        i.remarks,
@@ -249,6 +268,11 @@ async function fetchFilteredInvoiceRows(req: Request): Promise<{ rows: InvoiceEx
        FROM payments
        GROUP BY invoice_id
      ) p ON p.invoice_id = i.id
+     LEFT JOIN (
+       SELECT invoice_id, SUM(allocated_amount) AS total_credits
+       FROM credit_note_allocations
+       GROUP BY invoice_id
+     ) c ON c.invoice_id = i.id
      LEFT JOIN users u ON u.id = i.created_by
      WHERE ${conds.join(' AND ')}
      ORDER BY ${orderBy}`,
@@ -443,6 +467,10 @@ interface CashflowRow {
 
 export async function exportCashflow(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    // Project managers see only their assigned sites; ho/mgmt see all.
+    const allowedSites = scopedSites(req.user);
+    const siteClause = allowedSites ? 'AND i.site = ANY($1::text[])' : '';
+    const params = allowedSites ? [allowedSites] : [];
     const rows = await query<CashflowRow>(
       `SELECT TO_CHAR(i.month, 'YYYY-MM') AS month, i.purpose,
          SUM(i.invoice_amount) AS total_invoiced,
@@ -451,8 +479,10 @@ export async function exportCashflow(req: Request, res: Response, next: NextFunc
        FROM invoices i
        LEFT JOIN (SELECT invoice_id, SUM(amount) AS total_paid FROM payments GROUP BY invoice_id) p ON p.invoice_id = i.id
        WHERE i.deleted_at IS NULL
+       ${siteClause}
        GROUP BY TO_CHAR(i.month, 'YYYY-MM'), i.purpose
-       ORDER BY month, i.purpose`
+       ORDER BY month, i.purpose`,
+      params
     );
 
     const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 40 });

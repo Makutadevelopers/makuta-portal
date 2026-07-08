@@ -9,6 +9,6 @@ import { getAnalytics } from '../controllers/analytics.controller';
 const router = Router();
 
 router.use(authenticate);
-router.get('/', requireRole(['ho', 'mgmt']), getAnalytics);
+router.get('/', requireRole(['ho', 'mgmt', 'project_manager']), getAnalytics);
 
 export default router;

@@ -44,7 +44,7 @@ const createSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   email: z.string().email('Valid email is required'),
   password: z.string().min(4, 'Password must be at least 4 characters'),
-  role: z.enum(['ho', 'site', 'mgmt']),
+  role: z.enum(['ho', 'site', 'mgmt', 'project_manager']),
   site: z.string().nullable().default(null),
   sites: sitesField,
   title: z.string().nullable().default(null),
@@ -95,7 +95,7 @@ export async function createUser(req: Request, res: Response, next: NextFunction
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
   email: z.string().email().optional(),
-  role: z.enum(['ho', 'site', 'mgmt']).optional(),
+  role: z.enum(['ho', 'site', 'mgmt', 'project_manager']).optional(),
   site: z.string().nullable().optional(),
   sites: sitesField,
   title: z.string().nullable().optional(),

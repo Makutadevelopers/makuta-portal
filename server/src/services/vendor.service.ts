@@ -204,6 +204,8 @@ export interface VendorDetailPayment {
   tds_amount: number;
   gst_tds_pct: number;
   gst_tds_amount: number;
+  gst_added_pct: number;
+  gst_added_amount: number;
 }
 
 export interface VendorDetailInvoice {
@@ -297,7 +299,8 @@ export async function getVendorDetail(
   const paymentRows = invoiceIds.length
     ? await query<VendorDetailPayment>(
         `SELECT id, invoice_id, payment_date, payment_type, payment_ref,
-                bank, amount, tds_pct, tds_amount, gst_tds_pct, gst_tds_amount
+                bank, amount, tds_pct, tds_amount, gst_tds_pct, gst_tds_amount,
+                gst_added_pct, gst_added_amount
          FROM payments
          WHERE invoice_id = ANY($1::uuid[])
          ORDER BY payment_date ASC, created_at ASC`,

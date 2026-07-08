@@ -1307,10 +1307,17 @@ function PaymentHistoryPanel({ invoice, payments, loading, onClose, onAddPayment
                 const tdsPct = Number(p.tds_pct ?? 0);
                 const gstTdsAmt = Number(p.gst_tds_amount ?? 0);
                 const gstTdsPct = Number(p.gst_tds_pct ?? 0);
+                const gstAddedAmt = Number(p.gst_added_amount ?? 0);
+                const gstAddedPct = Number(p.gst_added_pct ?? 0);
                 return (
                   <tr key={p.id} className="border-t border-gray-50">
                     <td className="px-2.5 py-3 whitespace-nowrap">{formatDate(p.payment_date)}</td>
-                    <td className="px-2.5 py-3 text-right font-medium text-green-700">{formatINR(Number(p.amount))}</td>
+                    <td className="px-2.5 py-3 text-right font-medium text-green-700">
+                      {formatINR(Number(p.amount))}
+                      {gstAddedAmt > 0 && (
+                        <div className="text-[10px] font-normal text-green-600" title="GST added on top of the invoice (extra cash to vendor)">+{formatINR(gstAddedAmt)} GST {gstAddedPct}%</div>
+                      )}
+                    </td>
                     {hasAnyTds && (
                       <td className="px-2.5 py-3 text-right">
                         {tdsAmt > 0 || gstTdsAmt > 0 ? (
@@ -1416,21 +1423,24 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
   const [paymentDate, setPaymentDate] = useState(String(payment.payment_date).slice(0, 10));
   const [bank, setBank] = useState(payment.bank ?? '');
   const [tdsPct, setTdsPct] = useState(String(payment.tds_pct ?? 0));
-  const [gstTdsPct, setGstTdsPct] = useState(String(payment.gst_tds_pct ?? 0));
+  // "Add GST" — extra cash to the vendor on top of the invoice, on the after-TDS
+  // base. Not a withholding; not part of settlement. Mirrors PaymentModal.
+  const [gstAddedPct, setGstAddedPct] = useState(String(payment.gst_added_pct ?? 0));
   const [saving, setSaving] = useState(false);
 
   const numAmount = Number(amount) || 0;
   const numTdsPct = Math.max(0, Math.min(10, Number(tdsPct) || 0));
   const tdsAmount = Math.round(tdsBase * numTdsPct) / 100;
-  const numGstTdsPct = Math.max(0, Math.min(10, Number(gstTdsPct) || 0));
-  const gstTdsAmount = Math.round(tdsBase * numGstTdsPct) / 100;
-  const settlement = numAmount + tdsAmount + gstTdsAmount;
+  const numGstAddedPct = Math.max(0, Math.min(28, Number(gstAddedPct) || 0));
+  const gstAddedAmount = Math.round((tdsBase - tdsAmount) * numGstAddedPct) / 100;
+  // Settlement excludes added GST (cash + TDS only).
+  const settlement = numAmount + tdsAmount;
   const overHeadroom = settlement > headroom + 0.001;
 
   async function handleSubmit() {
-    if (settlement <= 0) { notify('Amount, TDS or GST-TDS must be greater than 0'); return; }
+    if (settlement <= 0) { notify('Amount or TDS must be greater than 0'); return; }
     if (overHeadroom) {
-      notify(`Cash + TDS + GST-TDS exceeds invoice headroom of ${formatINRPaisa(headroom)}`);
+      notify(`Cash + TDS exceeds invoice headroom of ${formatINRPaisa(headroom)}`);
       return;
     }
     if (numAmount > 0 && paymentType !== 'Cash' && !paymentRef.trim()) {
@@ -1446,7 +1456,7 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
         payment_date: paymentDate,
         bank: paymentType === 'Cash' ? null : (bank.trim() || null),
         tds_pct: numTdsPct,
-        gst_tds_pct: numGstTdsPct,
+        gst_added_pct: numGstAddedPct,
       });
       notify('Payment updated');
       await onSaved();
@@ -1478,7 +1488,7 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
               onChange={e => setAmount(e.target.value)}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
-            {overHeadroom && <div className="text-xs text-red-600 mt-1">Cash + TDS + GST-TDS exceeds invoice headroom</div>}
+            {overHeadroom && <div className="text-xs text-red-600 mt-1">Cash + TDS exceeds invoice headroom</div>}
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1" title="Income-tax TDS withheld (Sec. 194C). Computed on the pre-GST base amount.">TDS %</label>
@@ -1492,14 +1502,14 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
             )}
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1" title="GST-TDS withheld under GST law (statutorily 2%). Computed on the same pre-GST base.">GST-TDS %</label>
+            <label className="block text-xs text-gray-500 mb-1" title="GST added to the vendor payment (extra cash on top of the invoice). Computed on the base after TDS.">Add GST %</label>
             <input
-              type="number" step="0.01" min="0" max="10" value={gstTdsPct}
-              onChange={e => setGstTdsPct(e.target.value)}
+              type="number" step="0.01" min="0" max="28" value={gstAddedPct}
+              onChange={e => setGstAddedPct(e.target.value)}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
-            {numGstTdsPct > 0 && (
-              <div className="text-[11px] text-amber-700 mt-1">GST-TDS amount: {formatINR(gstTdsAmount)} ({numGstTdsPct}% of {formatINR(tdsBase)} base)</div>
+            {numGstAddedPct > 0 && (
+              <div className="text-[11px] text-green-700 mt-1">GST added: +{formatINR(gstAddedAmount)} ({numGstAddedPct}% of {formatINR(Math.max(0, tdsBase - tdsAmount))} after-TDS base)</div>
             )}
           </div>
           <div>

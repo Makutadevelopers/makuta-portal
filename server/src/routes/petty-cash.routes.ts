@@ -24,19 +24,20 @@ const router = Router();
 
 router.use(authenticate);
 
-// Balances
-router.get('/balances',       requireRole(['ho']),         getBalances);
-router.get('/balances/:site', requireRole(['ho','site']),  getBalances);
+// Balances. Project managers get read-only, own-assigned-sites access (like
+// site accountants) but never the write routes below.
+router.get('/balances',       requireRole(['ho']),                            getBalances);
+router.get('/balances/:site', requireRole(['ho','site','project_manager']),   getBalances);
 
-// Disbursements (HO only creates, both can list)
-router.get('/disbursements',  requireRole(['ho','site']),  listDisbursements);
-router.post('/disbursements', requireRole(['ho']),         createDisbursement);
+// Disbursements (HO only creates; ho/site/PM can list — all read-scoped)
+router.get('/disbursements',  requireRole(['ho','site','project_manager']),   listDisbursements);
+router.post('/disbursements', requireRole(['ho']),                            createDisbursement);
 
-// Expenses (HO any site, site own site only)
-router.get('/expenses',       requireRole(['ho','site']),  listExpenses);
-router.post('/expenses',      requireRole(['ho','site']),  createExpense);
+// Expenses (HO any site, site own site only; PM read-only)
+router.get('/expenses',       requireRole(['ho','site','project_manager']),   listExpenses);
+router.post('/expenses',      requireRole(['ho','site']),                     createExpense);
 
 // Ledger (combined in + out, chronological)
-router.get('/ledger',         requireRole(['ho','site']),  getLedger);
+router.get('/ledger',         requireRole(['ho','site','project_manager']),   getLedger);
 
 export default router;

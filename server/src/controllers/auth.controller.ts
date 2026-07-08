@@ -63,7 +63,7 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
     const payload = {
       id: user.id,
       name: user.name,
-      role: user.role as 'ho' | 'site' | 'mgmt',
+      role: user.role as 'ho' | 'site' | 'mgmt' | 'project_manager',
       site: user.site,
       sites,
       title: user.title,

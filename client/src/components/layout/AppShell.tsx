@@ -42,13 +42,25 @@ const SITE_TABS = [
   { to: '/vendors', label: 'Vendor Master' },
 ];
 
+// Project manager — read-only expenditure across assigned sites.
+const PM_TABS = [
+  { to: '/pm-invoices', label: 'Invoices' },
+  { to: '/pm-aging', label: 'Payment Aging' },
+  { to: '/pm-cashflow', label: 'Cashflow' },
+  { to: '/analytics', label: 'Analytics' },
+  { to: '/pm-petty-cash', label: 'Petty Cash' },
+];
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
   const role = user?.role;
-  const tabs = role === 'ho' ? HO_TABS : role === 'mgmt' ? MGMT_TABS : SITE_TABS;
+  const tabs = role === 'ho' ? HO_TABS
+    : role === 'mgmt' ? MGMT_TABS
+      : role === 'project_manager' ? PM_TABS
+        : SITE_TABS;
   const userSites = user?.sites && user.sites.length > 0
     ? user.sites
     : (user?.site ? [user.site] : []);
@@ -59,12 +71,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       : '';
   const subtitle = role === 'ho' ? 'Head Office — Full Access'
     : role === 'mgmt' ? 'Management — Read Only'
-      : `${siteSubtitle} — Site Portal`;
+      : role === 'project_manager' ? `${siteSubtitle} — Project Manager (Read Only)`
+        : `${siteSubtitle} — Site Portal`;
 
   const initials = user?.name?.split(' ').map(n => n[0]).join('').slice(0, 2) ?? '';
   const avatarBg = role === 'ho' ? 'bg-blue-50 text-blue-800'
     : role === 'mgmt' ? 'bg-purple-50 text-purple-800'
-      : 'bg-green-50 text-green-800';
+      : role === 'project_manager' ? 'bg-teal-50 text-teal-800'
+        : 'bg-green-50 text-green-800';
 
   // Online/offline state
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -300,6 +314,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {role === 'mgmt' && (
         <div className="bg-purple-50 border-b border-purple-200 px-4 sm:px-6 py-1.5 text-xs text-purple-800">
           Management view — read only · All data is live
+        </div>
+      )}
+      {role === 'project_manager' && (
+        <div className="bg-teal-50 border-b border-teal-200 px-4 sm:px-6 py-1.5 text-xs text-teal-800">
+          Project Manager — read only · Viewing <strong>{userSites.join(', ')}</strong> expenditure
         </div>
       )}
 

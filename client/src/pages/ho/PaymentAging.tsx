@@ -5,11 +5,16 @@ import { useToast } from '../../context/ToastContext';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
+import { useAuth } from '../../hooks/useAuth';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { MobileCard, CardField } from '../../components/ui/MobileCard';
 
 export default function PaymentAging() {
+  const { user } = useAuth();
+  // Project managers only ever see their assigned sites in the picker; every
+  // other role sees the full list. The server enforces the same scope anyway.
+  const visibleSites = user?.role === 'project_manager' && user.sites?.length ? user.sites : SITES;
   const [site, setSite] = useState('All');
   const [vendorFilter, setVendorFilter] = useState('');
   const [activeTab, setActiveTab] = useState<'within' | 'overdue'>('within');
@@ -81,7 +86,7 @@ export default function PaymentAging() {
             </div>
             <select value={site} onChange={e => setSite(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600">
               <option value="All">All Sites</option>
-              {SITES.map(s => <option key={s}>{s}</option>)}
+              {visibleSites.map(s => <option key={s}>{s}</option>)}
             </select>
             <button
               type="button"

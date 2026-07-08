@@ -358,6 +358,15 @@ export default function VendorDetail() {
                         </span>
                       </>
                     )}
+                    {Number(p.gst_added_amount) > 0 && (
+                      <>
+                        <span className="text-gray-300">·</span>
+                        <span className="text-green-600" title="GST added on top of the invoice (extra cash to vendor)">
+                          +GST {formatINR(Number(p.gst_added_amount))}
+                          {Number(p.gst_added_pct) > 0 ? ` (${Number(p.gst_added_pct)}%)` : ''}
+                        </span>
+                      </>
+                    )}
                   </div>
                   <span className="font-medium text-green-700 whitespace-nowrap">
                     {formatINR(Number(p.amount))}

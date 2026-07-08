@@ -44,6 +44,9 @@ export default function LoginPage() {
         case 'site':
           navigate('/my-invoices');
           break;
+        case 'project_manager':
+          navigate('/pm-invoices');
+          break;
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');

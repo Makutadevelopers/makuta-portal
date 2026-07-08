@@ -9,6 +9,6 @@ import { getAging } from '../controllers/aging.controller';
 const router = Router();
 
 router.use(authenticate);
-router.get('/', requireRole(['ho', 'mgmt']), getAging);
+router.get('/', requireRole(['ho', 'mgmt', 'project_manager']), getAging);
 
 export default router;

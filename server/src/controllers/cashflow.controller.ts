@@ -4,6 +4,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { query } from '../db/query';
+import { scopedSites } from '../middleware/auth';
 
 interface PivotRow {
   month: string;
@@ -17,8 +18,15 @@ export async function getCashflow(req: Request, res: Response, next: NextFunctio
     const category = (req.query.category as string) || 'All';
     const vendor = (req.query.vendor as string) || '';
 
+    // Project managers are hard-capped to their assigned sites; ho/mgmt are not.
+    const allowedSites = scopedSites(req.user);
+    if (allowedSites && site !== 'All' && !allowedSites.includes(site)) {
+      res.status(403).json({ error: 'Forbidden', message: 'You are not assigned to this site' });
+      return;
+    }
+
     const conditions: string[] = [];
-    const params: string[] = [];
+    const params: (string | string[])[] = [];
     let idx = 1;
 
     if (site !== 'All') {
@@ -34,6 +42,10 @@ export async function getCashflow(req: Request, res: Response, next: NextFunctio
       // invoices regardless of stored casing variants.
       conditions.push(`LOWER(TRIM(i.vendor_name)) = LOWER(TRIM($${idx++}))`);
       params.push(vendor);
+    }
+    if (allowedSites) {
+      conditions.push(`i.site = ANY($${idx++}::text[])`);
+      params.push(allowedSites);
     }
 
     // Always exclude soft-deleted invoices

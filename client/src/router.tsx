@@ -41,6 +41,10 @@ const MyInvoices = lazy(() => import('./pages/site/MyInvoices'));
 const SiteExpenditure = lazy(() => import('./pages/site/SiteExpenditure'));
 const SitePettyCash = lazy(() => import('./pages/site/SitePettyCash'));
 
+// Project-manager pages (read-only, multi-site expenditure)
+const PmInvoices = lazy(() => import('./pages/pm/PmInvoices'));
+const PmPettyCash = lazy(() => import('./pages/pm/PmPettyCash'));
+
 // Shared pages
 const CreditNotes = lazy(() => import('./pages/shared/CreditNotes'));
 
@@ -73,6 +77,8 @@ function RootRedirect() {
       return <Navigate to="/overview" replace />;
     case 'site':
       return <Navigate to="/site-dashboard" replace />;
+    case 'project_manager':
+      return <Navigate to="/pm-invoices" replace />;
     default:
       return <Navigate to="/login" replace />;
   }
@@ -87,7 +93,7 @@ export default function AppRouter() {
         <Route path="/sso" element={<SsoHandoff />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
-        <Route path="/change-password" element={<ProtectedRoute allowed={['ho', 'mgmt', 'site']}><ChangePasswordPage /></ProtectedRoute>} />
+        <Route path="/change-password" element={<ProtectedRoute allowed={['ho', 'mgmt', 'site', 'project_manager']}><ChangePasswordPage /></ProtectedRoute>} />
         <Route path="/" element={<RootRedirect />} />
 
         {/* HO routes */}
@@ -95,7 +101,7 @@ export default function AppRouter() {
         <Route path="/invoices" element={<ProtectedRoute allowed={['ho']}><InvoiceList /></ProtectedRoute>} />
         <Route path="/payment-aging" element={<ProtectedRoute allowed={['ho']}><PaymentAging /></ProtectedRoute>} />
         <Route path="/cashflow" element={<ProtectedRoute allowed={['ho']}><CashflowPage /></ProtectedRoute>} />
-        <Route path="/analytics" element={<ProtectedRoute allowed={['ho', 'mgmt']}><Analytics /></ProtectedRoute>} />
+        <Route path="/analytics" element={<ProtectedRoute allowed={['ho', 'mgmt', 'project_manager']}><Analytics /></ProtectedRoute>} />
         <Route path="/vendors" element={<ProtectedRoute allowed={['ho', 'site']}><VendorMaster /></ProtectedRoute>} />
         <Route path="/vendors/:id" element={<ProtectedRoute allowed={['ho', 'mgmt', 'site']}><VendorDetail /></ProtectedRoute>} />
         <Route path="/audit" element={<ProtectedRoute allowed={['ho', 'mgmt']}><AuditTrail /></ProtectedRoute>} />
@@ -116,6 +122,14 @@ export default function AppRouter() {
         <Route path="/my-invoices" element={<ProtectedRoute allowed={['site']}><MyInvoices /></ProtectedRoute>} />
         <Route path="/site-expenditure" element={<ProtectedRoute allowed={['site']}><SiteExpenditure /></ProtectedRoute>} />
         <Route path="/site-petty-cash" element={<ProtectedRoute allowed={['site']}><SitePettyCash /></ProtectedRoute>} />
+
+        {/* Project-manager routes — read-only expenditure, scoped to assigned
+            sites by the server. Aging and Cashflow reuse existing read-only
+            pages; Invoices and Petty Cash use purpose-built PM views. */}
+        <Route path="/pm-invoices" element={<ProtectedRoute allowed={['project_manager']}><PmInvoices /></ProtectedRoute>} />
+        <Route path="/pm-aging" element={<ProtectedRoute allowed={['project_manager']}><PaymentAging /></ProtectedRoute>} />
+        <Route path="/pm-cashflow" element={<ProtectedRoute allowed={['project_manager']}><MgmtCashflow /></ProtectedRoute>} />
+        <Route path="/pm-petty-cash" element={<ProtectedRoute allowed={['project_manager']}><PmPettyCash /></ProtectedRoute>} />
 
         {/* Shared: Credit Notes (ho + site entry, mgmt view-only) */}
         <Route path="/credit-notes" element={<ProtectedRoute allowed={['ho', 'site', 'mgmt']}><CreditNotes /></ProtectedRoute>} />

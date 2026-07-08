@@ -19,7 +19,7 @@ router.post('/', requireRole(['ho', 'site']), createPayment);
 // Reverse all payments on the invoice → Not Paid, with a reason. Site scope and
 // finalized-invoice guard are enforced inside the controller.
 router.post('/revert', requireRole(['ho', 'site']), revertInvoicePayments);
-router.get('/', requireRole(['ho', 'mgmt']), getPayments);
+router.get('/', requireRole(['ho', 'mgmt', 'project_manager']), getPayments);
 router.patch('/:pid', requireRole(['ho']), updatePayment);
 
 export default router;

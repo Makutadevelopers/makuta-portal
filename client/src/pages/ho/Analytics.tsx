@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { getAnalytics, AnalyticsResponse } from '../../api/analytics';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
+import { useAuth } from '../../hooks/useAuth';
 import { formatINR } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
@@ -46,6 +47,10 @@ interface Totals {
 }
 
 export default function Analytics() {
+  const { user } = useAuth();
+  // Project managers only see their assigned sites/projects in the picker; the
+  // server scopes analytics to those sites regardless.
+  const visibleSites = user?.role === 'project_manager' && user.sites?.length ? user.sites : SITES;
   const [data, setData] = useState<AnalyticsResponse>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -136,7 +141,7 @@ export default function Analytics() {
               className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-600"
             >
               <option value="All">All Projects</option>
-              {SITES.map(s => <option key={s} value={s}>{s}</option>)}
+              {visibleSites.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
             <select
               value={fMonth}

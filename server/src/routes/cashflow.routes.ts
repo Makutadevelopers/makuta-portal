@@ -9,6 +9,6 @@ import { getCashflow } from '../controllers/cashflow.controller';
 const router = Router();
 
 router.use(authenticate);
-router.get('/', requireRole(['ho', 'mgmt']), getCashflow);
+router.get('/', requireRole(['ho', 'mgmt', 'project_manager']), getCashflow);
 
 export default router;

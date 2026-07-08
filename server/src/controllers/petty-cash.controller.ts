@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { query, queryOne, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
 import { paymentStatusCase } from '../services/payment.service';
+import { isSiteScoped } from '../middleware/auth';
 
 const MINOR_LIMIT = 50000;
 
@@ -81,13 +82,14 @@ interface ExpenseRow {
 // GET /api/petty-cash/balances/:site  — HO or site (site restricted to assigned sites)
 export async function getBalances(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { role, site: userSite } = req.user!;
+    const { site: userSite } = req.user!;
     const userSites = req.user!.sites && req.user!.sites.length > 0
       ? req.user!.sites
       : (userSite ? [userSite] : []);
     const siteParam = (req.params.site as string | undefined) ?? null;
 
-    if (role === 'site') {
+    // Site accountants and project managers are both scoped to assigned sites.
+    if (isSiteScoped(req.user)) {
       if (siteParam && !userSites.includes(siteParam)) {
         res.status(403).json({ error: 'Forbidden', message: 'You can only view balances for sites you are assigned to' });
         return;
@@ -190,13 +192,14 @@ export async function createDisbursement(req: Request, res: Response, next: Next
 // GET /api/petty-cash/disbursements?site=X — HO (any site) | site (assigned sites only)
 export async function listDisbursements(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { role, site: userSite } = req.user!;
+    const { site: userSite } = req.user!;
     const userSites = req.user!.sites && req.user!.sites.length > 0
       ? req.user!.sites
       : (userSite ? [userSite] : []);
     const qSite = (req.query.site as string | undefined) ?? null;
+    const scoped = isSiteScoped(req.user);
 
-    if (role === 'site' && qSite && !userSites.includes(qSite)) {
+    if (scoped && qSite && !userSites.includes(qSite)) {
       res.status(403).json({ error: 'Forbidden', message: 'You can only view sites you are assigned to' });
       return;
     }
@@ -206,7 +209,7 @@ export async function listDisbursements(req: Request, res: Response, next: NextF
     if (qSite) {
       where = 'WHERE d.site = $1 AND d.deleted_at IS NULL';
       params = [qSite];
-    } else if (role === 'site') {
+    } else if (scoped) {
       where = 'WHERE d.site = ANY($1) AND d.deleted_at IS NULL';
       params = [userSites];
     } else {
@@ -362,13 +365,14 @@ export async function createExpense(req: Request, res: Response, next: NextFunct
 // GET /api/petty-cash/expenses?site=X — HO (any site) | site (assigned sites only)
 export async function listExpenses(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { role, site: userSite } = req.user!;
+    const { site: userSite } = req.user!;
     const userSites = req.user!.sites && req.user!.sites.length > 0
       ? req.user!.sites
       : (userSite ? [userSite] : []);
     const qSite = (req.query.site as string | undefined) ?? null;
+    const scoped = isSiteScoped(req.user);
 
-    if (role === 'site' && qSite && !userSites.includes(qSite)) {
+    if (scoped && qSite && !userSites.includes(qSite)) {
       res.status(403).json({ error: 'Forbidden', message: 'You can only view sites you are assigned to' });
       return;
     }
@@ -378,7 +382,7 @@ export async function listExpenses(req: Request, res: Response, next: NextFuncti
     if (qSite) {
       where = 'WHERE e.site = $1 AND e.deleted_at IS NULL';
       params = [qSite];
-    } else if (role === 'site') {
+    } else if (scoped) {
       where = 'WHERE e.site = ANY($1) AND e.deleted_at IS NULL';
       params = [userSites];
     } else {
@@ -402,13 +406,14 @@ export async function listExpenses(req: Request, res: Response, next: NextFuncti
 // site role: assigned sites only; HO: any site (defaults to all if no site query param)
 export async function getLedger(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const { role, site: userSite } = req.user!;
+    const { site: userSite } = req.user!;
     const userSites = req.user!.sites && req.user!.sites.length > 0
       ? req.user!.sites
       : (userSite ? [userSite] : []);
     const qSite = (req.query.site as string | undefined) ?? null;
+    const scoped = isSiteScoped(req.user);
 
-    if (role === 'site' && qSite && !userSites.includes(qSite)) {
+    if (scoped && qSite && !userSites.includes(qSite)) {
       res.status(403).json({ error: 'Forbidden', message: 'You can only view sites you are assigned to' });
       return;
     }
@@ -422,7 +427,7 @@ export async function getLedger(req: Request, res: Response, next: NextFunction)
       filterDisb = 'AND site = $1';
       filterExp  = 'AND e.site = $1';
       params = [qSite];
-    } else if (role === 'site') {
+    } else if (scoped) {
       filterDisb = 'AND site = ANY($1)';
       filterExp  = 'AND e.site = ANY($1)';
       params = [userSites];
