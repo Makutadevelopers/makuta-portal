@@ -222,8 +222,8 @@ export async function sendTempPassword(req: Request, res: Response, next: NextFu
   try {
     const { id } = req.params;
 
-    const user = await queryOne<{ id: string; name: string; email: string; is_active: boolean }>(
-      'SELECT id, name, email, is_active FROM users WHERE id = $1',
+    const user = await queryOne<{ id: string; name: string; email: string; role: string; sites: string[] | null; is_active: boolean }>(
+      'SELECT id, name, email, role, sites, is_active FROM users WHERE id = $1',
       [id]
     );
     if (!user) {
@@ -264,6 +264,8 @@ export async function sendTempPassword(req: Request, res: Response, next: NextFu
     const emailSent = await notifyTempPassword({
       name: user.name,
       email: user.email,
+      role: user.role,
+      sites: user.sites ?? [],
       tempPassword,
     });
 

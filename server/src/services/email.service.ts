@@ -133,21 +133,103 @@ export async function notifyInvoicePushed(params: {
   });
 }
 
+// Human-readable role label + the numbered "what you can do" list shown in the
+// welcome / temp-password email. Kept in sync with middleware/rbac.ts and the
+// role briefing in CLAUDE.md.
+function roleInfo(role: string): { label: string; scope: string; canDo: string[] } {
+  switch (role) {
+    case 'ho':
+      return {
+        label: 'Head Office (Head Accountant)',
+        scope: 'All sites',
+        canDo: [
+          'Add, edit and finalize invoices for every site',
+          'Record and edit payments of any amount (single, bulk & petty cash)',
+          'Manage vendors, credit notes and bank reconciliation',
+          'Run the executive dashboard, payment-aging and exports',
+          'Manage users and view the full audit log',
+        ],
+      };
+    case 'mgmt':
+      return {
+        label: 'Management (Managing Director)',
+        scope: 'All sites — read only',
+        canDo: [
+          'View executive dashboards across all sites',
+          'View payment aging and expenditure reports',
+          'Read-only access — no data entry',
+        ],
+      };
+    case 'project_manager':
+      return {
+        label: 'Project Manager',
+        scope: 'Your assigned sites only — read only',
+        canDo: [
+          'View invoices, amounts and outstanding balances for your assigned sites',
+          'View payment aging and expenditure for those sites',
+          'Read-only access — no invoices, payments or edits',
+        ],
+      };
+    case 'site':
+    default:
+      return {
+        label: 'Site Accountant',
+        scope: 'Your assigned site(s) only',
+        canDo: [
+          'Enter invoices for your site',
+          'Record minor payments up to ₹50,000 (larger payments are Head Office only)',
+          'Log petty-cash expenses against your site float',
+          'View category / vendor expenditure and payment status for your site',
+        ],
+      };
+  }
+}
+
 export async function notifyTempPassword(params: {
   name: string;
   email: string;
+  role: string;
+  sites?: string[];
   tempPassword: string;
 }): Promise<boolean> {
+  const info = roleInfo(params.role);
+  const loginUrl = env.APP_URL;
+  const sitesLine = params.sites && params.sites.length > 0
+    ? params.sites.join(', ')
+    : info.scope;
+  const canDoList = info.canDo
+    .map((c, i) => `<li style="margin:4px 0;"><strong>${i + 1}.</strong> ${c}</li>`)
+    .join('');
+
+  const row = (label: string, value: string) =>
+    `<tr>
+       <td style="padding:6px 12px 6px 0;color:#666;font-size:13px;vertical-align:top;white-space:nowrap;">${label}</td>
+       <td style="padding:6px 0;font-size:13px;color:#111;font-weight:600;">${value}</td>
+     </tr>`;
+
   return send({
     to: params.email,
-    subject: 'Your temporary Makuta Portal password',
+    subject: 'Your Makuta Portal login details',
     html: `
-      <h3>Temporary password</h3>
+      <h3 style="margin-bottom:4px;">Welcome to the Makuta Portal</h3>
+      <p style="color:#555;font-size:13px;margin-top:0;">Invoice &amp; Payment Portal for Makuta Developers — where site invoices are entered, payments are processed and expenditure is tracked across all projects.</p>
       <p>Hi ${params.name},</p>
-      <p>Your password has been reset. Sign in with the temporary password below, then change it from the "Change password" button at the top of the screen.</p>
-      <p style="font-size:20px;font-weight:bold;font-family:monospace;letter-spacing:2px;background:#f3f4f6;padding:10px 14px;border-radius:6px;display:inline-block;">${params.tempPassword}</p>
-      <p style="color:#666;font-size:12px;">If you didn't request this, contact your manager immediately.</p>
-      <hr><p style="color:#888;font-size:12px;">Makuta Developers — Invoice & Payment Portal</p>
+      <p>Your account is ready. Use the details below to sign in, then change your password from the <strong>"Change password"</strong> button at the top of the screen.</p>
+
+      <table style="border-collapse:collapse;margin:14px 0;">
+        ${row('Portal', 'Makuta Invoice &amp; Payment Portal')}
+        ${row('Login link', `<a href="${loginUrl}" style="color:#1a3c5e;">${loginUrl}</a>`)}
+        ${row('Your email (username)', params.email)}
+        ${row('Temporary password', `<span style="font-family:monospace;letter-spacing:2px;background:#f3f4f6;padding:4px 10px;border-radius:6px;display:inline-block;">${params.tempPassword}</span>`)}
+        ${row('Your role', info.label)}
+        ${row('Access', sitesLine)}
+      </table>
+
+      <p style="margin-bottom:4px;font-weight:600;">What you can do as ${info.label}:</p>
+      <ul style="padding-left:18px;margin-top:4px;color:#333;font-size:13px;">${canDoList}</ul>
+
+      <p style="color:#666;font-size:12px;margin-top:16px;">For your security, change this temporary password as soon as you sign in. If you didn't request this, contact your manager immediately.</p>
+      <hr><p style="color:#888;font-size:12px;">Makuta Developers — Invoice &amp; Payment Portal</p>
     `,
   });
 }
