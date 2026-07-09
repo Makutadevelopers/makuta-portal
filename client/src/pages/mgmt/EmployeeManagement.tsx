@@ -18,6 +18,38 @@ const ROLES: { value: string; label: string }[] = [
 // (read-only) expenditure for theirs. HO/MD are cross-site and take no sites.
 const roleNeedsSites = (r: string) => r === 'site' || r === 'project_manager';
 
+const PORTAL_URL = 'https://invoice.makutadevelopers.com';
+
+// A plain-text credentials sheet the admin can hand off when auto-email fails
+// (or just prefers to share manually). Kept to the essentials so it pastes
+// cleanly into WhatsApp / a message.
+function buildCredentialText(r: { userName: string; userEmail: string; tempPassword: string }): string {
+  return [
+    'Makuta Accounts — Login',
+    '',
+    `Name: ${r.userName}`,
+    `Portal: ${PORTAL_URL}`,
+    `Login email: ${r.userEmail}`,
+    `Temporary password: ${r.tempPassword}`,
+    '',
+    "This is a one-time password — you'll set your own right after your first sign-in. Please keep it private.",
+  ].join('\n');
+}
+
+// Download the credentials as a .txt "doc" the admin can forward.
+function downloadCredentialDoc(r: { userName: string; userEmail: string; tempPassword: string }): void {
+  const blob = new Blob([buildCredentialText(r)], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const safeName = r.userName.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'user';
+  a.download = `makuta-login-${safeName}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export default function EmployeeManagement() {
   const { notify } = useToast();
   const [users, setUsers] = useState<UserRecord[]>([]);
@@ -33,6 +65,7 @@ export default function EmployeeManagement() {
     tempPassword: string;
     userName: string;
     userEmail: string;
+    emailSent: boolean;
   } | null>(null);
   const [sendingTempFor, setSendingTempFor] = useState<string | null>(null);
   const [confirmTempFor, setConfirmTempFor] = useState<UserRecord | null>(null);
@@ -84,6 +117,7 @@ export default function EmployeeManagement() {
         tempPassword: result.tempPassword,
         userName: result.userName,
         userEmail: result.userEmail,
+        emailSent: result.emailSent,
       });
       // Refresh alerts so the badge clears.
       loadPendingResets();
@@ -508,8 +542,11 @@ export default function EmployeeManagement() {
             <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
               <div className="text-lg font-medium text-gray-900 mb-1">Temporary password generated</div>
               <div className="text-sm text-gray-500 mb-5">
-                Share this with <strong>{tempPasswordResult.userName}</strong> via WhatsApp or phone.
-                They use it to sign in once, then change their password.
+                {tempPasswordResult.emailSent ? (
+                  <>Emailed to <strong>{tempPasswordResult.userEmail}</strong>. You can also share it with {tempPasswordResult.userName} directly below. They sign in once, then set their own password.</>
+                ) : (
+                  <>Couldn't email this automatically — share it with <strong>{tempPasswordResult.userName}</strong> via WhatsApp/phone or download the doc below. They sign in once, then set their own password.</>
+                )}
               </div>
 
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 flex items-center justify-between gap-3">
@@ -524,12 +561,39 @@ export default function EmployeeManagement() {
                 </button>
               </div>
 
-              <div className="text-xs text-gray-500 space-y-1 mb-5">
+              {/* Email delivery status — reflects the API's real emailSent flag */}
+              {tempPasswordResult.emailSent ? (
+                <div className="text-sm bg-green-50 border border-green-200 text-green-800 rounded-lg px-3 py-2 mb-4">
+                  ✓ Emailed to {tempPasswordResult.userEmail}
+                </div>
+              ) : (
+                <div className="text-sm bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3 py-2 mb-4">
+                  ✕ Couldn't email automatically — use “Copy full message” or “Download as doc” below to share it.
+                </div>
+              )}
+
+              <div className="text-xs text-gray-500 space-y-1 mb-4">
                 <div>👤 {tempPasswordResult.userName}</div>
-                <div>✉️ {tempPasswordResult.userEmail} <span className="text-gray-400">(also emailed if SMTP is set)</span></div>
+                <div>✉️ {tempPasswordResult.userEmail}</div>
                 <div className="text-amber-700 mt-2">
                   ⚠ The user's old password is now invalid. They must use this one-time password for their next sign-in.
                 </div>
+              </div>
+
+              {/* Manual-share helpers — always available, essential when email failed */}
+              <div className="flex flex-wrap gap-2 mb-5">
+                <button
+                  onClick={() => copyToClipboard(buildCredentialText(tempPasswordResult))}
+                  className="px-3 py-1.5 border border-gray-200 text-gray-700 text-xs rounded-lg hover:bg-gray-50"
+                >
+                  Copy full message
+                </button>
+                <button
+                  onClick={() => downloadCredentialDoc(tempPasswordResult)}
+                  className="px-3 py-1.5 border border-gray-200 text-gray-700 text-xs rounded-lg hover:bg-gray-50"
+                >
+                  Download as doc
+                </button>
               </div>
 
               <div className="flex justify-end">
