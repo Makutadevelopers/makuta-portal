@@ -1,7 +1,7 @@
 import { Fragment, ReactNode, useEffect, useMemo, useState } from 'react';
 import AppShell from '../../components/layout/AppShell';
 import ExportButton from '../../components/shared/ExportButton';
-import { getBankReconciliation, verifyBankTxn, updateBankTxnDate, BankReconciliationRow, BankTxnAllocation } from '../../api/reconciliation';
+import { getBankReconciliation, verifyBankTxn, updateBankTxnDate, updateBankTxnRef, revertBankTxn, BankReconciliationRow, BankTxnAllocation } from '../../api/reconciliation';
 import { formatINR, formatDate } from '../../utils/formatters';
 import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
@@ -38,6 +38,15 @@ export default function BankReconciliation() {
   const [editingDateId, setEditingDateId] = useState<string | null>(null);
   const [draftDate, setDraftDate] = useState('');
   const [dateError, setDateError] = useState<string | null>(null);
+  // Inline cheque / reference edit — mirrors the date edit above.
+  const [editingRefId, setEditingRefId] = useState<string | null>(null);
+  const [draftRef, setDraftRef] = useState('');
+  const [refError, setRefError] = useState<string | null>(null);
+  // Whole-cheque reversal: the row awaiting confirmation + the typed reason.
+  const [revertFor, setRevertFor] = useState<BankReconciliationRow | null>(null);
+  const [revertReason, setRevertReason] = useState('');
+  const [reverting, setReverting] = useState(false);
+  const [revertError, setRevertError] = useState<string | null>(null);
   const { user } = useAuth();
   const canEditDate = user?.role === 'ho';
   const isMobile = useIsMobile();
@@ -97,6 +106,43 @@ export default function BankReconciliation() {
       setDateError(err instanceof Error ? err.message : 'Save failed');
     }
     setSavingId(null);
+  }
+
+  // Save a corrected cheque / transaction reference. The backend rewrites
+  // payment_ref on every linked payment, so re-fetch to keep the page in step.
+  async function saveRef(r: BankReconciliationRow) {
+    setRefError(null);
+    const next = draftRef.trim();
+    if (!next) { setRefError('Reference cannot be empty'); return; }
+    if (next === r.txn_ref) { setEditingRefId(null); return; }
+    setSavingId(r.id);
+    try {
+      await updateBankTxnRef(r.id, next);
+      setEditingRefId(null);
+      load({ silent: true });
+    } catch (err) {
+      setRefError(err instanceof Error ? err.message : 'Save failed');
+    }
+    setSavingId(null);
+  }
+
+  // Reverse an entire cheque — every payment under it is deleted and each
+  // invoice recomputed. Destructive, so it goes through a reason prompt.
+  async function confirmRevert() {
+    if (!revertFor) return;
+    const reason = revertReason.trim();
+    if (reason.length < 3) { setRevertError('Give a reason (min 3 characters)'); return; }
+    setReverting(true);
+    setRevertError(null);
+    try {
+      await revertBankTxn(revertFor.id, reason);
+      setRevertFor(null);
+      setRevertReason('');
+      load({ silent: true });
+    } catch (err) {
+      setRevertError(err instanceof Error ? err.message : 'Revert failed');
+    }
+    setReverting(false);
   }
 
   // Tick / un-tick a transaction as verified against the bank statement.
@@ -467,6 +513,9 @@ export default function BankReconciliation() {
                 <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Invoices</th>
                 <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Tally</th>
                 <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Verified</th>
+                {canEditDate && (
+                  <th className="text-center px-4 py-2.5 font-medium bg-gray-50 sticky top-0 z-20 border-b border-gray-100">Actions</th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -496,7 +545,40 @@ export default function BankReconciliation() {
                         {renderDateEditor(r)}
                       </td>
                       <td className="px-4 py-3 text-gray-700">{r.txn_type}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900 truncate">{r.txn_ref}</td>
+                      <td
+                        className="px-4 py-3 font-medium text-gray-900 truncate relative"
+                        onClick={canEditDate ? (e => { e.stopPropagation(); setEditingRefId(r.id); setDraftRef(r.txn_ref); setRefError(null); }) : undefined}
+                        title={canEditDate ? 'Click to correct the cheque / reference number — linked payments will follow' : undefined}
+                      >
+                        <span className={canEditDate ? 'cursor-pointer hover:underline decoration-dotted underline-offset-2' : undefined}>
+                          {r.txn_ref}
+                        </span>
+                        {editingRefId === r.id && (
+                          <div
+                            className="absolute left-2 top-full z-30 mt-1 w-56 rounded-lg border border-gray-200 bg-white p-2 shadow-lg"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <input
+                              autoFocus
+                              value={draftRef}
+                              onChange={e => setDraftRef(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') saveRef(r); if (e.key === 'Escape') setEditingRefId(null); }}
+                              className="w-full rounded-md border border-gray-200 px-2 py-1 text-sm"
+                            />
+                            {refError && <div className="mt-1 text-[11px] text-red-600">{refError}</div>}
+                            <div className="mt-2 flex justify-end gap-2">
+                              <button onClick={() => setEditingRefId(null)} className="text-xs text-gray-500">Cancel</button>
+                              <button
+                                onClick={() => saveRef(r)}
+                                disabled={savingId === r.id}
+                                className="rounded bg-[#1a3c5e] px-2 py-1 text-xs text-white disabled:opacity-50"
+                              >
+                                {savingId === r.id ? 'Saving…' : 'Save'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-gray-700 truncate">{vendorSummary(r.allocations)}</td>
                       <td className="px-4 py-3 text-gray-600 truncate">{r.bank ?? '—'}</td>
                       <td className="px-4 py-3 text-right font-medium text-gray-900">{formatINR(r.txn_amount)}</td>
@@ -509,10 +591,21 @@ export default function BankReconciliation() {
                       <td className="px-4 py-3 text-center">
                         {renderVerifiedCheckbox(r)}
                       </td>
+                      {canEditDate && (
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={e => { e.stopPropagation(); setRevertFor(r); setRevertReason(''); setRevertError(null); }}
+                            className="text-xs text-red-600 hover:underline"
+                            title="Reverse this entire cheque — deletes every payment under it"
+                          >
+                            Revert
+                          </button>
+                        </td>
+                      )}
                     </tr>
                     {isOpen && (
                       <tr className="bg-gray-50/80">
-                        <td colSpan={12} className="px-6 py-4">
+                        <td colSpan={canEditDate ? 13 : 12} className="px-6 py-4">
                           {renderAllocations(r)}
                         </td>
                       </tr>
@@ -524,6 +617,41 @@ export default function BankReconciliation() {
           </table>
         </div>
       </div>
+      )}
+
+      {/* Whole-cheque reversal — destructive, so it demands a typed reason. */}
+      {revertFor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !reverting && setRevertFor(null)}>
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="text-lg font-medium text-gray-900">Revert this entire cheque?</div>
+            <div className="mt-2 text-sm text-gray-600">
+              <strong>{revertFor.txn_ref}</strong> · {formatINR(revertFor.txn_amount)} · {revertFor.allocation_count} invoice(s)
+            </div>
+            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+              Every payment recorded under this cheque will be deleted and each invoice's status recomputed.
+              The bank transaction itself is removed. This cannot be undone.
+            </div>
+            <label className="mt-4 block text-xs font-medium text-gray-600">Reason *</label>
+            <input
+              autoFocus
+              value={revertReason}
+              onChange={e => setRevertReason(e.target.value)}
+              placeholder="e.g. cheque bounced / entered in error"
+              className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            />
+            {revertError && <div className="mt-2 text-xs text-red-600">{revertError}</div>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setRevertFor(null)} disabled={reverting} className="px-4 py-2 text-sm text-gray-600">Cancel</button>
+              <button
+                onClick={confirmRevert}
+                disabled={reverting}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {reverting ? 'Reverting…' : 'Revert cheque'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </AppShell>
   );

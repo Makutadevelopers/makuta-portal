@@ -37,8 +37,14 @@ const bulkPaySchema = z.object({
     // single-payment path. Optional; defaults to 0.
     tds_pct: z.number().min(0).max(10).optional(),
     // GST-TDS withheld under GST law (statutorily 2%), computed on the same
-    // pre-GST base as TDS. Optional; defaults to 0.
+    // pre-GST base as TDS. Optional; defaults to 0. Retained for backwards
+    // compatibility — the Bulk Pay UI now sends gst_added_pct instead.
     gst_tds_pct: z.number().min(0).max(10).optional(),
+    // GST ADDED at payment — extra cash paid to the vendor on top of the
+    // invoice, computed on the base AFTER income-tax TDS (migration 052).
+    // NOT part of settlement, so it never counts toward the outstanding
+    // balance; it DOES form part of the cheque / bank-transaction total.
+    gst_added_pct: z.number().min(0).max(28).optional(),
   })).min(1).max(200),
 }).refine(
   d => d.txn_type.trim().toLowerCase() === 'cash' || !!d.txn_ref?.trim(),
@@ -73,36 +79,25 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
     const data = bulkPaySchema.parse(req.body);
     const { id: userId } = req.user!;
 
-    // Allocation total must tally with cheque / transaction amount (allow ₹1 paise tolerance)
-    const allocTotal = data.allocations.reduce((s, a) => s + a.amount, 0);
-    if (Math.abs(allocTotal - data.txn_amount) >= 1) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: `Allocations total ₹${allocTotal.toLocaleString('en-IN')} does not match cheque / transaction amount ₹${data.txn_amount.toLocaleString('en-IN')}`,
-      });
-      return;
-    }
-
     // Cash isn't a bank instrument, so it gets no bank_transactions row (mirrors
     // syncBankTxnForPayment, which only links cheque/NEFT/etc). Every other type
     // creates one row that all the payments link to.
     const isCash = data.txn_type.trim().toLowerCase() === 'cash';
 
     const result = await withTransaction(async (tx) => {
-      let txn: BankTxnRow | null = null;
-      if (!isCash) {
-        txn = await tx.queryOne<BankTxnRow>(
-          `INSERT INTO bank_transactions (txn_type, txn_ref, txn_amount, txn_date, bank, remarks, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           RETURNING *`,
-          [data.txn_type, data.txn_ref, data.txn_amount, data.txn_date, data.bank ?? null, data.remarks ?? null, userId]
-        );
-        if (!txn) {
-          return { status: 500, body: { error: 'Internal Server Error', message: 'Failed to create bank transaction' } };
-        }
-      }
-
-      const paymentsOut: { invoice_id: string; amount: number; invoice_no: string }[] = [];
+      // IMPORTANT: withTransaction COMMITS on a normal return and only rolls
+      // back when the callback throws. So nothing may be written until every
+      // allocation has passed validation — otherwise a failure on invoice N
+      // would still commit the bank transaction and invoices 1..N-1's payments
+      // while the caller is told the request failed. Hence two passes:
+      // pass 1 validates only, pass 2 writes.
+      const prepared: {
+        invoice: InvoiceRow;
+        amount: number;
+        tdsPctVal: number; tdsAmount: number;
+        gstTdsPctVal: number; gstTdsAmount: number;
+        gstAddedPctVal: number; gstAddedAmount: number;
+      }[] = [];
 
       for (const alloc of data.allocations) {
         const invoice = await tx.queryOne<InvoiceRow>(
@@ -137,10 +132,15 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
         // invoice without cash changing hands.
         const gstTdsPctVal = Math.max(0, Math.min(10, alloc.gst_tds_pct ?? 0));
         const gstTdsAmount = Math.round(tdsBase * gstTdsPctVal) / 100;
+        // GST added at payment — extra cash to the vendor, computed on the base
+        // AFTER income-tax TDS (identical rule to the single-payment path).
+        // Deliberately excluded from the balance check below: it settles
+        // nothing, it's simply more money leaving the bank.
+        const gstAddedPctVal = Math.max(0, Math.min(28, alloc.gst_added_pct ?? 0));
+        const gstAddedAmount = Math.round((tdsBase - tdsAmount) * gstAddedPctVal) / 100;
 
-        // The cheque amount is the cash leg only, so the allocation tally above
-        // is unaffected by TDS/GST-TDS — but cash + TDS + GST-TDS together must
-        // still fit inside the outstanding balance.
+        // Cash + TDS + GST-TDS together must fit inside the outstanding
+        // balance (added GST is excluded — it isn't settlement).
         if (alloc.amount + tdsAmount + gstTdsAmount > balance + 0.009) {
           const withheldParts = [
             tdsAmount > 0 ? `TDS ₹${tdsAmount.toLocaleString('en-IN')}` : null,
@@ -155,13 +155,55 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
           };
         }
 
+        prepared.push({
+          invoice, amount: alloc.amount,
+          tdsPctVal, tdsAmount,
+          gstTdsPctVal, gstTdsAmount,
+          gstAddedPctVal, gstAddedAmount,
+        });
+      }
+
+      // Cheque total = cash legs + any GST added on top. Added GST is real
+      // money leaving the bank, so the instrument has to cover it (migration
+      // 052). With no added GST this reduces to the old cash-only tally, so
+      // existing callers are unaffected. ₹1 tolerance for paise rounding.
+      const chequeTotal = prepared.reduce((s, p) => s + p.amount + p.gstAddedAmount, 0);
+      if (Math.abs(chequeTotal - data.txn_amount) >= 1) {
+        const addedTotal = prepared.reduce((s, p) => s + p.gstAddedAmount, 0);
+        return {
+          status: 400,
+          body: {
+            error: 'Bad Request',
+            message: `Allocations total ₹${chequeTotal.toLocaleString('en-IN')}${addedTotal > 0 ? ` (cash + GST added ₹${addedTotal.toLocaleString('en-IN')})` : ''} does not match cheque / transaction amount ₹${data.txn_amount.toLocaleString('en-IN')}`,
+          },
+        };
+      }
+
+      // ── Pass 2: everything validated, now write ──────────────────────────
+      let txn: BankTxnRow | null = null;
+      if (!isCash) {
+        txn = await tx.queryOne<BankTxnRow>(
+          `INSERT INTO bank_transactions (txn_type, txn_ref, txn_amount, txn_date, bank, remarks, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING *`,
+          [data.txn_type, data.txn_ref, data.txn_amount, data.txn_date, data.bank ?? null, data.remarks ?? null, userId]
+        );
+        if (!txn) {
+          return { status: 500, body: { error: 'Internal Server Error', message: 'Failed to create bank transaction' } };
+        }
+      }
+
+      const paymentsOut: { invoice_id: string; amount: number; invoice_no: string }[] = [];
+
+      for (const p of prepared) {
         await tx.query(
-          `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, bank_txn_id, tds_pct, tds_amount, gst_tds_pct, gst_tds_amount)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-          [alloc.invoice_id, alloc.amount, data.txn_type,
+          `INSERT INTO payments (invoice_id, amount, payment_type, payment_ref, payment_date, bank, recorded_by, bank_txn_id, tds_pct, tds_amount, gst_tds_pct, gst_tds_amount, gst_added_pct, gst_added_amount)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+          [p.invoice.id, p.amount, data.txn_type,
            isCash ? null : (data.txn_ref ?? null), data.txn_date,
            isCash ? null : (data.bank ?? null), userId, txn?.id ?? null,
-           tdsPctVal, tdsAmount, gstTdsPctVal, gstTdsAmount]
+           p.tdsPctVal, p.tdsAmount, p.gstTdsPctVal, p.gstTdsAmount,
+           p.gstAddedPctVal, p.gstAddedAmount]
         );
 
         await tx.query(
@@ -169,10 +211,10 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
            SET payment_status = ${paymentStatusCase('invoices')},
                updated_at = NOW()
            WHERE id = $1`,
-          [alloc.invoice_id]
+          [p.invoice.id]
         );
 
-        paymentsOut.push({ invoice_id: alloc.invoice_id, amount: alloc.amount, invoice_no: invoice.invoice_no });
+        paymentsOut.push({ invoice_id: p.invoice.id, amount: p.amount, invoice_no: p.invoice.invoice_no });
       }
 
       return { status: 201, body: { txn, allocations: paymentsOut } };
@@ -497,6 +539,181 @@ export async function updateReconciliationDate(req: Request, res: Response, next
     }
 
     res.json({ id: body.id, txn_ref: body.txn_ref, txn_date: body.txn_date, old_date: body.old_date, payments_updated: body.payments_updated });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── Revert an entire cheque / transaction ───────────────────────────────────
+// POST /api/reconciliation/:id/revert — HO only
+// Reverses a WHOLE bank transaction that was recorded in error: hard-deletes
+// every payment linked to it, recomputes each affected invoice's status, then
+// removes the bank_transactions row itself. Mirrors revertInvoicePayments, but
+// scoped by bank_txn_id instead of invoice_id so one action undoes the entire
+// bulk payment rather than making the user revert 50 invoices one at a time.
+const revertTxnSchema = z.object({
+  reason: z.string().min(3, 'Give a reason for the reversal').max(500),
+});
+
+export async function revertBankTxn(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    if (!z.string().uuid().safeParse(id).success) {
+      res.status(400).json({ error: 'Bad Request', message: 'Invalid transaction id' });
+      return;
+    }
+    const { reason } = revertTxnSchema.parse(req.body);
+    const { id: userId } = req.user!;
+
+    const result = await withTransaction(async (tx) => {
+      const txn = await tx.queryOne<BankTxnRow>(
+        `SELECT * FROM bank_transactions WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+      if (!txn) {
+        return { status: 404, body: { error: 'Not Found', message: 'Bank transaction not found' } };
+      }
+
+      const payments = await tx.query<{ id: string; invoice_id: string; amount: string; invoice_no: string }>(
+        `SELECT p.id, p.invoice_id, p.amount::text AS amount, i.invoice_no
+         FROM payments p
+         JOIN invoices i ON i.id = p.invoice_id
+         WHERE p.bank_txn_id = $1`,
+        [id]
+      );
+      if (payments.length === 0) {
+        return { status: 400, body: { error: 'Bad Request', message: 'This transaction has no payments to revert' } };
+      }
+
+      const invoiceIds = [...new Set(payments.map(p => p.invoice_id))];
+
+      await tx.query(`DELETE FROM payments WHERE bank_txn_id = $1`, [id]);
+
+      // Recompute each invoice from what's left (credit notes may still cover
+      // part of it) and clear the site minor-payment flag.
+      for (const invoiceId of invoiceIds) {
+        await tx.query(
+          `UPDATE invoices
+              SET payment_status = ${paymentStatusCase('invoices')},
+                  minor_payment = FALSE,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [invoiceId]
+        );
+      }
+
+      await tx.query(`DELETE FROM bank_transactions WHERE id = $1`, [id]);
+
+      return {
+        status: 200,
+        body: {
+          txn_ref: txn.txn_ref,
+          txn_amount: txn.txn_amount,
+          reverted_payments: payments.length,
+          reverted_invoices: invoiceIds.length,
+          invoice_nos: payments.map(p => p.invoice_no),
+        },
+      };
+    });
+
+    if (result.status !== 200) {
+      res.status(result.status).json(result.body);
+      return;
+    }
+
+    const body = result.body as {
+      txn_ref: string; txn_amount: string | number;
+      reverted_payments: number; reverted_invoices: number; invoice_nos: string[];
+    };
+
+    try {
+      await logAudit({
+        userId,
+        action: `Reverted bulk payment ${body.txn_ref} (₹${Number(body.txn_amount).toLocaleString('en-IN')}) across ${body.reverted_invoices} invoice(s) — ${reason}`,
+        metadata: {
+          txn_id: id, txn_ref: body.txn_ref, txn_amount: body.txn_amount,
+          reverted_payments: body.reverted_payments,
+          reverted_invoices: body.reverted_invoices,
+          invoice_nos: body.invoice_nos,
+          reason,
+        },
+      });
+    } catch (err) {
+      console.error('[audit] revertBankTxn audit log failed:', err);
+    }
+
+    res.json(body);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ── Correct a cheque / reference number ─────────────────────────────────────
+// PATCH /api/reconciliation/:id/ref — HO only
+// Fixes a mistyped cheque / transaction reference after the fact. The number is
+// denormalised onto every linked payment row (payment_ref), so both are updated
+// together or the invoice's payment history would still show the old number.
+const updateRefSchema = z.object({
+  txn_ref: z.string().min(1, 'Reference is required').max(100),
+});
+
+export async function updateBankTxnRef(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    if (!z.string().uuid().safeParse(id).success) {
+      res.status(400).json({ error: 'Bad Request', message: 'Invalid transaction id' });
+      return;
+    }
+    const { txn_ref: newRef } = updateRefSchema.parse(req.body);
+    const { id: userId } = req.user!;
+
+    const result = await withTransaction(async (tx) => {
+      const txn = await tx.queryOne<{ id: string; txn_ref: string; txn_type: string }>(
+        `SELECT id, txn_ref, txn_type FROM bank_transactions WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+      if (!txn) {
+        return { status: 404, body: { error: 'Not Found', message: 'Bank transaction not found' } };
+      }
+      if (txn.txn_ref === newRef) {
+        return { status: 200, body: { id, txn_ref: newRef, old_ref: txn.txn_ref, payments_updated: 0, unchanged: true } };
+      }
+
+      await tx.query(
+        `UPDATE bank_transactions SET txn_ref = $1 WHERE id = $2`,
+        [newRef, id]
+      );
+      const updated = await tx.query<{ id: string }>(
+        `UPDATE payments SET payment_ref = $1 WHERE bank_txn_id = $2 RETURNING id`,
+        [newRef, id]
+      );
+
+      return {
+        status: 200,
+        body: { id, txn_ref: newRef, old_ref: txn.txn_ref, payments_updated: updated.length, unchanged: false },
+      };
+    });
+
+    if (result.status !== 200) {
+      res.status(result.status).json(result.body);
+      return;
+    }
+
+    const body = result.body as { id: string; txn_ref: string; old_ref: string; payments_updated: number; unchanged: boolean };
+
+    if (!body.unchanged) {
+      try {
+        await logAudit({
+          userId,
+          action: `Edited cheque / reference: "${body.old_ref}" → "${body.txn_ref}" (${body.payments_updated} payment row(s))`,
+          metadata: { txn_id: id, before: body.old_ref, after: body.txn_ref, payments_updated: body.payments_updated },
+        });
+      } catch (err) {
+        console.error('[audit] updateBankTxnRef audit log failed:', err);
+      }
+    }
+
+    res.json(body);
   } catch (err) {
     next(err);
   }

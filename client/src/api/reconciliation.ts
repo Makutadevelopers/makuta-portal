@@ -37,7 +37,12 @@ export interface BulkPayAllocationInput {
   // TDS % withheld for this invoice (0–10). Computed on base_amount server-side.
   tds_pct?: number;
   // GST-TDS % withheld for this invoice (0–10). Same pre-GST base as TDS.
+  // Legacy — the Bulk Pay UI now sends gst_added_pct instead.
   gst_tds_pct?: number;
+  // GST % ADDED at payment (0–28) — extra cash paid to the vendor on top of
+  // the invoice, computed on the base after TDS. Settles nothing; forms part
+  // of the cheque total.
+  gst_added_pct?: number;
 }
 
 export interface BulkPayInput {
@@ -64,6 +69,36 @@ export function updateBankTxnDate(id: string, txn_date: string): Promise<{
   return apiFetch(`/reconciliation/${id}/date`, {
     method: 'PATCH',
     body: JSON.stringify({ txn_date }),
+  });
+}
+
+// Correct a mistyped cheque / transaction reference. The server also rewrites
+// payment_ref on every linked payment so the invoice history stays in step.
+export function updateBankTxnRef(id: string, txn_ref: string): Promise<{
+  id: string;
+  txn_ref: string;
+  old_ref: string;
+  payments_updated: number;
+  unchanged: boolean;
+}> {
+  return apiFetch(`/reconciliation/${id}/ref`, {
+    method: 'PATCH',
+    body: JSON.stringify({ txn_ref }),
+  });
+}
+
+// Reverse an entire cheque — deletes every payment under it, recomputes each
+// invoice's status, and removes the bank transaction. Requires a reason.
+export function revertBankTxn(id: string, reason: string): Promise<{
+  txn_ref: string;
+  txn_amount: number;
+  reverted_payments: number;
+  reverted_invoices: number;
+  invoice_nos: string[];
+}> {
+  return apiFetch(`/reconciliation/${id}/revert`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
   });
 }
 
