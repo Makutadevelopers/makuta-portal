@@ -38,7 +38,10 @@ set -euo pipefail
 S3_BUCKET="makuta-backup-use1"
 S3_REGION="us-east-1"
 
-INTERNAL_ROOT="${INTERNAL_ROOT:-$HOME/Makuta-Backups}"
+# Scoped to its own subfolder: ~/Makuta-Backups is shared with the CRM's mongo
+# and secrets backups, and two backup systems writing (and pruning) one folder
+# is a future accident. Keep the portal's copies clearly separate.
+INTERNAL_ROOT="${INTERNAL_ROOT:-$HOME/Makuta-Backups/invoice-portal}"
 DRIVE_ROOT="${DRIVE_ROOT:-/Volumes/mac-scratch}"
 DRIVE_DEST="$DRIVE_ROOT/Backups/invoice portal"
 ICLOUD_DEST="${ICLOUD_DEST:-$HOME/Library/Mobile Documents/com~apple~CloudDocs/Makuta-Backups}"

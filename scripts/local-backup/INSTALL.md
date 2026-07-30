@@ -4,7 +4,7 @@ This sets up your Mac to pull the database dump and invoice-attachment mirror fr
 
 | Destination | Path | Survives | Keeps |
 |---|---|---|---|
-| Internal disk | `~/Makuta-Backups/` | AWS gone, hosting down, app retired | 14 days |
+| Internal disk | `~/Makuta-Backups/invoice-portal/` | AWS gone, hosting down, app retired | 14 days |
 | External drive | `/Volumes/mac-scratch/Backups/invoice portal/` | the Mac dying | 30 days |
 | iCloud Drive (encrypted) | `Makuta-Backups/` | losing the Mac **and** the drive | 7 newest |
 
@@ -157,7 +157,7 @@ tail -40 ~/Library/Logs/makuta-backup.log
 The log should end with three `[done]` lines, one per destination:
 
 ```
-[done] internal /Users/<you>/Makuta-Backups — 111M
+[done] internal /Users/<you>/Makuta-Backups/invoice-portal — 111M
 [done] drive    /Volumes/mac-scratch/Backups/invoice portal — 2.0G
 [done] icloud   .../Makuta-Backups — 2.8M (2 encrypted files)
 ```
@@ -165,7 +165,7 @@ The log should end with three `[done]` lines, one per destination:
 Layout on the internal disk and the drive:
 
 ```
-~/Makuta-Backups/
+~/Makuta-Backups/invoice-portal/
 ├── 2026-07-30/
 │   ├── db/   makuta_makuta_portal_<timestamp>.sql.gz
 │   └── csv/  invoice_register.csv, invoices.csv, payments.csv, …

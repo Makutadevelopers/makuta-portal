@@ -7,7 +7,7 @@ There are three copies of everything. Use whichever you can reach:
 
 | Where | Path | Holds | Keeps |
 |---|---|---|---|
-| Internal disk | `~/Makuta-Backups/` | dumps, CSVs, invoice files | 14 days |
+| Internal disk | `~/Makuta-Backups/invoice-portal/` | dumps, CSVs, invoice files | 14 days |
 | External drive | `/Volumes/mac-scratch/Backups/invoice portal/` | same, dated | 30 days |
 | iCloud Drive | `Makuta-Backups/` | newest dump + CSVs, **encrypted** | 7 newest |
 
@@ -18,7 +18,7 @@ There are three copies of everything. Use whichever you can reach:
 Open the CSVs. This is the normal case and needs nothing installed:
 
 ```
-~/Makuta-Backups/<YYYY-MM-DD>/csv/
+~/Makuta-Backups/invoice-portal/<YYYY-MM-DD>/csv/
 ```
 
 Start with **`invoice_register.csv`** — one row per invoice with the vendor,
@@ -54,7 +54,7 @@ Two things worth knowing so the numbers don't surprise you:
 The `.sql.gz` files are plain `pg_dump` output. Into any Postgres 17:
 
 ```bash
-gunzip -c ~/Makuta-Backups/<date>/db/makuta_makuta_portal_<stamp>.sql.gz \
+gunzip -c ~/Makuta-Backups/invoice-portal/<date>/db/makuta_makuta_portal_<stamp>.sql.gz \
   | psql -h <host> -U <user> -d <new_empty_database>
 ```
 
