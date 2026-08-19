@@ -156,8 +156,27 @@ Deployment:
   - ./infra/prod/deploy.sh --no-build     — restart containers only (no rebuild)
   - ./infra/prod/deploy.sh --migrate-only — apply pending migrations to RDS
 
-## Sites
+## Sites (projects)
 Nirvana, Taranga, Horizon, Green Wood Villas, Aruna Arcade, Office
+
+Since migration 053 these live in the `sites` table, **not** in code. HO adds,
+renames and archives them at **/projects (Project Master)** — no deploy needed.
+- `client/src/utils/constants.ts` `SITES` is now only the seed + offline
+  fallback. Read projects with the `useSites()` hook; server-side use
+  `normaliseSiteName` / `isCanonicalSite` / `activeSiteNames` from
+  `server/src/utils/sites.ts`, which read an in-process cache (60s TTL,
+  refreshed eagerly on every write) so they can stay synchronous in the
+  importer's per-row loop.
+- Deliberately NOT a foreign key: `invoices.site`, `credit_notes.site`,
+  `petty_cash_*.site` and `users.sites[]` all store the project NAME as text.
+  A **rename therefore cascades** across all five in one transaction
+  (`renameSite` in `sites.service.ts`), audit-logged with per-table counts so
+  it can be reversed by renaming back.
+- Projects are never hard-deleted — archiving (`active = false`) retires one
+  from new dropdowns while historical records keep resolving.
+- Migration 053 registers any site name already present in live data but not
+  canonical (e.g. `Villa No -140 Honer Homes`, 1 invoice) as **archived**, so
+  typo/import phantoms are visible to HO instead of silently invisible.
 
 ## Do not modify without discussion
 - server/src/middleware/rbac.ts

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, Fragment, FormEvent, ChangeEvent, DragEvent } from 'react';
+import { useSites } from '../../hooks/useSites';
 import { useSearchParams } from 'react-router-dom';
 import { downloadAuthenticated } from '../../api/client';
 import { useInvoices } from '../../hooks/useInvoices';
@@ -10,7 +11,7 @@ import { getPayments, updatePayment } from '../../api/payments';
 import { bulkPayInvoices } from '../../api/reconciliation';
 import { createVendor } from '../../api/vendors';
 import { formatINR, formatINRPaisa, formatDate } from '../../utils/formatters';
-import { SITES, PAYMENT_TYPES } from '../../utils/constants';
+import { PAYMENT_TYPES } from '../../utils/constants';
 import CategorySelect from '../../components/shared/CategorySelect';
 import BankSelect from '../../components/shared/BankSelect';
 import { Invoice, InvoiceLineItem } from '../../types/invoice';
@@ -40,6 +41,10 @@ import { useTypeaheadKeyboard } from '../../hooks/useTypeaheadKeyboard';
 const INVOICE_PAGE_SIZE = 50;
 
 export default function InvoiceList() {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const { invoices, loading, refresh, patchInvoice, removeInvoice } = useInvoices();
   const { withinTerms, overdue } = useAgingCalc();
   const { vendors } = useVendors();
@@ -1566,6 +1571,10 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
   onCancel: () => void;
   onSaved: () => void;
 }) {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const isEdit = !!editInvoice;
   const { notify } = useToast();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -2156,6 +2165,10 @@ function HOInvoiceBatchForm({ vendors, onCancel, onSaved }: {
   onCancel: () => void;
   onSaved: (createdCount: number) => void;
 }) {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const { notify } = useToast();
 
   const [localVendors, setLocalVendors] = useState<Vendor[]>(vendors);

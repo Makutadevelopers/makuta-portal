@@ -15,6 +15,7 @@ const HO_TABS = [
   { to: '/analytics', label: 'Analytics' },
   { to: '/vendors', label: 'Vendor Master' },
   { to: '/banks', label: 'Bank Master' },
+  { to: '/projects', label: 'Project Master' },
   { to: '/bank-reconciliation', label: 'Bank Reconciliation' },
   { to: '/petty-cash', label: 'Petty Cash' },
   { to: '/audit', label: 'Audit Trail' },

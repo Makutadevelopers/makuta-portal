@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSites } from '../../hooks/useSites';
 import { getUsers, createUser, updateUser, resetUserPassword, sendTempPassword, UserRecord } from '../../api/users';
 import { getAlerts, resolveAlert, Alert } from '../../api/alerts';
 import { useToast } from '../../context/ToastContext';
 import AppShell from '../../components/layout/AppShell';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
-const SITES = ['Nirvana', 'Taranga', 'Horizon', 'Green Wood Villas', 'Aruna Arcade', 'Office'];
 const ROLES: { value: string; label: string }[] = [
   { value: 'ho', label: 'Head Office' },
   { value: 'mgmt', label: 'Management' },
@@ -51,6 +51,10 @@ function downloadCredentialDoc(r: { userName: string; userEmail: string; tempPas
 }
 
 export default function EmployeeManagement() {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const { notify } = useToast();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(true);

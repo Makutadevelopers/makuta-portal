@@ -1,14 +1,18 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useSites } from '../../hooks/useSites';
 import { getAuditLogs, undoBatchImport } from '../../api/audit';
 import { getVendorMerges, revertVendorMerge, VendorMerge } from '../../api/vendors';
 import { AuditLog } from '../../types/audit';
 import AppShell from '../../components/layout/AppShell';
 import ExportButton from '../../components/shared/ExportButton';
-import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useAuth } from '../../hooks/useAuth';
 
 export default function AuditTrail() {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const { user } = useAuth();
   const canRevertMerge = user?.role === 'ho';
   const [logs, setLogs] = useState<AuditLog[]>([]);

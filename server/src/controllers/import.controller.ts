@@ -11,7 +11,7 @@ import { randomUUID } from 'crypto';
 import { query, queryOne, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
 import { paymentStatusCase, recomputeInvoiceStatus, syncBankTxnForPayment } from '../services/payment.service';
-import { normaliseSiteName, isCanonicalSite, CANONICAL_SITES } from '../utils/sites';
+import { normaliseSiteName, isCanonicalSite, activeSiteNames } from '../utils/sites';
 
 interface CsvRow {
   [key: string]: string;
@@ -654,7 +654,7 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
       }
 
       // Tally unknown sites for the preview response. Skipped only when the
-      // value is non-empty AND not in CANONICAL_SITES — blank sites are
+      // value is non-empty AND not an active registered project — blank sites are
       // surfaced as ordinary "skipped" rows below.
       if (norm.site && !isCanonicalSite(norm.site)) {
         const key = norm.site.toLowerCase().trim();
@@ -700,7 +700,9 @@ export async function importInvoices(req: Request, res: Response, next: NextFunc
         duplicates,
         skipped: skippedRows,
         unknownSites,
-        canonicalSites: CANONICAL_SITES,
+        // Live registry, not the static seed list — a project HO added via
+        // Project Master must be offered as a remap target here too.
+        canonicalSites: activeSiteNames(),
         headers: headerReport,
       });
       return;

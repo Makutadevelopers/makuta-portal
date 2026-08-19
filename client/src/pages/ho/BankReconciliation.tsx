@@ -1,9 +1,9 @@
 import { Fragment, ReactNode, useEffect, useMemo, useState } from 'react';
+import { useSites } from '../../hooks/useSites';
 import AppShell from '../../components/layout/AppShell';
 import ExportButton from '../../components/shared/ExportButton';
 import { getBankReconciliation, verifyBankTxn, updateBankTxnDate, updateBankTxnRef, revertBankTxn, BankReconciliationRow, BankTxnAllocation } from '../../api/reconciliation';
 import { formatINR, formatDate } from '../../utils/formatters';
-import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useAuth } from '../../hooks/useAuth';
 import { useIsMobile } from '../../hooks/useIsMobile';
@@ -26,6 +26,10 @@ function vendorSummary(allocations: BankTxnAllocation[]): string {
 }
 
 export default function BankReconciliation() {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const [rows, setRows] = useState<BankReconciliationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);

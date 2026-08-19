@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useSites } from '../../hooks/useSites';
 import { apiFetch } from '../../api/client';
 import { useVendors } from '../../hooks/useVendors';
 import { useAuth } from '../../hooks/useAuth';
 import { formatINR } from '../../utils/formatters';
-import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
@@ -20,6 +20,10 @@ interface CashflowResponse {
 }
 
 export default function MgmtCashflow() {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const { user } = useAuth();
   // Project managers only see their assigned sites in the picker; other roles
   // see all. The server scopes the data to the PM's sites regardless.

@@ -1,4 +1,8 @@
-// TODO: constants
+// Projects (sites) moved to the DB in migration 053 — HO manages them at
+// /projects (Project Master). This list is now the SEED (migration 053 inserts
+// exactly these six) and the runtime fallback used by useSites() while the API
+// request is in flight or has failed, so a project dropdown is never empty.
+// Read projects via useSites(); don't import this directly for dropdowns.
 export const SITES = [
   'Nirvana', 'Taranga', 'Horizon',
   'Green Wood Villas', 'Aruna Arcade', 'Office',

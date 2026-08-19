@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
+import { useSites } from '../../hooks/useSites';
 import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { formatINR } from '../../utils/formatters';
-import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 
@@ -17,6 +17,10 @@ interface VendorRow {
 }
 
 export default function VendorAging() {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const [site, setSite] = useState('All');
   const [sortBy, setSortBy] = useState<string>('overdueBalance');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');

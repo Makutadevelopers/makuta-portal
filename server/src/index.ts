@@ -32,6 +32,8 @@ import creditNoteAttachmentRoutes from './routes/credit-note-attachment.routes';
 import categoriesRoutes from './routes/categories.routes';
 import banksRoutes from './routes/banks.routes';
 import adminRoutes from './routes/admin.routes';
+import sitesRoutes from './routes/sites.routes';
+import { refreshSiteCache, cachedSiteNames } from './services/sites.service';
 import cron from 'node-cron';
 
 console.log('Imported routes:', { authRoutes, vendorRoutes });
@@ -117,6 +119,7 @@ app.use('/api/credit-notes', creditNoteRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/banks', banksRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/sites', sitesRoutes);
 app.use('/api/cron', cronRoutes);
 
 // Error handler (must be after all routes)
@@ -143,6 +146,11 @@ async function start(): Promise<void> {
   try {
     await pool.query('SELECT 1');
     console.log('Database connected');
+    // Warm the project-name cache so the first invoice write / CSV import
+    // after boot normalises against the registry rather than the fallback
+    // seed list. Non-fatal: the helpers fall back to CANONICAL_SITES.
+    await refreshSiteCache(true);
+    console.log(`Project registry loaded (${cachedSiteNames().length} projects)`);
   } catch (err) {
     console.error('Failed to connect to database:', err);
     process.exit(1);

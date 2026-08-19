@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useSites } from '../../hooks/useSites';
 import { apiFetch } from '../../api/client';
 import { formatINR } from '../../utils/formatters';
-import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
@@ -23,6 +23,10 @@ interface CashflowResponse {
 const RECENT_MONTH_COUNT = 6;
 
 export default function CashflowPage() {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const [data, setData] = useState<CashflowResponse>({ expenditure: [], cashflow: [] });
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);

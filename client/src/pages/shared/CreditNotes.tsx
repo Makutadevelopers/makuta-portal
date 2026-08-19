@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, FormEvent, useRef, Fragment } from 'react';
+import { useSites } from '../../hooks/useSites';
 import AppShell from '../../components/layout/AppShell';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../hooks/useAuth';
@@ -19,7 +20,6 @@ import { Vendor } from '../../types/vendor';
 import { Invoice } from '../../types/invoice';
 import { CreditNote } from '../../types/creditNote';
 import { formatINR, formatDate } from '../../utils/formatters';
-import { SITES } from '../../utils/constants';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 import { useTypeaheadKeyboard } from '../../hooks/useTypeaheadKeyboard';
@@ -27,6 +27,10 @@ import { useConfirm } from '../../components/ui/ConfirmDialog';
 import ExportButton from '../../components/shared/ExportButton';
 
 export default function CreditNotes() {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const { user } = useAuth();
   const { notify } = useToast();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -247,6 +251,10 @@ function CreditNoteForm({
   onCancel: () => void;
   onSaved: () => void;
 }) {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const { notify } = useToast();
   const today = new Date().toISOString().split('T')[0];
 

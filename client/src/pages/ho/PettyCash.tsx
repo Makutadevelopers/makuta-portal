@@ -3,9 +3,9 @@
 // combined ledger (disbursements + expenses) with a site filter.
 
 import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { useSites } from '../../hooks/useSites';
 import AppShell from '../../components/layout/AppShell';
 import ExportButton from '../../components/shared/ExportButton';
-import { SITES } from '../../utils/constants';
 import { formatINR, formatDate } from '../../utils/formatters';
 import {
   getAllBalances,
@@ -21,6 +21,10 @@ import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 
 export default function PettyCash() {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const { notify } = useToast();
   const today = new Date().toISOString().split('T')[0];
 

@@ -1,9 +1,9 @@
 import { useState } from 'react';
+import { useSites } from '../../hooks/useSites';
 import { useAgingCalc } from '../../hooks/useAgingCalc';
 import { downloadAuthenticated } from '../../api/client';
 import { useToast } from '../../context/ToastContext';
 import { formatINR, formatDate } from '../../utils/formatters';
-import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
 import { useAuth } from '../../hooks/useAuth';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
@@ -11,6 +11,10 @@ import { useIsMobile } from '../../hooks/useIsMobile';
 import { MobileCard, CardField } from '../../components/ui/MobileCard';
 
 export default function PaymentAging() {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const { user } = useAuth();
   // Project managers only ever see their assigned sites in the picker; every
   // other role sees the full list. The server enforces the same scope anyway.

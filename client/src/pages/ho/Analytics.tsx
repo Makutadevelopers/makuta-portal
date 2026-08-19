@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useSites } from '../../hooks/useSites';
 import { getAnalytics, AnalyticsResponse } from '../../api/analytics';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 import { useAuth } from '../../hooks/useAuth';
 import { formatINR } from '../../utils/formatters';
-import { SITES } from '../../utils/constants';
 import AppShell from '../../components/layout/AppShell';
 import {
   ComposedChart,
@@ -47,6 +47,10 @@ interface Totals {
 }
 
 export default function Analytics() {
+  // Projects come from the DB-backed Project Master (HO manages them at
+  // /projects). useSites falls back to the static seed list while the request
+  // is in flight, so this dropdown is never empty.
+  const { names: SITES } = useSites();
   const { user } = useAuth();
   // Project managers only see their assigned sites/projects in the picker; the
   // server scopes analytics to those sites regardless.
