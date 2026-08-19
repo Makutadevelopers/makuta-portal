@@ -150,6 +150,7 @@ export async function forgotPassword(req: Request, res: Response, next: NextFunc
       `UPDATE users
           SET reset_token_hash = $1,
               reset_token_expires_at = $2,
+              reset_attempts = 0,
               updated_at = NOW()
         WHERE id = $3`,
       [otpHash, expiresAt, user.id]
@@ -215,6 +216,9 @@ const resetSchema = z.object({
   newPassword: z.string().min(8, 'New password must be at least 8 characters'),
 });
 
+/** Wrong-OTP guesses allowed per issued code before it is invalidated. */
+const MAX_RESET_ATTEMPTS = 5;
+
 export async function resetPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { email, otp, newPassword } = resetSchema.parse(req.body);
@@ -226,8 +230,9 @@ export async function resetPassword(req: Request, res: Response, next: NextFunct
       is_active: boolean;
       reset_token_hash: string | null;
       reset_token_expires_at: string | null;
+      reset_attempts: number;
     }>(
-      `SELECT id, name, is_active, reset_token_hash, reset_token_expires_at
+      `SELECT id, name, is_active, reset_token_hash, reset_token_expires_at, reset_attempts
          FROM users WHERE email = $1`,
       [email]
     );
@@ -243,8 +248,32 @@ export async function resetPassword(req: Request, res: Response, next: NextFunct
       return;
     }
 
+    // Cap guesses per issued OTP (migration 054). A per-account counter is the
+    // only bound that holds regardless of how many IPs an attacker uses, and
+    // unlike a per-IP limit it cannot be tripped by the whole office sharing
+    // one NAT address. Requesting a fresh code resets it, and that request is
+    // itself limited to 5/hour by forgotLimiter.
+    if (user.reset_attempts >= MAX_RESET_ATTEMPTS) {
+      await query(
+        `UPDATE users
+            SET reset_token_hash = NULL,
+                reset_token_expires_at = NULL,
+                updated_at = NOW()
+          WHERE id = $1`,
+        [user.id]
+      );
+      res.status(400).json(genericFail);
+      return;
+    }
+
     const matches = await bcrypt.compare(otp, user.reset_token_hash);
     if (!matches) {
+      // Burn one attempt. Deliberately still returns the same generic message,
+      // so a prober learns nothing about how many tries remain.
+      await query(
+        'UPDATE users SET reset_attempts = reset_attempts + 1 WHERE id = $1',
+        [user.id]
+      );
       res.status(400).json(genericFail);
       return;
     }
@@ -255,6 +284,7 @@ export async function resetPassword(req: Request, res: Response, next: NextFunct
           SET password_hash = $1,
               reset_token_hash = NULL,
               reset_token_expires_at = NULL,
+              reset_attempts = 0,
               updated_at = NOW()
         WHERE id = $2`,
       [hash, user.id]
@@ -344,6 +374,7 @@ export async function changePassword(req: Request, res: Response, next: NextFunc
           SET password_hash = $1,
               reset_token_hash = NULL,
               reset_token_expires_at = NULL,
+              reset_attempts = 0,
               updated_at = NOW()
         WHERE id = $2`,
       [newHash, user.id]

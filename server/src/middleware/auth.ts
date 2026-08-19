@@ -44,19 +44,17 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
 
   try {
     // Verify with explicit audience/issuer so a token signed for a different
-    // app with the same secret can't be replayed against the portal. Tokens
-    // issued before this change won't carry these claims; treat them as
-    // legitimate during the rollout window — the 8h expiry naturally retires
-    // unclaimed tokens. After 2026-05-22 the loose verify branch can go.
-    let decoded: JwtPayload;
-    try {
-      decoded = jwt.verify(token, env.JWT_SECRET, {
-        audience: 'makuta-portal',
-        issuer: 'makuta-auth',
-      }) as JwtPayload;
-    } catch (strictErr) {
-      decoded = jwt.verify(token, env.JWT_SECRET) as JwtPayload;
-    }
+    // app with the same secret can't be replayed against the portal.
+    //
+    // A loose fallback (verify without these claims) existed for the rollout
+    // window when tokens predating them were still in circulation. Tokens live
+    // 8 hours, so that window closed on 2026-05-22; the fallback was removed on
+    // 2026-08-19, since while it was live it still accepted exactly the
+    // cross-app tokens the strict check exists to reject.
+    const decoded = jwt.verify(token, env.JWT_SECRET, {
+      audience: 'makuta-portal',
+      issuer: 'makuta-auth',
+    }) as JwtPayload;
     if (!Array.isArray(decoded.sites)) {
       decoded.sites = decoded.site ? [decoded.site] : [];
     }
