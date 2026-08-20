@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useDashboardData } from '../../hooks/useDashboardData';
+import DueSoonPanel from '../../components/shared/DueSoonPanel';
 import { useInvoices } from '../../hooks/useInvoices';
 import { formatINR, formatDate } from '../../utils/formatters';
 import AppShell from '../../components/layout/AppShell';
@@ -173,31 +174,7 @@ export default function MgmtOverview() {
 
             {/* Due soon + Overdue */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-              {/* Payments Due Next 15 Days */}
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                <div className="px-5 py-4 border-b border-gray-100 bg-blue-50">
-                  <div className="text-sm font-medium text-[#1a3c5e]">Payments Due — Next 15 Days</div>
-                  <div className="text-[11px] text-[#1a3c5e] opacity-70 mt-0.5">
-                    {data.dueSoon.length} invoice{data.dueSoon.length !== 1 ? 's' : ''} · {formatINR(data.dueSoon.reduce((s, r) => s + r.balance, 0))}
-                  </div>
-                </div>
-                {data.dueSoon.length === 0 ? (
-                  <div className="py-7 text-center text-sm text-green-600">No payments falling due in the next 15 days</div>
-                ) : data.dueSoon.map((r, i) => (
-                  <div key={r.invoiceId} className={`px-5 py-3.5 flex items-center justify-between ${i > 0 ? 'border-t border-gray-100' : ''}`}>
-                    <div className="flex-1 min-w-0 mr-3">
-                      <div className="font-medium text-sm text-gray-900 truncate">{r.vendorName}</div>
-                      <div className="text-[11px] text-gray-500 mt-0.5">{r.site} · Due {formatDate(r.dueDate)}</div>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <div className="text-[15px] font-semibold text-gray-900">{formatINR(r.balance)}</div>
-                      <span className={`inline-block mt-1 text-[11px] font-medium px-2 py-0.5 rounded-md ${
-                        r.daysLeft <= 3 ? 'text-red-700 bg-red-100' : r.daysLeft <= 7 ? 'text-orange-700 bg-orange-100' : 'text-[#1a3c5e] bg-blue-50'
-                      }`}>{r.daysLeft === 0 ? 'Due today' : `${r.daysLeft}d left`}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <DueSoonPanel rows={data.dueSoon} />
 
               {/* Overdue */}
               <div className="bg-white rounded-xl border border-red-200 overflow-hidden">
