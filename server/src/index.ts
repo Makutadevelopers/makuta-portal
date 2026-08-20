@@ -31,7 +31,6 @@ import creditNoteRoutes from './routes/credit-note.routes';
 import creditNoteAttachmentRoutes from './routes/credit-note-attachment.routes';
 import categoriesRoutes from './routes/categories.routes';
 import banksRoutes from './routes/banks.routes';
-import adminRoutes from './routes/admin.routes';
 import sitesRoutes from './routes/sites.routes';
 import { refreshSiteCache, cachedSiteNames } from './services/sites.service';
 import cron from 'node-cron';
@@ -106,12 +105,6 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Test route
-app.get('/api/test', (_req, res) => {
-  console.log('Test endpoint called');
-  res.json({ message: 'API is working' });
-});
-
 console.log('Mounting auth routes...');
 // Routes
 app.use('/api/auth', authRoutes);
@@ -134,7 +127,6 @@ app.use('/api/credit-notes/:id/attachments', creditNoteAttachmentRoutes);
 app.use('/api/credit-notes', creditNoteRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/banks', banksRoutes);
-app.use('/api/admin', adminRoutes);
 app.use('/api/sites', sitesRoutes);
 app.use('/api/cron', cronRoutes);
 

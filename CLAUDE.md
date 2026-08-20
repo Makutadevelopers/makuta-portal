@@ -67,10 +67,12 @@ The importer used to silently fall back to `invoice_date` /
 `'2001-01-01'` / `'Import'` when source cells were unparseable. Migrations
 033-036 cleaned up 200+ corrupted payment rows; pre-repair values are
 preserved in `payments_repair_snapshot` (tags `034_F7_type_has_digits`,
-`035_F1_date_fallback`, `036_F8_epoch_sentinel`) for rollback. A
-diagnostic `GET /api/admin/import-audit` (HO-only, temporary) returns
-the current corruption fingerprint; raw queries in
-`server/src/db/diagnostics/2026-05-19_import_corruption_audit.sql`.
+`035_F1_date_fallback`, `036_F8_epoch_sentinel`) for rollback. The
+temporary `GET /api/admin/import-audit` diagnostic was removed on
+2026-08-20 now the repair work is finished; the queries it wrapped still
+live in `server/src/db/diagnostics/2026-05-19_import_corruption_audit.sql`
+and can be run directly against the DB if the fingerprint is ever needed
+again (see the endpoint's implementation in git history if useful).
 
 ### Human edits are final — repairs must never overwrite them (since 2026-05-20)
 A value a person typed/edited through the app is the **source of truth** and

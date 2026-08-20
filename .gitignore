@@ -34,3 +34,11 @@ backups/
 
 # Claude Code runtime artifacts (lock files, transient state)
 .claude/scheduled_tasks.lock
+
+# Private keys and certificates — never commit. The repo has none today; this
+# is here so an accidental `git add .` after dropping a .pem in the tree
+# cannot publish it.
+*.pem
+*.key
+*.p12
+*.pfx
