@@ -40,6 +40,22 @@ console.log('Imported routes:', { authRoutes, vendorRoutes });
 
 const app = express();
 
+// Trust exactly one proxy hop — the CRM's nginx, which fronts this API.
+//
+// Without this, Express ignores X-Forwarded-For and req.ip is nginx's own
+// container address for EVERY request. That silently made all the rate limits
+// global rather than per-client: forgot-password was 5/hour for the entire
+// company (so a handful of resets locked everyone else out), and the global
+// 200/min was shared by all users at once. express-rate-limit was logging a
+// ValidationError about exactly this on every boot.
+//
+// Safe here because the API is not publicly reachable: the container exposes
+// 4000 only on the internal Docker network — only :80/:443 (nginx) are
+// published on the host — so a client cannot bypass nginx to forge the header.
+// The literal 1 (not `true`) matters: it trusts one hop, so a spoofed
+// X-Forwarded-For entry from further upstream is still ignored.
+app.set('trust proxy', 1);
+
 // gzip JSON (and any other) responses. The fronting nginx only gzips
 // text/css/xml — application/json was excluded, so list endpoints like
 // GET /api/invoices (thousands of rows) were shipped uncompressed. Doing it
