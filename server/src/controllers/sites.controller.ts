@@ -1,8 +1,8 @@
 // sites.controller.ts
 // GET    /api/sites                   — list active projects (any authenticated)
-// GET    /api/sites?includeInactive=1 — list all, with usage counts (HO only)
-// POST   /api/sites                   — create (HO only); case-insensitive dedupe
-// PATCH  /api/sites/:id               — rename and/or archive (HO only)
+// GET    /api/sites?includeInactive=1 — list all, with usage counts (HO + MD)
+// POST   /api/sites                   — create (HO + MD); case-insensitive dedupe
+// PATCH  /api/sites/:id               — rename and/or archive (HO + MD)
 //
 // Projects are never hard-deleted: invoices, credit notes, petty cash and user
 // assignments all store the project NAME as text, so removing a row would
@@ -28,9 +28,10 @@ function validateName(raw: unknown): { name: string } | { error: string } {
 export async function list(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const wantsAll = req.query.includeInactive === '1' || req.query.includeInactive === 'true';
-    // Only HO manages projects, so only HO sees archived ones — silently
-    // downgrade for other roles so a shared link can't leak them.
-    const includeInactive = wantsAll && req.user?.role === 'ho';
+    // Only the roles that manage projects see archived ones — silently
+    // downgrade for everyone else so a shared link can't leak them.
+    const MANAGERS = ['ho', 'mgmt'];
+    const includeInactive = wantsAll && MANAGERS.includes(req.user?.role ?? '');
     const rows = await listSites(includeInactive);
 
     if (!includeInactive) {

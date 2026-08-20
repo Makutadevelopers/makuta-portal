@@ -109,7 +109,7 @@ export default function AppRouter() {
         <Route path="/bin" element={<ProtectedRoute allowed={['ho', 'mgmt']}><Bin /></ProtectedRoute>} />
         <Route path="/bank-reconciliation" element={<ProtectedRoute allowed={['ho']}><BankReconciliation /></ProtectedRoute>} />
         <Route path="/banks" element={<ProtectedRoute allowed={['ho']}><BankMaster /></ProtectedRoute>} />
-        <Route path="/projects" element={<ProtectedRoute allowed={['ho']}><ProjectMaster /></ProtectedRoute>} />
+        <Route path="/projects" element={<ProtectedRoute allowed={['ho', 'mgmt']}><ProjectMaster /></ProtectedRoute>} />
         <Route path="/petty-cash" element={<ProtectedRoute allowed={['ho']}><PettyCash /></ProtectedRoute>} />
 
         {/* Mgmt routes */}

@@ -30,6 +30,7 @@ const MGMT_TABS = [
   { to: '/mgmt-bank-reconciliation', label: 'Bank Reconciliation' },
   { to: '/credit-notes', label: 'Credit Notes' },
   { to: '/employees', label: 'Employees' },
+  { to: '/projects', label: 'Project Master' },
   { to: '/audit', label: 'Audit Trail' },
   { to: '/bin', label: 'Bin' },
 ];
@@ -71,7 +72,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       ? `${userSites.length} sites — ${userSites.join(', ')}`
       : '';
   const subtitle = role === 'ho' ? 'Head Office — Full Access'
-    : role === 'mgmt' ? 'Management — Read Only'
+    : role === 'mgmt' ? 'Management — Dashboards & Admin'
       : role === 'project_manager' ? `${siteSubtitle} — Project Manager (Read Only)`
         : `${siteSubtitle} — Site Portal`;
 
@@ -314,7 +315,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       )}
       {role === 'mgmt' && (
         <div className="bg-purple-50 border-b border-purple-200 px-4 sm:px-6 py-1.5 text-xs text-purple-800">
-          Management view — read only · All data is live
+          Management view · All data is live · Invoices and payments are read-only — you can manage employees and projects
         </div>
       )}
       {role === 'project_manager' && (

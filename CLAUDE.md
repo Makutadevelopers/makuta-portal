@@ -7,7 +7,12 @@ invoices. Head Office processes payments. MD views executive dashboards.
 
 ## Roles and what they can do
 - **ho** (Head Accountant): full CRUD on invoices, payments, vendors, audit
-- **mgmt** (Managing Director): read-only dashboards — no data entry
+- **mgmt** (Managing Director): read-only dashboards — no data entry on
+  invoices, payments, vendors or petty cash. Two deliberate exceptions, both
+  administrative rather than financial: **Employees** and **Project Master**
+  (add / rename / archive projects, since opening a project is an executive
+  call). The AppShell banner states this rather than claiming blanket
+  read-only.
 - **site** (Site Accountant): enter invoices for their site only,
   view category/vendor expenditure for their site, see Paid/Partial/Pending
   payment badge on own-site invoices (no amounts, no aging)
