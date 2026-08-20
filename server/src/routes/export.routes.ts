@@ -7,7 +7,7 @@ import { requireRole } from '../middleware/rbac';
 import { exportAging, exportInvoices, exportCashflow } from '../controllers/export.controller';
 import {
   exportCreditNotes, exportVendors, exportVendorInvoices,
-  exportAuditLogs, exportPettyCash, exportBankTransactions, exportBin,
+  exportAuditLogs, exportPettyCash, exportBankTransactions, exportBin, exportTds,
 } from '../controllers/tableExports.controller';
 
 const router = Router();

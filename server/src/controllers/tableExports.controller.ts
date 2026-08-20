@@ -8,6 +8,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { query } from '../db/query';
 import { sendTableExport, ExportColumn } from '../services/exportTable';
+import { getTdsRegister } from '../services/tds.service';
+import { scopedSites } from '../middleware/auth';
 
 function parseFormat(req: Request): 'csv' | 'xlsx' | 'pdf' {
   const f = String(req.query.format || '').toLowerCase();
@@ -375,6 +377,70 @@ export async function exportBin(req: Request, res: Response, next: NextFunction)
     sendTableExport(res, {
       format: parseFormat(req), filenameBase: `bin-${today()}`,
       title: 'Bin — Deleted Invoices', columns, rows: data,
+    });
+  } catch (err) { next(err); }
+}
+
+// ── TDS Register ──────────────────────────────────────────────────────────────
+// One row per deduction withheld, so an auditor can tie each figure back to the
+// vendor, the invoice and the date it was deducted. Reuses the same service the
+// dashboard panel reads, so the export can never drift from the on-screen total.
+export async function exportTds(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const from = String(req.query.from || '').trim() || undefined;
+    const to = String(req.query.to || '').trim() || undefined;
+    const site = String(req.query.site || 'All');
+
+    const allowedSites = scopedSites(req.user);
+    if (allowedSites && site !== 'All' && !allowedSites.includes(site)) {
+      res.status(403).json({ error: 'Forbidden', message: 'You are not assigned to this site' });
+      return;
+    }
+
+    const { rows, totals } = await getTdsRegister({ from, to, site, allowedSites });
+
+    const columns: ExportColumn[] = [
+      { header: 'Payment Date', type: 'date' },
+      { header: 'Vendor', pdfWidth: 140 },
+      { header: 'GSTIN' },
+      { header: 'Site' },
+      { header: 'Invoice No' },
+      { header: 'Invoice Date', type: 'date' },
+      { header: 'Invoice Amount', type: 'amount' },
+      { header: 'Cash Paid', type: 'amount' },
+      { header: 'IT-TDS %', type: 'pct' },
+      { header: 'IT-TDS Amount', type: 'amount' },
+      { header: 'GST-TDS %', type: 'pct' },
+      { header: 'GST-TDS Amount', type: 'amount' },
+      { header: 'Total TDS', type: 'amount' },
+      { header: 'Payment Type' },
+      { header: 'Payment Ref' },
+      { header: 'Recorded By' },
+    ];
+
+    const data = rows.map(r => [
+      r.payment_date, r.vendor_name, r.gstin, r.site, r.invoice_no, r.invoice_date,
+      r.invoice_amount, r.cash_amount,
+      r.tds_pct, r.tds_amount, r.gst_tds_pct, r.gst_tds_amount, r.total_tds,
+      r.payment_type, r.payment_ref, r.recorded_by_name,
+    ]);
+
+    const period = from || to ? `${from || 'start'} to ${to || 'today'}` : 'all time';
+    const filters = [
+      `Period: ${period}`,
+      `Site: ${site}`,
+      `Income-tax TDS: ${totals.incomeTaxTds.toFixed(2)}`,
+      `GST-TDS: ${totals.gstTds.toFixed(2)}`,
+      `Total withheld: ${totals.totalTds.toFixed(2)}`,
+    ];
+
+    sendTableExport(res, {
+      format: parseFormat(req),
+      filenameBase: `tds-register-${today()}`,
+      title: 'TDS Register — Tax Deducted at Source',
+      filters,
+      columns,
+      rows: data,
     });
   } catch (err) { next(err); }
 }
