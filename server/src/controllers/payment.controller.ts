@@ -27,7 +27,7 @@ const tdsPct = z.number().min(0, 'TDS % cannot be negative').max(10, 'TDS % cann
 // match the TDS field; computed on the same pre-GST base. See migration 050.
 const gstTdsPct = z.number().min(0, 'GST-TDS % cannot be negative').max(10, 'GST-TDS % cannot exceed 10').optional();
 // GST ADDED at payment (the opposite of GST-TDS withholding): extra cash paid to
-// the vendor on top of the invoice, computed on the after-TDS base. GST slabs go
+// the vendor on top of the invoice, computed on the taxable base. GST slabs go
 // up to 28%, so cap at 28. NOT part of invoice settlement. See migration 052.
 const gstAddedPct = z.number().min(0, 'GST % cannot be negative').max(28, 'GST % cannot exceed 28').optional();
 
@@ -154,11 +154,14 @@ export async function createPayment(req: Request, res: Response, next: NextFunct
       const gstTdsPctVal = data.gst_tds_pct ?? 0;
       const gstTdsAmount = Math.round(tdsBase * gstTdsPctVal) / 100;
       // GST ADDED at payment: extra cash paid to the vendor on top of the
-      // invoice, computed on the base AFTER income-tax TDS (new base = base −
-      // TDS). Unlike TDS/GST-TDS this is NOT a withholding and does NOT settle
-      // the invoice — it only inflates the cheque (see bank-txn amount below).
+      // invoice, computed on the taxable BASE — the same base as TDS and
+      // GST-TDS. (It was briefly computed on base − TDS; corrected 2026-08-20.
+      // GST is levied on the value of the supply, which TDS does not reduce —
+      // TDS is withheld from what is paid, it does not shrink the taxable
+      // value.) Unlike TDS/GST-TDS this is NOT a withholding and does NOT
+      // settle the invoice — it only inflates the cheque (see bank txn below).
       const gstAddedPctVal = data.gst_added_pct ?? 0;
-      const gstAddedAmount = Math.round((tdsBase - tdsAmount) * gstAddedPctVal) / 100;
+      const gstAddedAmount = Math.round(tdsBase * gstAddedPctVal) / 100;
       // Settlement excludes gstAddedAmount — cash + withholdings only.
       const settlement = data.amount + tdsAmount + gstTdsAmount;
       if (settlement > balance + 0.001) {
@@ -349,10 +352,10 @@ export async function updatePayment(req: Request, res: Response, next: NextFunct
       // GST-TDS withheld on the same pre-GST base (see createPayment).
       const gstTdsPctVal = data.gst_tds_pct ?? 0;
       const gstTdsAmount = Math.round(tdsBase * gstTdsPctVal) / 100;
-      // GST added at payment (extra cash, on the after-TDS base). Not part of
+      // GST added at payment (extra cash, on the taxable base). Not part of
       // settlement/headroom — see createPayment.
       const gstAddedPctVal = data.gst_added_pct ?? 0;
-      const gstAddedAmount = Math.round((tdsBase - tdsAmount) * gstAddedPctVal) / 100;
+      const gstAddedAmount = Math.round(tdsBase * gstAddedPctVal) / 100;
       const settlement = data.amount + tdsAmount + gstTdsAmount;
       if (settlement > headroom + 0.001) {
         const withheldParts = [

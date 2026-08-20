@@ -17,7 +17,7 @@ export interface Payment {
   gst_tds_pct: number;
   gst_tds_amount: number;
   // GST ADDED at payment — extra cash paid to the vendor on top of the invoice
-  // (computed on the after-TDS base). Frozen server-side. NOT part of invoice
+  // (computed on the invoice's taxable base). Frozen server-side. NOT part of invoice
   // settlement; included in the cheque/bank-transaction total.
   gst_added_pct: number;
   gst_added_amount: number;
@@ -34,6 +34,6 @@ export interface CreatePaymentData {
   // Optional GST-TDS %. Server defaults to 0; statutory rate is 2%.
   gst_tds_pct?: number;
   // Optional "GST added at payment" %. Server defaults to 0. Extra cash to the
-  // vendor, computed on the after-TDS base; not part of invoice settlement.
+  // vendor, computed on the invoice's taxable base; not part of settlement.
   gst_added_pct?: number;
 }

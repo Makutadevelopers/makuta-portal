@@ -1428,7 +1428,7 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
   const [paymentDate, setPaymentDate] = useState(String(payment.payment_date).slice(0, 10));
   const [bank, setBank] = useState(payment.bank ?? '');
   const [tdsPct, setTdsPct] = useState(String(payment.tds_pct ?? 0));
-  // "Add GST" — extra cash to the vendor on top of the invoice, on the after-TDS
+  // "Add GST" — extra cash to the vendor on top of the invoice, on the taxable
   // base. Not a withholding; not part of settlement. Mirrors PaymentModal.
   const [gstAddedPct, setGstAddedPct] = useState(String(payment.gst_added_pct ?? 0));
   const [saving, setSaving] = useState(false);
@@ -1437,7 +1437,7 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
   const numTdsPct = Math.max(0, Math.min(10, Number(tdsPct) || 0));
   const tdsAmount = Math.round(tdsBase * numTdsPct) / 100;
   const numGstAddedPct = Math.max(0, Math.min(28, Number(gstAddedPct) || 0));
-  const gstAddedAmount = Math.round((tdsBase - tdsAmount) * numGstAddedPct) / 100;
+  const gstAddedAmount = Math.round(tdsBase * numGstAddedPct) / 100;
   // Settlement excludes added GST (cash + TDS only).
   const settlement = numAmount + tdsAmount;
   const overHeadroom = settlement > headroom + 0.001;
@@ -1507,14 +1507,14 @@ function EditPaymentModal({ invoice, payment, otherPaid, onClose, onSaved }: {
             )}
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1" title="GST added to the vendor payment (extra cash on top of the invoice). Computed on the base after TDS.">Add GST %</label>
+            <label className="block text-xs text-gray-500 mb-1" title="GST added to the vendor payment (extra cash on top of the invoice). Computed on the invoice's taxable base — the same base as TDS.">Add GST %</label>
             <input
               type="number" step="0.01" min="0" max="28" value={gstAddedPct}
               onChange={e => setGstAddedPct(e.target.value)}
               className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
             {numGstAddedPct > 0 && (
-              <div className="text-[11px] text-green-700 mt-1">GST added: +{formatINR(gstAddedAmount)} ({numGstAddedPct}% of {formatINR(Math.max(0, tdsBase - tdsAmount))} after-TDS base)</div>
+              <div className="text-[11px] text-green-700 mt-1">GST added: +{formatINR(gstAddedAmount)} ({numGstAddedPct}% of {formatINR(Math.max(0, tdsBase))} base)</div>
             )}
           </div>
           <div>
@@ -2872,7 +2872,7 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
   // pre-GST base_amount — same basis as the single-payment modal.
   const [tdsPcts, setTdsPcts] = useState<Record<string, string>>({});
   // Per-invoice GST % ADDED at payment — extra cash paid to the vendor on top
-  // of the invoice, computed on the base after TDS. This is NOT a withholding:
+  // of the invoice, computed on the taxable base. This is NOT a withholding:
   // it settles nothing, it only increases the cheque total. Mirrors the
   // single-payment modal's "Add GST %" field (migration 052).
   const [gstAddedPcts, setGstAddedPcts] = useState<Record<string, string>>({});
@@ -2900,7 +2900,7 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
     return Math.round(tdsBaseFor(inv) * pct) / 100;
   }
 
-  // GST added on top of the invoice — computed on the base AFTER TDS, matching
+  // GST added on top of the invoice — computed on the taxable base, matching
   // the single-payment path. Extra cash to the vendor; settles nothing.
   function gstAddedAmountFor(inv: Invoice): number {
     const pct = Math.max(0, Math.min(28, Number(gstAddedPcts[inv.id]) || 0));
@@ -3105,7 +3105,7 @@ function BulkPayModal({ invoices, agingMap, onClose, onSaved }: BulkPayModalProp
                           placeholder="0"
                           className="w-16 px-2 py-1 border border-gray-200 rounded-md text-sm text-right" />
                         {gstAdded > 0 && (
-                          <div className="text-[11px] text-green-700 mt-0.5" title="GST added on top of the invoice — extra cash to the vendor, computed on the base after TDS">+{formatINR(gstAdded)}</div>
+                          <div className="text-[11px] text-green-700 mt-0.5" title="GST added on top of the invoice — extra cash to the vendor, computed on the taxable base">+{formatINR(gstAdded)}</div>
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">

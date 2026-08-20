@@ -32,12 +32,12 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
   const numTdsPct = Math.max(0, Math.min(10, Number(tdsPct) || 0));
   const tdsAmount = Math.round(tdsBase * numTdsPct) / 100;
   // "Add GST" — optional GST the employee adds ON TOP of the invoice (extra cash
-  // to the vendor), computed on the base AFTER TDS. NOT a withholding: it does
-  // not settle the invoice, it only increases the cheque. Mirrors the server
-  // (payment.controller / migration 052).
+  // to the vendor), computed on the taxable BASE, the same base as TDS.
+  // NOT a withholding: it does not settle the invoice, it only increases the
+  // cheque. Mirrors the server (payment.controller).
   const [gstAddedPct, setGstAddedPct] = useState('0');
   const numGstAddedPct = Math.max(0, Math.min(28, Number(gstAddedPct) || 0));
-  const gstAddedAmount = Math.round((tdsBase - tdsAmount) * numGstAddedPct) / 100;
+  const gstAddedAmount = Math.round(tdsBase * numGstAddedPct) / 100;
   // Only TDS is withheld (no cash), so the cash leg that fully settles the
   // invoice is balance minus TDS. Added GST is separate (extra cash, below).
   const withheld = tdsAmount;
@@ -209,7 +209,7 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1" title="GST added to the vendor payment (extra cash on top of the invoice). Computed on the base after TDS. Use when the invoice was entered without GST.">Add GST %</label>
+            <label className="block text-xs text-gray-500 mb-1" title="GST added to the vendor payment (extra cash on top of the invoice). Computed on the invoice's taxable base — the same base as TDS. Use when the invoice was entered without GST.">Add GST %</label>
             <input
               type="number"
               value={gstAddedPct}
@@ -226,7 +226,7 @@ export default function PaymentModal({ invoice, balance, onClose, onSaved }: Pro
             <div className="flex justify-between"><span>Cash (against invoice)</span><span className="font-medium">{formatINR(numAmount)}</span></div>
             {numGstAddedPct > 0 && (
               <div className="flex justify-between">
-                <span>GST added ({numGstAddedPct}% of {formatINR(Math.max(0, tdsBase - tdsAmount))} after-TDS base)</span>
+                <span>GST added ({numGstAddedPct}% of {formatINR(Math.max(0, tdsBase))} base)</span>
                 <span className="font-medium text-green-700">+{formatINR(gstAddedAmount)}</span>
               </div>
             )}

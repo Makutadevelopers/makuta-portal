@@ -40,7 +40,7 @@ export interface BulkPayAllocationInput {
   // Legacy — the Bulk Pay UI now sends gst_added_pct instead.
   gst_tds_pct?: number;
   // GST % ADDED at payment (0–28) — extra cash paid to the vendor on top of
-  // the invoice, computed on the base after TDS. Settles nothing; forms part
+  // the invoice, computed on the taxable base. Settles nothing; forms part
   // of the cheque total.
   gst_added_pct?: number;
 }

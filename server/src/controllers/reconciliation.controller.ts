@@ -41,7 +41,7 @@ const bulkPaySchema = z.object({
     // compatibility — the Bulk Pay UI now sends gst_added_pct instead.
     gst_tds_pct: z.number().min(0).max(10).optional(),
     // GST ADDED at payment — extra cash paid to the vendor on top of the
-    // invoice, computed on the base AFTER income-tax TDS (migration 052).
+    // invoice, computed on the taxable base — the same base as TDS.
     // NOT part of settlement, so it never counts toward the outstanding
     // balance; it DOES form part of the cheque / bank-transaction total.
     gst_added_pct: z.number().min(0).max(28).optional(),
@@ -133,11 +133,11 @@ export async function bulkPay(req: Request, res: Response, next: NextFunction): 
         const gstTdsPctVal = Math.max(0, Math.min(10, alloc.gst_tds_pct ?? 0));
         const gstTdsAmount = Math.round(tdsBase * gstTdsPctVal) / 100;
         // GST added at payment — extra cash to the vendor, computed on the base
-        // AFTER income-tax TDS (identical rule to the single-payment path).
+        // the taxable base (identical rule to the single-payment path).
         // Deliberately excluded from the balance check below: it settles
         // nothing, it's simply more money leaving the bank.
         const gstAddedPctVal = Math.max(0, Math.min(28, alloc.gst_added_pct ?? 0));
-        const gstAddedAmount = Math.round((tdsBase - tdsAmount) * gstAddedPctVal) / 100;
+        const gstAddedAmount = Math.round(tdsBase * gstAddedPctVal) / 100;
 
         // Cash + TDS + GST-TDS together must fit inside the outstanding
         // balance (added GST is excluded — it isn't settlement).
