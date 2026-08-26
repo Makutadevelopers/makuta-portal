@@ -1,13 +1,23 @@
 // Site petty-cash console.
 // Current balance card · "Log Expense" form · own-site ledger.
 
-import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { useEffect, useMemo, useState, useCallback, FormEvent } from 'react';
 import AppShell from '../../components/layout/AppShell';
 import { useAuth } from '../../hooks/useAuth';
 import { useInvoices } from '../../hooks/useInvoices';
 import { formatINR, formatDate } from '../../utils/formatters';
-import { getSiteBalance, createExpense, getLedger } from '../../api/pettyCash';
-import { PettyCashBalance, PettyCashLedgerEntry } from '../../types/pettyCash';
+import { getSiteBalance, createExpense, listDisbursements, listExpenses } from '../../api/pettyCash';
+import { PettyCashBalance, PettyCashDisbursement, PettyCashExpense } from '../../types/pettyCash';
+import ActionsMenu from '../../components/shared/ActionsMenu';
+import PeriodFilter from '../../components/shared/PeriodFilter';
+import PettyCashEditModal, { PettyCashEditTarget } from '../../components/shared/PettyCashEditModal';
+import PettyCashDeleteModal, { PettyCashDeleteTarget } from '../../components/shared/PettyCashDeleteModal';
+import {
+  mergePettyCashActivity,
+  matchesPeriod,
+  DEFAULT_PERIOD_FILTER,
+  PeriodFilter as PeriodFilterValue,
+} from '../../utils/pettyCashActivity';
 import { useToast } from '../../context/ToastContext';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
@@ -22,8 +32,12 @@ export default function SitePettyCash() {
   const today = new Date().toISOString().split('T')[0];
 
   const [balance, setBalance] = useState<PettyCashBalance | null>(null);
-  const [ledger, setLedger]   = useState<PettyCashLedgerEntry[]>([]);
+  const [disbursements, setDisbursements] = useState<PettyCashDisbursement[]>([]);
+  const [expenses, setExpenses] = useState<PettyCashExpense[]>([]);
   const [loading, setLoading] = useState(true);
+  const [period, setPeriod] = useState<PeriodFilterValue>(DEFAULT_PERIOD_FILTER);
+  const [editTarget, setEditTarget] = useState<PettyCashEditTarget | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PettyCashDeleteTarget | null>(null);
   const { ref: stickyHeaderRef, height: stickyHeaderHeight } = useStickyHeaderHeight();
 
   // Log Expense form
@@ -42,18 +56,29 @@ export default function SitePettyCash() {
   const [pRemarks, setPRemarks]     = useState('');
   const [paying, setPaying]         = useState(false);
 
-  async function refresh(opts?: { background?: boolean }) {
+  const refresh = useCallback(async (opts?: { background?: boolean }) => {
     if (!site) return;
     if (!opts?.background) setLoading(true);
     try {
-      const [b, l] = await Promise.all([getSiteBalance(site), getLedger(site)]);
+      const [b, d, e] = await Promise.all([getSiteBalance(site), listDisbursements(site), listExpenses(site)]);
       setBalance(b);
-      setLedger(l);
+      setDisbursements(d);
+      setExpenses(e);
     } catch (err) {
       if (!opts?.background) notify(err instanceof Error ? err.message : 'Failed to load petty cash', 'error');
     } finally {
       if (!opts?.background) setLoading(false);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [site]);
+
+  const activity = useMemo(
+    () => mergePettyCashActivity(disbursements, expenses).filter(a => matchesPeriod(a.date, period)),
+    [disbursements, expenses, period]
+  );
+
+  function handleChanged() {
+    refresh();
   }
 
   useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [site]);
@@ -291,27 +316,31 @@ export default function SitePettyCash() {
         </div>
       )}
 
-      {/* Ledger */}
-      <div className="text-xs text-gray-400 mb-3 text-right">{ledger.length} entries</div>
+      {/* Activity */}
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <PeriodFilter value={period} onChange={setPeriod} />
+        <div className="text-xs text-gray-400">{activity.length} {activity.length === 1 ? 'entry' : 'entries'}</div>
+      </div>
 
       {loading ? (
         <div className="text-gray-500 text-sm py-12 text-center">Loading…</div>
       ) : (
         <div
           className="bg-white rounded-xl border border-gray-100 overflow-y-auto overflow-x-hidden"
-          style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 120}px)` }}
+          style={{ maxHeight: `calc(100vh - ${stickyHeaderHeight + 160}px)` }}
         >
           <table className="w-full table-fixed text-[13px]">
             <colgroup>
-              <col style={{ width: '15%' }} />{/* Transaction Date */}
-              <col style={{ width: '12%' }} />{/* Type */}
-              <col style={{ width: '40%' }} />{/* Description */}
-              <col style={{ width: '18%' }} />{/* By */}
-              <col style={{ width: '15%' }} />{/* Amount */}
+              <col style={{ width: '14%' }} />{/* Transaction Date */}
+              <col style={{ width: '11%' }} />{/* Type */}
+              <col style={{ width: '37%' }} />{/* Description */}
+              <col style={{ width: '17%' }} />{/* By */}
+              <col style={{ width: '14%' }} />{/* Amount */}
+              <col style={{ width: '7%' }} />{/* Actions */}
             </colgroup>
             <thead className="bg-gray-50">
               <tr>
-                {['Transaction Date','Type','Description','By','Amount'].map(h => (
+                {['Transaction Date','Type','Description','By','Amount',''].map(h => (
                   <th
                     key={h}
                     className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}
@@ -322,30 +351,45 @@ export default function SitePettyCash() {
               </tr>
             </thead>
             <tbody>
-              {ledger.map(e => (
-                <tr key={`${e.event_type}-${e.id}`} className="border-t border-gray-50 hover:bg-gray-50/50">
-                  <td className="px-4 py-3 whitespace-nowrap">{formatDate(e.event_date)}</td>
+              {activity.map(a => (
+                <tr key={`${a.type}-${a.row.id}`} className="border-t border-gray-50 hover:bg-gray-50/50">
+                  <td className="px-4 py-3 whitespace-nowrap">{formatDate(a.date)}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                      e.event_type === 'in' ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700'
+                      a.type === 'in' ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700'
                     }`}>
-                      {e.event_type === 'in' ? 'Received' : 'Spent'}
+                      {a.type === 'in' ? 'Received' : 'Spent'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-700 truncate">{e.description}</td>
-                  <td className="px-4 py-3 text-gray-500 truncate">{e.by_name ?? '—'}</td>
-                  <td className={`px-4 py-3 text-right font-medium ${e.event_type === 'in' ? 'text-green-700' : 'text-orange-700'}`}>
-                    {e.event_type === 'in' ? '+' : '−'}{formatINR(Number(e.amount))}
+                  <td className="px-4 py-3 text-gray-700 truncate">
+                    {a.type === 'in'
+                      ? `Received via ${a.row.mode}${a.row.reference ? ` — ${a.row.reference}` : ''}`
+                      : a.row.purpose}
+                  </td>
+                  <td className="px-4 py-3 text-gray-500 truncate">{a.type === 'in' ? (a.row.given_by_name ?? '—') : (a.row.recorded_by_name ?? '—')}</td>
+                  <td className={`px-4 py-3 text-right font-medium ${a.type === 'in' ? 'text-green-700' : 'text-orange-700'}`}>
+                    {a.type === 'in' ? '+' : '−'}{formatINR(Number(a.row.amount))}
+                  </td>
+                  <td className="px-2 py-3 text-right">
+                    {a.type === 'out' && (
+                      <ActionsMenu items={[
+                        { label: 'Edit', color: 'text-gray-700', onClick: () => setEditTarget({ kind: 'expense', row: a.row }) },
+                        { label: 'Delete', color: 'text-red-600', onClick: () => setDeleteTarget({ kind: 'expense', row: a.row }) },
+                      ]} />
+                    )}
                   </td>
                 </tr>
               ))}
-              {ledger.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-400 text-sm">No petty cash activity yet.</td></tr>
+              {activity.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400 text-sm">No petty cash activity for this period.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       )}
+
+      <PettyCashEditModal target={editTarget} onClose={() => setEditTarget(null)} onSaved={handleChanged} />
+      <PettyCashDeleteModal target={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={handleChanged} />
     </AppShell>
   );
 }

@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { query, queryOne, withTransaction } from '../db/query';
 import { logAudit } from '../services/audit.service';
 import { paymentStatusCase } from '../services/payment.service';
-import { isSiteScoped } from '../middleware/auth';
+import { isSiteScoped, userHasSite } from '../middleware/auth';
 
 const MINOR_LIMIT = 50000;
 
@@ -39,6 +39,27 @@ const expenseSchema = z.object({
   purpose:    z.string().min(1, 'Purpose is required').max(500),
   invoice_id: z.string().uuid('invoice_id must be a valid UUID').optional().nullable(),
   remarks:    z.string().max(500).optional().nullable(),
+});
+
+// Edits keep site and invoice linkage immutable — moving money between sites or
+// invoices is a delete + recreate, not a quiet edit.
+const updateDisbursementSchema = z.object({
+  amount:    z.number().positive('Amount must be positive').max(1e10),
+  given_on:  isoDate,
+  mode:      z.enum(['cash', 'bank']).default('cash'),
+  reference: z.string().max(100).optional().nullable(),
+  remarks:   z.string().max(500).optional().nullable(),
+});
+
+const updateExpenseSchema = z.object({
+  amount:   z.number().positive('Amount must be positive').max(1e10),
+  spent_on: isoDate,
+  purpose:  z.string().min(1, 'Purpose is required').max(500),
+  remarks:  z.string().max(500).optional().nullable(),
+});
+
+const deleteReasonSchema = z.object({
+  reason: z.string().trim().min(3, 'Please give a reason (e.g. wrong amount, duplicate entry)').max(500),
 });
 
 interface BalanceRow {
@@ -228,6 +249,140 @@ export async function listDisbursements(req: Request, res: Response, next: NextF
   } catch (err) { next(err); }
 }
 
+// PATCH /api/petty-cash/disbursements/:id — HO only
+export async function updateDisbursement(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id: userId } = req.user!;
+    const id = req.params.id as string;
+    const data = updateDisbursementSchema.parse(req.body);
+
+    const result = await withTransaction(async (tx) => {
+      const existing = await tx.queryOne<DisbursementRow>(
+        `SELECT * FROM petty_cash_disbursements WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+        [id]
+      );
+      if (!existing) {
+        return { status: 404 as const, body: { error: 'Not Found', message: 'Disbursement not found' } };
+      }
+
+      // Lock the site's rows so a concurrent expense/disbursement write can't
+      // race this balance check (mirrors createExpense's locking).
+      await tx.query(`SELECT 1 FROM petty_cash_disbursements WHERE site = $1 AND deleted_at IS NULL FOR UPDATE`, [existing.site]);
+      await tx.query(`SELECT 1 FROM petty_cash_expenses WHERE site = $1 AND deleted_at IS NULL FOR UPDATE`, [existing.site]);
+
+      const aggRow = await tx.queryOne<{ other_in: string; total_out: string }>(
+        `SELECT
+           COALESCE((SELECT SUM(amount) FROM petty_cash_disbursements WHERE site = $1 AND id <> $2 AND deleted_at IS NULL), 0)::TEXT AS other_in,
+           COALESCE((SELECT SUM(amount) FROM petty_cash_expenses WHERE site = $1 AND deleted_at IS NULL), 0)::TEXT AS total_out`,
+        [existing.site, id]
+      );
+      const newBalance = Number(aggRow?.other_in ?? 0) + data.amount - Number(aggRow?.total_out ?? 0);
+      if (newBalance < 0) {
+        return { status: 400 as const, body: {
+          error: 'Bad Request',
+          message: `Reducing this to ₹${data.amount.toLocaleString('en-IN')} would leave ${existing.site} with a negative balance of ₹${newBalance.toLocaleString('en-IN')}. Adjust downstream expenses first.`,
+        } };
+      }
+
+      const updated = await tx.queryOne<DisbursementRow>(
+        `UPDATE petty_cash_disbursements
+           SET amount = $1, given_on = $2, mode = $3, reference = $4, remarks = $5
+         WHERE id = $6
+         RETURNING *`,
+        [data.amount, data.given_on, data.mode, data.reference ?? null, data.remarks ?? null, id]
+      );
+
+      return { status: 200 as const, body: { updated: updated!, existing } };
+    });
+
+    if (result.status !== 200) {
+      res.status(result.status).json(result.body);
+      return;
+    }
+
+    const { updated, existing } = result.body as { updated: DisbursementRow; existing: DisbursementRow };
+
+    const diffs: string[] = [];
+    if (Number(existing.amount) !== Number(updated.amount)) {
+      diffs.push(`amount ₹${Number(existing.amount).toLocaleString('en-IN')} → ₹${Number(updated.amount).toLocaleString('en-IN')}`);
+    }
+    if (String(existing.given_on).slice(0, 10) !== String(updated.given_on).slice(0, 10)) {
+      diffs.push(`date ${String(existing.given_on).slice(0, 10)} → ${String(updated.given_on).slice(0, 10)}`);
+    }
+    if (existing.mode !== updated.mode) diffs.push(`mode ${existing.mode} → ${updated.mode}`);
+    if ((existing.reference ?? '') !== (updated.reference ?? '')) {
+      diffs.push(`reference ${existing.reference ?? '—'} → ${updated.reference ?? '—'}`);
+    }
+    if ((existing.remarks ?? '') !== (updated.remarks ?? '')) diffs.push('remarks updated');
+
+    logAudit({
+      userId,
+      action: `Edited petty cash disbursement at ${existing.site}: ${diffs.length ? diffs.join(' · ') : 'no field changes'}`,
+      metadata: { kind: 'petty_cash_disbursement_edit', disbursementId: id, site: existing.site, before: existing, after: updated },
+    }).catch(e => console.error('[audit] petty cash disbursement edit log failed:', e));
+
+    res.json(updated);
+  } catch (err) { next(err); }
+}
+
+// DELETE /api/petty-cash/disbursements/:id — HO only
+export async function deleteDisbursement(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id: userId } = req.user!;
+    const id = req.params.id as string;
+    const { reason } = deleteReasonSchema.parse(req.body);
+
+    const result = await withTransaction(async (tx) => {
+      const existing = await tx.queryOne<DisbursementRow>(
+        `SELECT * FROM petty_cash_disbursements WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+        [id]
+      );
+      if (!existing) {
+        return { status: 404 as const, body: { error: 'Not Found', message: 'Disbursement not found' } };
+      }
+
+      await tx.query(`SELECT 1 FROM petty_cash_disbursements WHERE site = $1 AND deleted_at IS NULL FOR UPDATE`, [existing.site]);
+      await tx.query(`SELECT 1 FROM petty_cash_expenses WHERE site = $1 AND deleted_at IS NULL FOR UPDATE`, [existing.site]);
+
+      const aggRow = await tx.queryOne<{ other_in: string; total_out: string }>(
+        `SELECT
+           COALESCE((SELECT SUM(amount) FROM petty_cash_disbursements WHERE site = $1 AND id <> $2 AND deleted_at IS NULL), 0)::TEXT AS other_in,
+           COALESCE((SELECT SUM(amount) FROM petty_cash_expenses WHERE site = $1 AND deleted_at IS NULL), 0)::TEXT AS total_out`,
+        [existing.site, id]
+      );
+      const newBalance = Number(aggRow?.other_in ?? 0) - Number(aggRow?.total_out ?? 0);
+      if (newBalance < 0) {
+        return { status: 400 as const, body: {
+          error: 'Bad Request',
+          message: `Deleting this would leave ${existing.site} with a negative balance of ₹${newBalance.toLocaleString('en-IN')}. Adjust downstream expenses first.`,
+        } };
+      }
+
+      await tx.query(
+        `UPDATE petty_cash_disbursements SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
+        [userId, id]
+      );
+
+      return { status: 200 as const, body: { existing } };
+    });
+
+    if (result.status !== 200) {
+      res.status(result.status).json(result.body);
+      return;
+    }
+
+    const { existing } = result.body as { existing: DisbursementRow };
+
+    logAudit({
+      userId,
+      action: `Deleted petty cash disbursement: ₹${Number(existing.amount).toLocaleString('en-IN')} given to ${existing.site} on ${String(existing.given_on).slice(0, 10)} — ${reason}`,
+      metadata: { kind: 'petty_cash_disbursement_delete', disbursementId: id, site: existing.site, amount: existing.amount, reason, before: existing },
+    }).catch(e => console.error('[audit] petty cash disbursement delete log failed:', e));
+
+    res.json({ message: 'Disbursement deleted' });
+  } catch (err) { next(err); }
+}
+
 // ── expenses ────────────────────────────────────────────────────────────
 // POST /api/petty-cash/expenses — HO (any site) | site (assigned sites only)
 export async function createExpense(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -399,6 +554,185 @@ export async function listExpenses(req: Request, res: Response, next: NextFuncti
       params
     );
     res.json(rows);
+  } catch (err) { next(err); }
+}
+
+// PATCH /api/petty-cash/expenses/:id — HO (any site) | site (assigned sites only)
+export async function updateExpense(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { role, id: userId } = req.user!;
+    const id = req.params.id as string;
+    const data = updateExpenseSchema.parse(req.body);
+
+    const result = await withTransaction(async (tx) => {
+      const existing = await tx.queryOne<ExpenseRow>(
+        `SELECT * FROM petty_cash_expenses WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+        [id]
+      );
+      if (!existing) {
+        return { status: 404 as const, body: { error: 'Not Found', message: 'Expense not found' } };
+      }
+      if (role === 'site' && !userHasSite(req.user, existing.site)) {
+        return { status: 403 as const, body: { error: 'Forbidden', message: 'You can only edit expenses for sites you are assigned to' } };
+      }
+
+      await tx.query(`SELECT 1 FROM petty_cash_disbursements WHERE site = $1 AND deleted_at IS NULL FOR UPDATE`, [existing.site]);
+      await tx.query(`SELECT 1 FROM petty_cash_expenses WHERE site = $1 AND deleted_at IS NULL FOR UPDATE`, [existing.site]);
+
+      const aggRow = await tx.queryOne<{ total_in: string; other_out: string }>(
+        `SELECT
+           COALESCE((SELECT SUM(amount) FROM petty_cash_disbursements WHERE site = $1 AND deleted_at IS NULL), 0)::TEXT AS total_in,
+           COALESCE((SELECT SUM(amount) FROM petty_cash_expenses WHERE site = $1 AND id <> $2 AND deleted_at IS NULL), 0)::TEXT AS other_out`,
+        [existing.site, id]
+      );
+      const availableBalance = Number(aggRow?.total_in ?? 0) - Number(aggRow?.other_out ?? 0);
+      if (data.amount > availableBalance) {
+        return { status: 400 as const, body: {
+          error: 'Bad Request',
+          message: `Expense of ₹${data.amount.toLocaleString('en-IN')} exceeds petty cash balance of ₹${availableBalance.toLocaleString('en-IN')}`,
+        } };
+      }
+
+      let newInvoiceStatus: string | null = null;
+
+      if (existing.invoice_id && existing.payment_id) {
+        const inv = await tx.queryOne<{ id: string; invoice_amount: string; pushed: boolean; deleted_at: string | null }>(
+          `SELECT id, invoice_amount, pushed, deleted_at FROM invoices WHERE id = $1 FOR UPDATE`,
+          [existing.invoice_id]
+        );
+        if (!inv || inv.deleted_at) {
+          return { status: 404 as const, body: { error: 'Not Found', message: 'Linked invoice not found' } };
+        }
+        if (role === 'site' && inv.pushed) {
+          return { status: 403 as const, body: { error: 'Forbidden', message: 'Finalized invoices can only be adjusted by Head Office' } };
+        }
+        if (role === 'site' && data.amount > MINOR_LIMIT) {
+          return { status: 403 as const, body: { error: 'Forbidden', message: `Site accountants can only pay invoices up to ₹${MINOR_LIMIT.toLocaleString('en-IN')}` } };
+        }
+
+        const sumRow = await tx.queryOne<{ paid: string; allocated: string }>(
+          `SELECT
+             COALESCE((SELECT SUM(amount + tds_amount + gst_tds_amount) FROM payments WHERE invoice_id = $1 AND id <> $2), 0)::TEXT AS paid,
+             COALESCE((SELECT SUM(allocated_amount) FROM credit_note_allocations WHERE invoice_id = $1), 0)::TEXT AS allocated`,
+          [existing.invoice_id, existing.payment_id]
+        );
+        const invBalance = Number(inv.invoice_amount) - Number(sumRow?.paid ?? 0) - Number(sumRow?.allocated ?? 0);
+        if (data.amount > invBalance) {
+          return { status: 400 as const, body: {
+            error: 'Bad Request',
+            message: `Payment of ₹${data.amount.toLocaleString('en-IN')} exceeds outstanding invoice balance of ₹${invBalance.toLocaleString('en-IN')}`,
+          } };
+        }
+
+        await tx.query(`UPDATE payments SET amount = $1, payment_date = $2 WHERE id = $3`, [data.amount, data.spent_on, existing.payment_id]);
+        const statusRow = await tx.queryOne<{ payment_status: string }>(
+          `UPDATE invoices SET payment_status = ${paymentStatusCase('invoices')}, updated_at = NOW() WHERE id = $1 RETURNING payment_status`,
+          [existing.invoice_id]
+        );
+        newInvoiceStatus = statusRow?.payment_status ?? null;
+      }
+
+      const updated = await tx.queryOne<ExpenseRow>(
+        `UPDATE petty_cash_expenses
+           SET amount = $1, spent_on = $2, purpose = $3, remarks = $4
+         WHERE id = $5
+         RETURNING *`,
+        [data.amount, data.spent_on, data.purpose, data.remarks ?? null, id]
+      );
+
+      return { status: 200 as const, body: { updated: updated!, existing, newInvoiceStatus } };
+    });
+
+    if (result.status !== 200) {
+      res.status(result.status).json(result.body);
+      return;
+    }
+
+    const { updated, existing, newInvoiceStatus } = result.body as { updated: ExpenseRow; existing: ExpenseRow; newInvoiceStatus: string | null };
+
+    const diffs: string[] = [];
+    if (Number(existing.amount) !== Number(updated.amount)) {
+      diffs.push(`amount ₹${Number(existing.amount).toLocaleString('en-IN')} → ₹${Number(updated.amount).toLocaleString('en-IN')}`);
+    }
+    if (String(existing.spent_on).slice(0, 10) !== String(updated.spent_on).slice(0, 10)) {
+      diffs.push(`date ${String(existing.spent_on).slice(0, 10)} → ${String(updated.spent_on).slice(0, 10)}`);
+    }
+    if (existing.purpose !== updated.purpose) diffs.push(`purpose "${existing.purpose}" → "${updated.purpose}"`);
+    if ((existing.remarks ?? '') !== (updated.remarks ?? '')) diffs.push('remarks updated');
+
+    logAudit({
+      userId,
+      action: `Edited petty cash expense at ${existing.site}: ${diffs.length ? diffs.join(' · ') : 'no field changes'}`,
+      invoiceId: existing.invoice_id ?? undefined,
+      metadata: { kind: 'petty_cash_expense_edit', expenseId: id, site: existing.site, before: existing, after: updated },
+    }).catch(e => console.error('[audit] petty cash expense edit log failed:', e));
+
+    res.json({ ...updated, invoice_payment_status: newInvoiceStatus ?? undefined });
+  } catch (err) { next(err); }
+}
+
+// DELETE /api/petty-cash/expenses/:id — HO (any site) | site (assigned sites only)
+export async function deleteExpense(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { role, id: userId } = req.user!;
+    const id = req.params.id as string;
+    const { reason } = deleteReasonSchema.parse(req.body);
+
+    const result = await withTransaction(async (tx) => {
+      const existing = await tx.queryOne<ExpenseRow>(
+        `SELECT * FROM petty_cash_expenses WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+        [id]
+      );
+      if (!existing) {
+        return { status: 404 as const, body: { error: 'Not Found', message: 'Expense not found' } };
+      }
+      if (role === 'site' && !userHasSite(req.user, existing.site)) {
+        return { status: 403 as const, body: { error: 'Forbidden', message: 'You can only delete expenses for sites you are assigned to' } };
+      }
+
+      let newInvoiceStatus: string | null = null;
+
+      if (existing.invoice_id && existing.payment_id) {
+        const inv = await tx.queryOne<{ id: string; pushed: boolean; deleted_at: string | null }>(
+          `SELECT id, pushed, deleted_at FROM invoices WHERE id = $1 FOR UPDATE`,
+          [existing.invoice_id]
+        );
+        if (role === 'site' && inv && inv.pushed) {
+          return { status: 403 as const, body: { error: 'Forbidden', message: 'Finalized invoices can only be adjusted by Head Office' } };
+        }
+        await tx.query(`DELETE FROM payments WHERE id = $1`, [existing.payment_id]);
+        if (inv && !inv.deleted_at) {
+          const statusRow = await tx.queryOne<{ payment_status: string }>(
+            `UPDATE invoices SET payment_status = ${paymentStatusCase('invoices')}, updated_at = NOW() WHERE id = $1 RETURNING payment_status`,
+            [existing.invoice_id]
+          );
+          newInvoiceStatus = statusRow?.payment_status ?? null;
+        }
+      }
+
+      await tx.query(
+        `UPDATE petty_cash_expenses SET deleted_at = NOW(), deleted_by = $1 WHERE id = $2`,
+        [userId, id]
+      );
+
+      return { status: 200 as const, body: { existing, newInvoiceStatus } };
+    });
+
+    if (result.status !== 200) {
+      res.status(result.status).json(result.body);
+      return;
+    }
+
+    const { existing, newInvoiceStatus } = result.body as { existing: ExpenseRow; newInvoiceStatus: string | null };
+
+    logAudit({
+      userId,
+      action: `Deleted petty cash expense: ₹${Number(existing.amount).toLocaleString('en-IN')} at ${existing.site} — ${existing.purpose} — ${reason}`,
+      invoiceId: existing.invoice_id ?? undefined,
+      metadata: { kind: 'petty_cash_expense_delete', expenseId: id, site: existing.site, amount: existing.amount, purpose: existing.purpose, reason, before: existing },
+    }).catch(e => console.error('[audit] petty cash expense delete log failed:', e));
+
+    res.json({ message: 'Expense deleted', invoice_payment_status: newInvoiceStatus ?? undefined });
   } catch (err) { next(err); }
 }
 

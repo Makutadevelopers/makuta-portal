@@ -67,3 +67,18 @@ export interface CreateExpenseData {
   invoice_id?: string | null;
   remarks?: string | null;
 }
+
+export interface UpdateDisbursementData {
+  amount: number;
+  given_on: string;
+  mode: 'cash' | 'bank';
+  reference?: string | null;
+  remarks?: string | null;
+}
+
+export interface UpdateExpenseData {
+  amount: number;
+  spent_on: string;
+  purpose: string;
+  remarks?: string | null;
+}

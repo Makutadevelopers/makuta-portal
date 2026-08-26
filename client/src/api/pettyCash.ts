@@ -6,6 +6,8 @@ import {
   PettyCashLedgerEntry,
   CreateDisbursementData,
   CreateExpenseData,
+  UpdateDisbursementData,
+  UpdateExpenseData,
 } from '../types/pettyCash';
 
 export function getAllBalances(): Promise<PettyCashBalance[]> {
@@ -37,6 +39,34 @@ export function createExpense(data: CreateExpenseData): Promise<PettyCashExpense
   return apiFetch<PettyCashExpense>('/petty-cash/expenses', {
     method: 'POST',
     body: JSON.stringify(data),
+  });
+}
+
+export function updateDisbursement(id: string, data: UpdateDisbursementData): Promise<PettyCashDisbursement> {
+  return apiFetch<PettyCashDisbursement>(`/petty-cash/disbursements/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteDisbursement(id: string, reason: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/petty-cash/disbursements/${id}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function updateExpense(id: string, data: UpdateExpenseData): Promise<PettyCashExpense> {
+  return apiFetch<PettyCashExpense>(`/petty-cash/expenses/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteExpense(id: string, reason: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/petty-cash/expenses/${id}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ reason }),
   });
 }
 
