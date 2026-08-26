@@ -6,6 +6,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
+import { normaliseSiteName } from '../utils/sites';
 
 export interface JwtPayload {
   id: string;
@@ -76,7 +77,13 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
 export function userHasSite(user: JwtPayload | undefined, site: string | null | undefined): boolean {
   if (!user || !site) return false;
   if (user.role === 'ho' || user.role === 'mgmt') return true;
-  return Array.isArray(user.sites) && user.sites.includes(site);
+  if (!Array.isArray(user.sites)) return false;
+  // `site` is normalised on write (see invoice.controller.ts), but user.sites[]
+  // is stored as whatever a caller sent when the user was assigned — compare
+  // both sides normalised so a stale casing/alias doesn't false-reject a site
+  // the user is actually assigned to.
+  const target = normaliseSiteName(site);
+  return user.sites.some(s => normaliseSiteName(s) === target);
 }
 
 /**

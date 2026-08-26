@@ -19,13 +19,16 @@ export default function PayFromPettyCashModal({ invoice, onClose, onDone }: Prop
   const [spentOn, setSpentOn] = useState(today);
   const [remarks, setRemarks] = useState('');
   const [balance, setBalance] = useState<number | null>(null);
+  const [balanceError, setBalanceError] = useState('');
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
+    setBalance(null);
+    setBalanceError('');
     getSiteBalance(invoice.site)
       .then(b => setBalance(Number(b.balance)))
-      .catch(() => setBalance(0));
+      .catch(err => setBalanceError(err instanceof Error ? err.message : 'Failed to load petty cash balance'));
   }, [invoice.site]);
 
   async function submit(e: FormEvent) {
@@ -75,11 +78,18 @@ export default function PayFromPettyCashModal({ invoice, onClose, onDone }: Prop
         </div>
 
         <div className="text-xs text-gray-500">
-          Balance available: <span className="font-medium text-gray-700">{balance === null ? '…' : formatINR(balance)}</span>
+          Balance available: <span className="font-medium text-gray-700">
+            {balanceError ? 'unavailable' : balance === null ? '…' : formatINR(balance)}
+          </span>
           {' · '}
           Site limit per payment: <span className="font-medium text-gray-700">{formatINR(MINOR_LIMIT)}</span>
         </div>
 
+        {balanceError && (
+          <div className="p-2 bg-red-50 text-red-700 rounded text-xs">
+            Couldn't load petty cash balance: {balanceError}
+          </div>
+        )}
         {error && <div className="p-2 bg-red-50 text-red-700 rounded text-xs">{error}</div>}
 
         <div className="grid grid-cols-2 gap-3">
