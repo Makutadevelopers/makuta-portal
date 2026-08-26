@@ -145,9 +145,13 @@ interface InvoiceRow {
 }
 
 // Defensive cap so a runaway client (or future growth) can't pull the entire
-// table at once. At current scale (~1–2k invoices) this is invisible; if it
-// ever clips real data we'll need server-side filter/sort + real pagination.
-const INVOICE_LIST_LIMIT = 5000;
+// table at once. Raised from 5000 on 2026-08-26 after it silently clipped a
+// real invoice: sorted `invoice_date DESC`, so once live volume crossed 5000
+// the oldest rows (still fully valid, e.g. paid-off invoices from mid-2025)
+// dropped out of "All Invoices" while remaining reachable everywhere else
+// (Vendor Detail, exports, etc). If this is ever approached again we need
+// real server-side filter/sort + pagination, not another bump.
+const INVOICE_LIST_LIMIT = 50000;
 
 export async function getInvoices(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
