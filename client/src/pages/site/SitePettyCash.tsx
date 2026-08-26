@@ -21,6 +21,7 @@ import {
 import { useToast } from '../../context/ToastContext';
 import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
+import { useTypeaheadKeyboard } from '../../hooks/useTypeaheadKeyboard';
 
 const MINOR_LIMIT = 50000;
 
@@ -51,6 +52,8 @@ export default function SitePettyCash() {
   // Pay Invoice from Petty Cash form
   const [showPay, setShowPay]       = useState(false);
   const [pInvoiceId, setPInvoiceId] = useState('');
+  const [pInvoiceSearch, setPInvoiceSearch] = useState('');
+  const [pInvoiceDropdownOpen, setPInvoiceDropdownOpen] = useState(false);
   const [pAmount, setPAmount]       = useState('');
   const [pSpentOn, setPSpentOn]     = useState(today);
   const [pRemarks, setPRemarks]     = useState('');
@@ -118,6 +121,37 @@ export default function SitePettyCash() {
   );
   const selectedInvoice = payableInvoices.find(i => i.id === pInvoiceId);
 
+  // Typeahead over payableInvoices — searches vendor name, invoice number,
+  // and amount, since a busy site can have too many drafts to scan a plain
+  // dropdown for "the ₹47,200 one" or a half-remembered invoice number.
+  const invoiceMatches = useMemo(() => {
+    const q = pInvoiceSearch.trim().toLowerCase();
+    if (!q) return payableInvoices;
+    return payableInvoices.filter(i =>
+      i.vendor_name.toLowerCase().includes(q) ||
+      (i.invoice_no ?? '').toLowerCase().includes(q) ||
+      String(i.invoice_amount).includes(q)
+    );
+  }, [payableInvoices, pInvoiceSearch]);
+
+  function invoiceLabel(i: typeof payableInvoices[number]) {
+    return `${i.vendor_name} · ${i.invoice_no} · ${formatINR(Number(i.invoice_amount))}`;
+  }
+
+  function selectPayableInvoice(i: typeof payableInvoices[number]) {
+    setPInvoiceId(i.id);
+    setPInvoiceSearch(invoiceLabel(i));
+    setPAmount(String(i.invoice_amount));
+    setPInvoiceDropdownOpen(false);
+  }
+
+  const invoiceKbd = useTypeaheadKeyboard({
+    items: invoiceMatches,
+    open: pInvoiceDropdownOpen,
+    onSelect: selectPayableInvoice,
+    onClose: () => setPInvoiceDropdownOpen(false),
+  });
+
   async function handlePay(e: FormEvent) {
     e.preventDefault();
     const amt = Number(pAmount);
@@ -136,7 +170,7 @@ export default function SitePettyCash() {
       });
       notify(`Paid ₹${amt.toLocaleString('en-IN')} from petty cash`);
       setShowPay(false);
-      setPInvoiceId(''); setPAmount(''); setPRemarks('');
+      setPInvoiceId(''); setPInvoiceSearch(''); setPAmount(''); setPRemarks('');
       refresh();
       refreshInvoices();
     } catch (err) {
@@ -212,19 +246,41 @@ export default function SitePettyCash() {
 
             <div>
               <label className="block text-xs text-gray-500 mb-1">Invoice</label>
-              <select value={pInvoiceId} onChange={e => {
-                  setPInvoiceId(e.target.value);
-                  const inv = payableInvoices.find(i => i.id === e.target.value);
-                  if (inv) setPAmount(String(inv.invoice_amount));
-                }} required
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm bg-white">
-                <option value="">Select an invoice…</option>
-                {payableInvoices.map(i => (
-                  <option key={i.id} value={i.id}>
-                    {i.vendor_name} · {i.invoice_no} · {formatINR(Number(i.invoice_amount))}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <input
+                  value={pInvoiceSearch}
+                  onChange={e => {
+                    setPInvoiceSearch(e.target.value);
+                    setPInvoiceId('');
+                    setPInvoiceDropdownOpen(true);
+                  }}
+                  onKeyDown={invoiceKbd.onKeyDown}
+                  onFocus={() => setPInvoiceDropdownOpen(true)}
+                  onBlur={() => setTimeout(() => setPInvoiceDropdownOpen(false), 150)}
+                  required
+                  placeholder="Search by vendor, invoice no. or amount…"
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+                {pInvoiceDropdownOpen && (
+                  <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {invoiceMatches.map((i, idx) => (
+                      <div
+                        key={i.id}
+                        ref={invoiceKbd.itemRef(idx)}
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => selectPayableInvoice(i)}
+                        className={`px-3 py-2 cursor-pointer flex items-center justify-between gap-2 ${invoiceKbd.isActive(idx) ? 'bg-blue-50' : 'hover:bg-blue-50'}`}
+                      >
+                        <span className="text-sm text-gray-900 truncate">{i.vendor_name} · {i.invoice_no}</span>
+                        <span className="text-xs text-gray-400 whitespace-nowrap">{formatINR(Number(i.invoice_amount))}</span>
+                      </div>
+                    ))}
+                    {invoiceMatches.length === 0 && (
+                      <div className="px-3 py-2 text-xs text-gray-400">No matching draft invoices</div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
