@@ -8,6 +8,8 @@ export interface PettyCashBalance {
   total_out: string;
   balance: string;
   last_activity: string | null;
+  /** Effective per-payment cap for this site — the HO-configured override, or the ₹50,000 default. */
+  payment_limit: string;
 }
 
 export interface PettyCashDisbursement {

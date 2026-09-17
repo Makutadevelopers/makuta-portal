@@ -84,7 +84,7 @@ export default function PettyCash() {
     const m = new Map(balances.map(b => [b.site, b]));
     for (const s of SITES) {
       if (!m.has(s)) {
-        m.set(s, { site: s, total_in: '0', total_out: '0', balance: '0', last_activity: null });
+        m.set(s, { site: s, total_in: '0', total_out: '0', balance: '0', last_activity: null, payment_limit: '50000' });
       }
     }
     return Array.from(m.values()).sort((a, b) => a.site.localeCompare(b.site));
@@ -332,8 +332,8 @@ function SiteDrilldownModal({ site, canEditDisbursements, onClose, onChanged }: 
             <table className="w-full text-[13px]">
               <thead className="bg-gray-50 sticky top-0 z-10">
                 <tr>
-                  {['Date', 'Type', 'Description', 'By', 'Amount', ''].map(h => (
-                    <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}>
+                  {['Date', 'Description', 'By', 'Amount Received', 'Amount Spent', ''].map(h => (
+                    <th key={h} className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap border-b border-gray-100 ${h.startsWith('Amount') ? 'text-right' : 'text-left'}`}>
                       {h}
                     </th>
                   ))}
@@ -345,11 +345,6 @@ function SiteDrilldownModal({ site, canEditDisbursements, onClose, onChanged }: 
                   return (
                     <tr key={`${a.type}-${a.row.id}`} className="border-t border-gray-50 hover:bg-gray-50/50">
                       <td className="px-4 py-3 whitespace-nowrap">{formatDate(a.date)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${a.type === 'in' ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700'}`}>
-                          {a.type === 'in' ? 'Given' : 'Spent'}
-                        </span>
-                      </td>
                       <td className="px-4 py-3 text-gray-700">
                         {a.type === 'in'
                           ? `Received via ${a.row.mode}${a.row.reference ? ` — ${a.row.reference}` : ''}`
@@ -357,8 +352,11 @@ function SiteDrilldownModal({ site, canEditDisbursements, onClose, onChanged }: 
                         {a.type === 'out' && a.row.invoice_no && <span className="text-gray-400"> · Inv #{a.row.invoice_no}</span>}
                       </td>
                       <td className="px-4 py-3 text-gray-500">{a.type === 'in' ? (a.row.given_by_name ?? '—') : (a.row.recorded_by_name ?? '—')}</td>
-                      <td className={`px-4 py-3 text-right font-medium ${a.type === 'in' ? 'text-green-700' : 'text-orange-700'}`}>
-                        {a.type === 'in' ? '+' : '−'}{formatINR(Number(a.row.amount))}
+                      <td className="px-4 py-3 text-right font-medium text-green-700">
+                        {a.type === 'in' ? formatINR(Number(a.row.amount)) : ''}
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium text-orange-700">
+                        {a.type === 'out' ? formatINR(Number(a.row.amount)) : ''}
                       </td>
                       <td className="px-2 py-3 text-right">
                         {canEdit && (

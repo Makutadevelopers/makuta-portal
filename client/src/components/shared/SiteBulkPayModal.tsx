@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { Invoice } from '../../types/invoice';
 import { createExpense, getSiteBalance } from '../../api/pettyCash';
+import { PettyCashBalance } from '../../types/pettyCash';
 import { formatINR } from '../../utils/formatters';
 
-const MINOR_LIMIT = 50000;
+const DEFAULT_MINOR_LIMIT = 50000;
 
 interface Props {
   invoices: Invoice[];
@@ -19,7 +20,7 @@ export default function SiteBulkPayModal({ invoices, site, onClose, onDone }: Pr
     const m: Record<string, string> = {};
     for (const inv of invoices) {
       const remaining = Number(inv.effective_payable ?? inv.invoice_amount);
-      m[inv.id] = String(Math.min(remaining, MINOR_LIMIT));
+      m[inv.id] = String(Math.min(remaining, DEFAULT_MINOR_LIMIT));
     }
     return m;
   }, [invoices]);
@@ -27,19 +28,22 @@ export default function SiteBulkPayModal({ invoices, site, onClose, onDone }: Pr
   const [allocs, setAllocs] = useState<Record<string, string>>(initialAllocs);
   const [spentOn, setSpentOn] = useState(today);
   const [remarks, setRemarks] = useState('');
-  const [balance, setBalance] = useState<number | null>(null);
+  const [balanceInfo, setBalanceInfo] = useState<PettyCashBalance | null>(null);
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState('');
   const [perRowError, setPerRowError] = useState<Record<string, string>>({});
 
+  const balance = balanceInfo ? Number(balanceInfo.balance) : null;
+  const minorLimit = balanceInfo ? Number(balanceInfo.payment_limit) : DEFAULT_MINOR_LIMIT;
+
   useEffect(() => {
     getSiteBalance(site)
-      .then(b => setBalance(Number(b.balance)))
-      .catch(() => setBalance(0));
+      .then(setBalanceInfo)
+      .catch(() => setBalanceInfo(null));
   }, [site]);
 
   const total = Object.values(allocs).reduce((s, v) => s + (Number(v) || 0), 0);
-  const overLimitIds = invoices.filter(inv => Number(allocs[inv.id] || 0) > MINOR_LIMIT).map(i => i.id);
+  const overLimitIds = invoices.filter(inv => Number(allocs[inv.id] || 0) > minorLimit).map(i => i.id);
   const overBalance = balance !== null && total > balance;
   const blocked = overLimitIds.length > 0 || overBalance || total <= 0;
 
@@ -48,7 +52,7 @@ export default function SiteBulkPayModal({ invoices, site, onClose, onDone }: Pr
     setError('');
     setPerRowError({});
     if (blocked) {
-      if (overLimitIds.length > 0) setError(`${overLimitIds.length} invoice(s) above the ₹${MINOR_LIMIT.toLocaleString('en-IN')} site limit`);
+      if (overLimitIds.length > 0) setError(`${overLimitIds.length} invoice(s) above the ₹${minorLimit.toLocaleString('en-IN')} site limit`);
       else if (overBalance) setError(`Total exceeds available petty cash balance (${formatINR(balance ?? 0)})`);
       else setError('Enter a non-zero amount for at least one invoice');
       return;
@@ -95,7 +99,7 @@ export default function SiteBulkPayModal({ invoices, site, onClose, onDone }: Pr
           <div>
             <div className="text-base font-medium text-gray-900">Bulk Pay from Petty Cash</div>
             <div className="text-xs text-gray-500 mt-0.5">
-              {invoices.length} invoice{invoices.length > 1 ? 's' : ''} · Each ≤ {formatINR(MINOR_LIMIT)}
+              {invoices.length} invoice{invoices.length > 1 ? 's' : ''} · Each ≤ {formatINR(minorLimit)}
               {' · '}Balance: <span className="font-medium text-gray-700">{balance === null ? '…' : formatINR(balance)}</span>
             </div>
           </div>
@@ -119,7 +123,7 @@ export default function SiteBulkPayModal({ invoices, site, onClose, onDone }: Pr
                 {invoices.map(inv => {
                   const remaining = Number(inv.effective_payable ?? inv.invoice_amount);
                   const cur = Number(allocs[inv.id] || 0);
-                  const overLimit = cur > MINOR_LIMIT;
+                  const overLimit = cur > minorLimit;
                   const rowErr = perRowError[inv.id];
                   return (
                     <tr key={inv.id} className={`border-t border-gray-50 ${rowErr ? 'bg-red-50/40' : ''}`}>
@@ -133,7 +137,7 @@ export default function SiteBulkPayModal({ invoices, site, onClose, onDone }: Pr
                           onChange={e => setAllocs(prev => ({ ...prev, [inv.id]: e.target.value }))}
                           className={`w-full px-2 py-1.5 border rounded text-sm text-right ${overLimit ? 'border-red-300 bg-red-50' : 'border-gray-200'}`}
                         />
-                        {overLimit && <div className="text-[10px] text-red-600 mt-0.5">Above ₹{MINOR_LIMIT.toLocaleString('en-IN')}</div>}
+                        {overLimit && <div className="text-[10px] text-red-600 mt-0.5">Above ₹{minorLimit.toLocaleString('en-IN')}</div>}
                         {rowErr && <div className="text-[10px] text-red-600 mt-0.5">{rowErr}</div>}
                       </td>
                     </tr>

@@ -23,11 +23,16 @@ import { useStickyHeaderHeight } from '../../hooks/useStickyHeaderHeight';
 import { useReloadOnFocus } from '../../hooks/useReloadOnFocus';
 import { useTypeaheadKeyboard } from '../../hooks/useTypeaheadKeyboard';
 
-const MINOR_LIMIT = 50000;
+const DEFAULT_MINOR_LIMIT = 50000;
 
 export default function SitePettyCash() {
   const { user } = useAuth();
-  const site = user?.site ?? '';
+  // Multi-site accountants get one petty-cash float per assigned site (it's a
+  // physical cash handoff, not pooled) — mirrors the "view one site at a time"
+  // selector pattern already used on SiteDashboard's trend chart.
+  const userSites = user?.sites && user.sites.length > 0 ? user.sites : (user?.site ? [user.site] : []);
+  const [selectedSite, setSelectedSite] = useState<string>('');
+  const site = selectedSite || userSites[0] || '';
   const { notify } = useToast();
   const { invoices, refresh: refreshInvoices } = useInvoices();
   const today = new Date().toISOString().split('T')[0];
@@ -114,12 +119,16 @@ export default function SitePettyCash() {
     }
   }
 
-  // Invoices payable from petty cash: own-site, not yet finalised (pushed)
-  const payableInvoices = useMemo(
-    () => invoices.filter(i => i.site === site && !i.pushed),
-    [invoices, site]
-  );
+  // Invoices payable from petty cash: own-site, not yet finalised (pushed).
+  // Compared case/whitespace-insensitively — `site` comes from the user's
+  // assigned sites[], which (pre-normalisation) could drift from invoices.site
+  // by casing or stray whitespace and silently empty this list.
+  const payableInvoices = useMemo(() => {
+    const target = site.trim().toLowerCase();
+    return invoices.filter(i => i.site.trim().toLowerCase() === target && !i.pushed);
+  }, [invoices, site]);
   const selectedInvoice = payableInvoices.find(i => i.id === pInvoiceId);
+  const selectedMissingPoNumber = !!selectedInvoice && (!selectedInvoice.po_number || !selectedInvoice.po_number.trim());
 
   // Typeahead over payableInvoices — searches vendor name, invoice number,
   // and amount, since a busy site can have too many drafts to scan a plain
@@ -157,7 +166,8 @@ export default function SitePettyCash() {
     const amt = Number(pAmount);
     if (!pInvoiceId) { notify('Pick an invoice', 'error'); return; }
     if (!(amt > 0)) { notify('Amount must be greater than zero', 'error'); return; }
-    if (amt > MINOR_LIMIT) { notify(`Site accountants can only pay up to ₹${MINOR_LIMIT.toLocaleString('en-IN')}`, 'error'); return; }
+    if (amt > minorLimit) { notify(`Site accountants can only pay up to ₹${minorLimit.toLocaleString('en-IN')}`, 'error'); return; }
+    if (selectedMissingPoNumber) { notify('This invoice has no PO / Work Order number. Add one before paying it from petty cash.', 'error'); return; }
     setPaying(true);
     try {
       await createExpense({
@@ -181,6 +191,7 @@ export default function SitePettyCash() {
   }
 
   const currentBalance = Number(balance?.balance ?? 0);
+  const minorLimit = balance?.payment_limit != null ? Number(balance.payment_limit) : DEFAULT_MINOR_LIMIT;
   const low = currentBalance > 0 && currentBalance < 1000;
   const empty = currentBalance <= 0;
 
@@ -198,6 +209,16 @@ export default function SitePettyCash() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {userSites.length > 1 && (
+              <select
+                value={site}
+                onChange={e => setSelectedSite(e.target.value)}
+                className="border border-gray-200 rounded-lg text-sm px-2 py-2 text-gray-700"
+                title="Each site has its own petty cash float"
+              >
+                {userSites.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            )}
             <button onClick={() => setShowPay(true)}
               disabled={empty || payableInvoices.length === 0}
               title={payableInvoices.length === 0 ? 'No draft invoices to pay' : empty ? 'No petty cash available' : ''}
@@ -241,7 +262,7 @@ export default function SitePettyCash() {
             <div className="text-xs text-gray-500 mb-2">
               Balance available: <span className="font-medium text-gray-700">{formatINR(currentBalance)}</span>
               {' · '}
-              Site limit per payment: <span className="font-medium text-gray-700">{formatINR(MINOR_LIMIT)}</span>
+              Site limit per payment: <span className="font-medium text-gray-700">{formatINR(minorLimit)}</span>
             </div>
 
             <div>
@@ -310,10 +331,16 @@ export default function SitePettyCash() {
               If the invoice has already been partly paid, the server will reject an amount that exceeds the remaining balance.
             </div>
 
+            {selectedMissingPoNumber && (
+              <div className="p-2 bg-red-50 text-red-700 rounded text-xs">
+                This invoice has no PO / Work Order number. Add one before paying it from petty cash.
+              </div>
+            )}
+
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => setShowPay(false)}
                 className="px-3 py-2 text-sm text-gray-600">Cancel</button>
-              <button type="submit" disabled={paying}
+              <button type="submit" disabled={paying || selectedMissingPoNumber}
                 className="px-4 py-2 bg-[#1a3c5e] text-white text-sm rounded-lg hover:bg-[#15304d] disabled:opacity-50">
                 {paying ? 'Paying…' : 'Pay from Petty Cash'}
               </button>
@@ -387,19 +414,19 @@ export default function SitePettyCash() {
         >
           <table className="w-full table-fixed text-[13px]">
             <colgroup>
-              <col style={{ width: '14%' }} />{/* Transaction Date */}
-              <col style={{ width: '11%' }} />{/* Type */}
-              <col style={{ width: '37%' }} />{/* Description */}
-              <col style={{ width: '17%' }} />{/* By */}
-              <col style={{ width: '14%' }} />{/* Amount */}
-              <col style={{ width: '7%' }} />{/* Actions */}
+              <col style={{ width: '13%' }} />{/* Transaction Date */}
+              <col style={{ width: '38%' }} />{/* Description */}
+              <col style={{ width: '15%' }} />{/* By */}
+              <col style={{ width: '12%' }} />{/* Amount Received */}
+              <col style={{ width: '12%' }} />{/* Amount Spent */}
+              <col style={{ width: '10%' }} />{/* Actions */}
             </colgroup>
             <thead className="bg-gray-50">
               <tr>
-                {['Transaction Date','Type','Description','By','Amount',''].map(h => (
+                {['Transaction Date','Description','By','Amount Received','Amount Spent',''].map(h => (
                   <th
                     key={h}
-                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h === 'Amount' ? 'text-right' : 'text-left'}`}
+                    className={`px-4 py-2.5 font-medium text-gray-500 whitespace-nowrap bg-gray-50 sticky top-0 z-20 border-b border-gray-100 ${h.startsWith('Amount') ? 'text-right' : 'text-left'}`}
                   >
                     {h}
                   </th>
@@ -410,21 +437,17 @@ export default function SitePettyCash() {
               {activity.map(a => (
                 <tr key={`${a.type}-${a.row.id}`} className="border-t border-gray-50 hover:bg-gray-50/50">
                   <td className="px-4 py-3 whitespace-nowrap">{formatDate(a.date)}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                      a.type === 'in' ? 'bg-green-50 text-green-700' : 'bg-orange-50 text-orange-700'
-                    }`}>
-                      {a.type === 'in' ? 'Received' : 'Spent'}
-                    </span>
-                  </td>
                   <td className="px-4 py-3 text-gray-700 truncate">
                     {a.type === 'in'
                       ? `Received via ${a.row.mode}${a.row.reference ? ` — ${a.row.reference}` : ''}`
                       : a.row.purpose}
                   </td>
                   <td className="px-4 py-3 text-gray-500 truncate">{a.type === 'in' ? (a.row.given_by_name ?? '—') : (a.row.recorded_by_name ?? '—')}</td>
-                  <td className={`px-4 py-3 text-right font-medium ${a.type === 'in' ? 'text-green-700' : 'text-orange-700'}`}>
-                    {a.type === 'in' ? '+' : '−'}{formatINR(Number(a.row.amount))}
+                  <td className="px-4 py-3 text-right font-medium text-green-700">
+                    {a.type === 'in' ? formatINR(Number(a.row.amount)) : ''}
+                  </td>
+                  <td className="px-4 py-3 text-right font-medium text-orange-700">
+                    {a.type === 'out' ? formatINR(Number(a.row.amount)) : ''}
                   </td>
                   <td className="px-2 py-3 text-right">
                     {a.type === 'out' && (

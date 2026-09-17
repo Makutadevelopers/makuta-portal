@@ -7,7 +7,8 @@
 // - mgmt : 403 everywhere (per product decision — MD does not see petty cash)
 //
 // Balance per site = Σ(disbursements.amount) − Σ(expenses.amount), both active.
-// A petty-cash expense may optionally pay a ≤ MINOR_LIMIT invoice in its own site;
+// A petty-cash expense may optionally pay a ≤ DEFAULT_MINOR_LIMIT (or the
+// site's own configured petty_cash_payment_limit) invoice in its own site;
 // when invoice_id is supplied the controller also inserts a `payments` row
 // (payment_type = 'petty_cash') and recomputes invoice.payment_status.
 
@@ -19,7 +20,17 @@ import { paymentStatusCase } from '../services/payment.service';
 import { isSiteScoped, userHasSite } from '../middleware/auth';
 import { normaliseSiteName } from '../utils/sites';
 
-const MINOR_LIMIT = 50000;
+const DEFAULT_MINOR_LIMIT = 50000;
+
+// HO can override the per-payment cap for a project from Project Master
+// (sites.petty_cash_payment_limit); NULL there means "use the default".
+async function pettyCashLimitForSite(site: string): Promise<number> {
+  const row = await queryOne<{ petty_cash_payment_limit: string | null }>(
+    `SELECT petty_cash_payment_limit FROM sites WHERE LOWER(name) = LOWER($1)`,
+    [site]
+  );
+  return row?.petty_cash_payment_limit != null ? Number(row.petty_cash_payment_limit) : DEFAULT_MINOR_LIMIT;
+}
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
   .refine(v => !isNaN(new Date(v).getTime()), 'Invalid calendar date');
@@ -69,6 +80,8 @@ interface BalanceRow {
   total_out:      string;
   balance:        string;
   last_activity:  string | null;
+  /** Effective per-payment cap for this site — the configured override, or the ₹50,000 default. */
+  payment_limit:  string;
 }
 
 interface DisbursementRow {
@@ -135,7 +148,7 @@ export async function getBalances(req: Request, res: Response, next: NextFunctio
 
     // HO list across all sites present in either table
     const rows = await query<BalanceRow>(`
-      WITH sites AS (
+      WITH site_names AS (
         SELECT site FROM petty_cash_disbursements WHERE deleted_at IS NULL
         UNION
         SELECT site FROM petty_cash_expenses      WHERE deleted_at IS NULL
@@ -155,8 +168,12 @@ export async function getBalances(req: Request, res: Response, next: NextFunctio
         GREATEST(
           (SELECT MAX(created_at) FROM petty_cash_disbursements d WHERE d.site = s.site AND d.deleted_at IS NULL),
           (SELECT MAX(created_at) FROM petty_cash_expenses      e WHERE e.site = s.site AND e.deleted_at IS NULL)
-        )::TEXT AS last_activity
-      FROM sites s
+        )::TEXT AS last_activity,
+        COALESCE(
+          (SELECT petty_cash_payment_limit FROM sites WHERE LOWER(name) = LOWER(s.site)),
+          ${DEFAULT_MINOR_LIMIT}
+        )::TEXT AS payment_limit
+      FROM site_names s
       ORDER BY s.site
     `);
     res.json(rows);
@@ -180,7 +197,11 @@ async function fetchSiteBalance(site: string): Promise<BalanceRow> {
       GREATEST(
         (SELECT MAX(created_at) FROM petty_cash_disbursements WHERE site = $1 AND deleted_at IS NULL),
         (SELECT MAX(created_at) FROM petty_cash_expenses      WHERE site = $1 AND deleted_at IS NULL)
-      )::TEXT AS last_activity
+      )::TEXT AS last_activity,
+      COALESCE(
+        (SELECT petty_cash_payment_limit FROM sites WHERE LOWER(name) = LOWER($1)),
+        ${DEFAULT_MINOR_LIMIT}
+      )::TEXT AS payment_limit
   `, [site]);
   return row!;
 }
@@ -398,6 +419,8 @@ export async function createExpense(req: Request, res: Response, next: NextFunct
       return;
     }
 
+    const pettyCashLimit = await pettyCashLimitForSite(site);
+
     const result = await withTransaction(async (tx) => {
       // Lock the site's petty cash rows so two concurrent expenses can't both
       // pass the balance check and overdraw. Locking the aggregate means
@@ -449,8 +472,8 @@ export async function createExpense(req: Request, res: Response, next: NextFunct
         if (role === 'site' && inv.pushed) {
           return { status: 403 as const, body: { error: 'Forbidden', message: 'Finalized invoices can only be paid by Head Office' } };
         }
-        if (role === 'site' && data.amount > MINOR_LIMIT) {
-          return { status: 403 as const, body: { error: 'Forbidden', message: `Site accountants can only pay invoices up to ₹${MINOR_LIMIT.toLocaleString('en-IN')}` } };
+        if (role === 'site' && data.amount > pettyCashLimit) {
+          return { status: 403 as const, body: { error: 'Forbidden', message: `Site accountants can only pay invoices up to ₹${pettyCashLimit.toLocaleString('en-IN')} at ${site}` } };
         }
 
         const sumRow = await tx.queryOne<{ paid: string; allocated: string }>(
@@ -609,8 +632,11 @@ export async function updateExpense(req: Request, res: Response, next: NextFunct
         if (role === 'site' && inv.pushed) {
           return { status: 403 as const, body: { error: 'Forbidden', message: 'Finalized invoices can only be adjusted by Head Office' } };
         }
-        if (role === 'site' && data.amount > MINOR_LIMIT) {
-          return { status: 403 as const, body: { error: 'Forbidden', message: `Site accountants can only pay invoices up to ₹${MINOR_LIMIT.toLocaleString('en-IN')}` } };
+        if (role === 'site') {
+          const pettyCashLimit = await pettyCashLimitForSite(existing.site);
+          if (data.amount > pettyCashLimit) {
+            return { status: 403 as const, body: { error: 'Forbidden', message: `Site accountants can only pay invoices up to ₹${pettyCashLimit.toLocaleString('en-IN')} at ${existing.site}` } };
+          }
         }
 
         const sumRow = await tx.queryOne<{ paid: string; allocated: string }>(

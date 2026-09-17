@@ -17,9 +17,11 @@ export interface SiteRow {
   created_at: string;
   updated_at: string;
   created_by: string | null;
+  /** Per-project petty-cash payment cap for site accountants. NULL = use the ₹50,000 default. */
+  petty_cash_payment_limit: string | null;
 }
 
-const SELECT_COLS = 'id, name, active, created_at, updated_at, created_by';
+const SELECT_COLS = 'id, name, active, created_at, updated_at, created_by, petty_cash_payment_limit';
 
 // ── Name cache ────────────────────────────────────────────────────────────
 const CACHE_TTL_MS = 60_000;
@@ -129,6 +131,21 @@ export async function createSite(name: string, userId: string): Promise<SiteRow>
   );
   await refreshSiteCache(true);
   await logAudit({ userId, action: `Added project "${name}"` });
+  return row!;
+}
+
+export async function setPettyCashLimit(site: SiteRow, limit: number | null, userId: string): Promise<SiteRow> {
+  const row = await queryOne<SiteRow>(
+    `UPDATE sites SET petty_cash_payment_limit = $1, updated_at = NOW() WHERE id = $2 RETURNING ${SELECT_COLS}`,
+    [limit, site.id]
+  );
+  await logAudit({
+    userId,
+    action: limit != null
+      ? `Set petty cash payment limit for "${site.name}" to ₹${limit.toLocaleString('en-IN')}`
+      : `Reset petty cash payment limit for "${site.name}" to the default (₹50,000)`,
+    metadata: { siteId: site.id, name: site.name, pettyCashPaymentLimit: limit },
+  });
   return row!;
 }
 

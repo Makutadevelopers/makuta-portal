@@ -40,6 +40,8 @@ export default function ProjectMaster() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [editingLimitId, setEditingLimitId] = useState<string | null>(null);
+  const [editLimit, setEditLimit] = useState('');
 
   async function refresh() {
     setLoading(true);
@@ -104,6 +106,38 @@ export default function ProjectMaster() {
   function startEdit(s: Site) {
     setEditingId(s.id);
     setEditName(s.name);
+  }
+
+  function startEditLimit(s: Site) {
+    setEditingLimitId(s.id);
+    setEditLimit(s.petty_cash_payment_limit != null ? String(Number(s.petty_cash_payment_limit)) : '');
+  }
+
+  async function commitEditLimit(s: Site) {
+    const trimmed = editLimit.trim();
+    const nextLimit = trimmed === '' ? null : Number(trimmed);
+    if (nextLimit !== null && (!Number.isFinite(nextLimit) || nextLimit <= 0)) {
+      notify('Petty cash limit must be a positive number', 'error');
+      return;
+    }
+    const currentLimit = s.petty_cash_payment_limit != null ? Number(s.petty_cash_payment_limit) : null;
+    if (nextLimit === currentLimit) {
+      setEditingLimitId(null);
+      return;
+    }
+    setSavingId(s.id);
+    try {
+      await updateSite(s.id, { petty_cash_payment_limit: nextLimit });
+      notify(nextLimit != null
+        ? `Petty cash limit for "${s.name}" set to ₹${nextLimit.toLocaleString('en-IN')}`
+        : `Petty cash limit for "${s.name}" reset to the default (₹50,000)`);
+      setEditingLimitId(null);
+      refresh();
+    } catch (err) {
+      notify(err instanceof Error ? err.message : 'Failed to update petty cash limit', 'error');
+    } finally {
+      setSavingId(null);
+    }
   }
 
   async function commitEdit(s: Site) {
@@ -197,15 +231,16 @@ export default function ProjectMaster() {
               <th className="px-4 py-2.5 font-medium">Status</th>
               <th className="px-4 py-2.5 font-medium text-right">Invoices</th>
               <th className="px-4 py-2.5 font-medium text-right">Users</th>
+              <th className="px-4 py-2.5 font-medium text-right">Petty Cash Limit</th>
               <th className="px-4 py-2.5 font-medium">Added</th>
               <th className="px-4 py-2.5 font-medium text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400 text-sm">Loading…</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-sm">Loading…</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400 text-sm">{search ? 'No projects match your search.' : 'No projects yet. Add one above.'}</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-sm">{search ? 'No projects match your search.' : 'No projects yet. Add one above.'}</td></tr>
             ) : filtered.map(s => (
               <tr key={s.id} className={`border-t border-gray-50 hover:bg-gray-50/50 ${!s.active ? 'opacity-60' : ''}`}>
                 <td className="px-4 py-3">
@@ -239,6 +274,34 @@ export default function ProjectMaster() {
                 </td>
                 <td className="px-4 py-3 text-right text-gray-600 tabular-nums">
                   {s.usage ? s.usage.users || '—' : '—'}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {editingLimitId === s.id ? (
+                    <div className="flex items-center gap-2 justify-end">
+                      <input
+                        autoFocus
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={editLimit}
+                        onChange={e => setEditLimit(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); commitEditLimit(s); }
+                          if (e.key === 'Escape') { e.preventDefault(); setEditingLimitId(null); }
+                        }}
+                        placeholder="50,000 (default)"
+                        className="px-2 py-1 border border-blue-300 rounded text-sm w-32 text-right focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      />
+                      <button onClick={() => commitEditLimit(s)} disabled={savingId === s.id} className="text-xs font-medium text-[#1a3c5e] hover:underline disabled:opacity-50">Save</button>
+                      <button onClick={() => setEditingLimitId(null)} className="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => startEditLimit(s)} className="text-gray-600 tabular-nums hover:text-[#1a3c5e] hover:underline">
+                      {s.petty_cash_payment_limit != null
+                        ? `₹${Number(s.petty_cash_payment_limit).toLocaleString('en-IN')}`
+                        : <span className="text-gray-400">Default (₹50,000)</span>}
+                    </button>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(s.created_at)}</td>
                 <td className="px-4 py-3 text-right">

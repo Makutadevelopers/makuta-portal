@@ -87,6 +87,15 @@ export default function MyInvoices() {
     return m;
   }, [pettyBalances]);
 
+  // Map site → per-payment petty cash cap (HO can override this per project
+  // from Project Master; falls back to the ₹50,000 default). Used to gate the
+  // "Pay" link so it matches whatever the server will actually accept.
+  const limitBySite = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const b of pettyBalances) m.set(b.site, Number(b.payment_limit ?? MINOR_LIMIT));
+    return m;
+  }, [pettyBalances]);
+
   // Group selected payable invoices by their site so we can check coverage
   // independently — petty cash is per-site, not portable.
   const bulkPaySummary = useMemo(() => {
@@ -222,7 +231,7 @@ export default function MyInvoices() {
       )}
       {!inv.pushed
         && inv.payment_status !== 'Paid'
-        && Number(inv.effective_payable ?? inv.invoice_amount) <= MINOR_LIMIT && (
+        && Number(inv.effective_payable ?? inv.invoice_amount) <= (limitBySite.get(inv.site) ?? MINOR_LIMIT) && (
         <span
           onClick={() => setPayInv(inv)}
           className="text-xs text-green-700 cursor-pointer hover:underline"

@@ -11,6 +11,7 @@ import { queryOne, query } from '../db/query';
 import { env } from '../config/env';
 import { logAudit } from '../services/audit.service';
 import { notifyResetOtp } from '../services/email.service';
+import { normaliseSiteName } from '../utils/sites';
 
 const loginSchema = z.object({
   email: z.string().email('Valid email is required'),
@@ -55,16 +56,23 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
     }
 
     // Resolve the sites array, falling back to single `site` if the array is
-    // empty (legacy users who were created before migration 018).
-    const sites = (Array.isArray(user.sites) && user.sites.length > 0)
+    // empty (legacy users who were created before migration 018). Normalise
+    // here so the JWT always carries canonical names — invoices.site and
+    // petty_cash_*.site are normalised on write (see invoice.controller.ts),
+    // but the users.sites[] column is stored as whatever an admin typed when
+    // assigning it, and a stale/aliased spelling there would silently fail
+    // every exact-string site comparison downstream (both server-side
+    // userHasSite() and client-side filters like SitePettyCash's invoice list).
+    const sites = ((Array.isArray(user.sites) && user.sites.length > 0)
       ? user.sites
-      : (user.site ? [user.site] : []);
+      : (user.site ? [user.site] : [])
+    ).map(normaliseSiteName);
 
     const payload = {
       id: user.id,
       name: user.name,
       role: user.role as 'ho' | 'site' | 'mgmt' | 'project_manager',
-      site: user.site,
+      site: user.site ? normaliseSiteName(user.site) : user.site,
       sites,
       title: user.title,
     };

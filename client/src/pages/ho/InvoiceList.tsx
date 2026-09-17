@@ -23,6 +23,7 @@ import DisputeModal from '../../components/shared/DisputeModal';
 import ActionsMenu from '../../components/shared/ActionsMenu';
 import PaymentModal from '../../components/shared/PaymentModal';
 import RevertPaymentModal from '../../components/shared/RevertPaymentModal';
+import PayFromPettyCashModal from '../../components/shared/PayFromPettyCashModal';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { useToast } from '../../context/ToastContext';
 import { normaliseSearch, highlight, amountMatchesSearch } from '../../utils/searchHighlight';
@@ -93,6 +94,7 @@ export default function InvoiceList() {
 
   // Payment modal state
   const [payInvoice, setPayInvoice] = useState<Invoice | null>(null);
+  const [pettyCashInvoice, setPettyCashInvoice] = useState<Invoice | null>(null);
   const [revertInvoice, setRevertInvoice] = useState<Invoice | null>(null);
   const [showBulkPay, setShowBulkPay] = useState(false);
   // History panel state
@@ -245,9 +247,13 @@ export default function InvoiceList() {
           ] : [
             { label: 'Undo Finalize', color: 'text-orange-600', onClick: () => handleUndo(inv.id) },
           ]),
-          ...(isNotPaid ? [{ label: 'Mark Paid', color: 'text-green-600', onClick: () => setPayInvoice(inv) }] : []),
+          ...(isNotPaid ? [
+            { label: 'Mark Paid', color: 'text-green-600', onClick: () => setPayInvoice(inv) },
+            { label: 'Pay from Petty Cash', color: 'text-green-600', onClick: () => setPettyCashInvoice(inv) },
+          ] : []),
           ...(isPartial ? [
             { label: 'Add Payment', color: 'text-green-600', onClick: () => setPayInvoice(inv) },
+            { label: 'Pay from Petty Cash', color: 'text-green-600', onClick: () => setPettyCashInvoice(inv) },
             { label: 'Payment History', color: 'text-gray-600', onClick: () => openHistory(inv) },
           ] : []),
           ...(isPaid ? [{ label: 'Payment History', color: 'text-gray-600', onClick: () => openHistory(inv) }] : []),
@@ -753,6 +759,15 @@ export default function InvoiceList() {
           balance={agingMap.get(payInvoice.id)?.balance ?? Number(payInvoice.invoice_amount)}
           onClose={() => setPayInvoice(null)}
           onSaved={() => { const id = payInvoice.id; setPayInvoice(null); notify('Payment recorded'); patchInvoice(id); }}
+        />
+      )}
+
+      {/* Pay from Petty Cash modal */}
+      {pettyCashInvoice && (
+        <PayFromPettyCashModal
+          invoice={pettyCashInvoice}
+          onClose={() => setPettyCashInvoice(null)}
+          onDone={() => { const id = pettyCashInvoice.id; setPettyCashInvoice(null); notify('Paid from petty cash'); patchInvoice(id); }}
         />
       )}
 

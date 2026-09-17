@@ -12,10 +12,21 @@
 import { Request, Response, NextFunction } from 'express';
 import {
   listSites, findSiteById, findSiteByName, siteUsage,
-  createSite, setSiteActive, renameSite,
+  createSite, setSiteActive, renameSite, setPettyCashLimit,
 } from '../services/sites.service';
 
 const MAX_NAME = 100; // matches the invoices.site zod max in invoice.controller
+const MAX_PETTY_CASH_LIMIT = 1e7; // matches the amount.max() sanity cap used elsewhere for money fields
+
+// undefined = "not provided" (leave untouched); null = "clear it" (revert to
+// the ₹50,000 default); anything else must be a positive finite number.
+function validatePettyCashLimit(raw: unknown): { limit: number | null } | { error: string } {
+  if (raw === null) return { limit: null };
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return { error: 'Petty cash limit must be a number' };
+  if (raw <= 0) return { error: 'Petty cash limit must be greater than zero' };
+  if (raw > MAX_PETTY_CASH_LIMIT) return { error: `Petty cash limit must be ${MAX_PETTY_CASH_LIMIT.toLocaleString('en-IN')} or less` };
+  return { limit: raw };
+}
 
 function validateName(raw: unknown): { name: string } | { error: string } {
   if (typeof raw !== 'string') return { error: 'Project name is required' };
@@ -94,12 +105,22 @@ export async function update(req: Request, res: Response, next: NextFunction): P
 
     const hasName = req.body?.name !== undefined;
     const nextActive = typeof req.body?.active === 'boolean' ? req.body.active : undefined;
-    if (!hasName && nextActive === undefined) {
-      res.status(400).json({ error: 'Bad Request', message: 'Nothing to update — provide name or active' });
+    const hasPettyCashLimit = req.body?.petty_cash_payment_limit !== undefined;
+    if (!hasName && nextActive === undefined && !hasPettyCashLimit) {
+      res.status(400).json({ error: 'Bad Request', message: 'Nothing to update — provide name, active or petty_cash_payment_limit' });
       return;
     }
 
     let result: unknown = existing;
+
+    if (hasPettyCashLimit) {
+      const parsedLimit = validatePettyCashLimit(req.body.petty_cash_payment_limit);
+      if ('error' in parsedLimit) {
+        res.status(400).json({ error: 'Bad Request', message: parsedLimit.error });
+        return;
+      }
+      result = await setPettyCashLimit(existing, parsedLimit.limit, req.user!.id);
+    }
 
     if (hasName) {
       const parsed = validateName(req.body.name);

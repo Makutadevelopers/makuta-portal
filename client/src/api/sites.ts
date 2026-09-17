@@ -18,6 +18,8 @@ export interface Site {
   created_at: string;
   updated_at: string;
   created_by: string | null;
+  /** Per-project petty-cash payment cap for site accountants. null = use the ₹50,000 default. */
+  petty_cash_payment_limit: string | null;
   /** Only present on the HO management listing (includeInactive=1). */
   usage?: SiteUsage;
 }
@@ -48,7 +50,7 @@ export function createSite(name: string): Promise<CreatedSite> {
 
 export function updateSite(
   id: string,
-  patch: { name?: string; active?: boolean; confirmArchiveWithData?: boolean }
+  patch: { name?: string; active?: boolean; confirmArchiveWithData?: boolean; petty_cash_payment_limit?: number | null }
 ): Promise<UpdatedSite> {
   return apiFetch<UpdatedSite>(`/sites/${id}`, {
     method: 'PATCH',

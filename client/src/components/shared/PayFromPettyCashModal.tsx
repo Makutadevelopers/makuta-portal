@@ -1,9 +1,11 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { Invoice } from '../../types/invoice';
 import { createExpense, getSiteBalance } from '../../api/pettyCash';
+import { PettyCashBalance } from '../../types/pettyCash';
 import { formatINR } from '../../utils/formatters';
+import { useAuth } from '../../hooks/useAuth';
 
-const MINOR_LIMIT = 50000;
+const DEFAULT_MINOR_LIMIT = 50000;
 
 interface Props {
   invoice: Invoice;
@@ -12,23 +14,31 @@ interface Props {
 }
 
 export default function PayFromPettyCashModal({ invoice, onClose, onDone }: Props) {
+  const { user } = useAuth();
+  // The per-payment cap only binds site accountants (backend mirrors this
+  // exactly — see petty-cash.controller.ts). HO has no cap here, same as it
+  // has none for a regular bank/cheque payment.
+  const capped = user?.role === 'site';
   const today = new Date().toISOString().split('T')[0];
   const remaining = Number(invoice.effective_payable ?? invoice.invoice_amount);
   const missingPoNumber = !invoice.po_number || !invoice.po_number.trim();
 
-  const [amount, setAmount] = useState(String(Math.min(remaining, MINOR_LIMIT)));
+  const [amount, setAmount] = useState(String(capped ? Math.min(remaining, DEFAULT_MINOR_LIMIT) : remaining));
   const [spentOn, setSpentOn] = useState(today);
   const [remarks, setRemarks] = useState('');
-  const [balance, setBalance] = useState<number | null>(null);
+  const [balanceInfo, setBalanceInfo] = useState<PettyCashBalance | null>(null);
   const [balanceError, setBalanceError] = useState('');
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState('');
 
+  const balance = balanceInfo ? Number(balanceInfo.balance) : null;
+  const minorLimit = balanceInfo ? Number(balanceInfo.payment_limit) : DEFAULT_MINOR_LIMIT;
+
   useEffect(() => {
-    setBalance(null);
+    setBalanceInfo(null);
     setBalanceError('');
     getSiteBalance(invoice.site)
-      .then(b => setBalance(Number(b.balance)))
+      .then(setBalanceInfo)
       .catch(err => setBalanceError(err instanceof Error ? err.message : 'Failed to load petty cash balance'));
   }, [invoice.site]);
 
@@ -37,8 +47,8 @@ export default function PayFromPettyCashModal({ invoice, onClose, onDone }: Prop
     setError('');
     const amt = Number(amount);
     if (!(amt > 0)) { setError('Amount must be greater than zero'); return; }
-    if (amt > MINOR_LIMIT) {
-      setError(`Site accountants can only pay up to ${formatINR(MINOR_LIMIT)} per invoice`);
+    if (capped && amt > minorLimit) {
+      setError(`Site accountants can only pay up to ${formatINR(minorLimit)} per invoice`);
       return;
     }
     if (balance !== null && amt > balance) {
@@ -86,8 +96,12 @@ export default function PayFromPettyCashModal({ invoice, onClose, onDone }: Prop
           Balance available: <span className="font-medium text-gray-700">
             {balanceError ? 'unavailable' : balance === null ? '…' : formatINR(balance)}
           </span>
-          {' · '}
-          Site limit per payment: <span className="font-medium text-gray-700">{formatINR(MINOR_LIMIT)}</span>
+          {capped && (
+            <>
+              {' · '}
+              Site limit per payment: <span className="font-medium text-gray-700">{formatINR(minorLimit)}</span>
+            </>
+          )}
         </div>
 
         {balanceError && (
