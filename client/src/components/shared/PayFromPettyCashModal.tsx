@@ -14,6 +14,7 @@ interface Props {
 export default function PayFromPettyCashModal({ invoice, onClose, onDone }: Props) {
   const today = new Date().toISOString().split('T')[0];
   const remaining = Number(invoice.effective_payable ?? invoice.invoice_amount);
+  const missingPoNumber = !invoice.po_number || !invoice.po_number.trim();
 
   const [amount, setAmount] = useState(String(Math.min(remaining, MINOR_LIMIT)));
   const [spentOn, setSpentOn] = useState(today);
@@ -42,6 +43,10 @@ export default function PayFromPettyCashModal({ invoice, onClose, onDone }: Prop
     }
     if (balance !== null && amt > balance) {
       setError(`Amount exceeds available petty cash balance (${formatINR(balance)})`);
+      return;
+    }
+    if (missingPoNumber) {
+      setError('This invoice has no PO / Work Order number. Add one before paying it from petty cash.');
       return;
     }
 
@@ -90,6 +95,11 @@ export default function PayFromPettyCashModal({ invoice, onClose, onDone }: Prop
             Couldn't load petty cash balance: {balanceError}
           </div>
         )}
+        {missingPoNumber && (
+          <div className="p-2 bg-red-50 text-red-700 rounded text-xs">
+            This invoice has no PO / Work Order number. Add one before paying it from petty cash.
+          </div>
+        )}
         {error && <div className="p-2 bg-red-50 text-red-700 rounded text-xs">{error}</div>}
 
         <div className="grid grid-cols-2 gap-3">
@@ -117,7 +127,7 @@ export default function PayFromPettyCashModal({ invoice, onClose, onDone }: Prop
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose}
             className="px-3 py-2 text-sm text-gray-600">Cancel</button>
-          <button type="submit" disabled={paying || balance === null}
+          <button type="submit" disabled={paying || balance === null || missingPoNumber}
             className="px-4 py-2 bg-[#1a3c5e] text-white text-sm rounded-lg hover:bg-[#15304d] disabled:opacity-50">
             {paying ? 'Paying…' : 'Pay from Petty Cash'}
           </button>

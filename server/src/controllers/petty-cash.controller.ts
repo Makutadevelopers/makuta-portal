@@ -432,8 +432,8 @@ export async function createExpense(req: Request, res: Response, next: NextFunct
 
       if (data.invoice_id) {
         // Pay this invoice from petty cash — mirrors payment.controller logic
-        const inv = await tx.queryOne<{ id: string; invoice_amount: string; site: string; pushed: boolean; deleted_at: string | null }>(
-          `SELECT id, invoice_amount, site, pushed, deleted_at
+        const inv = await tx.queryOne<{ id: string; invoice_amount: string; site: string; pushed: boolean; deleted_at: string | null; po_number: string | null }>(
+          `SELECT id, invoice_amount, site, pushed, deleted_at, po_number
              FROM invoices WHERE id = $1 FOR UPDATE`,
           [data.invoice_id]
         );
@@ -442,6 +442,9 @@ export async function createExpense(req: Request, res: Response, next: NextFunct
         }
         if (normaliseSiteName(inv.site) !== site) {
           return { status: 400 as const, body: { error: 'Bad Request', message: 'Invoice is not from this site' } };
+        }
+        if (!inv.po_number || !inv.po_number.trim()) {
+          return { status: 400 as const, body: { error: 'Bad Request', message: 'This invoice has no PO / Work Order number. Add one before paying it from petty cash.' } };
         }
         if (role === 'site' && inv.pushed) {
           return { status: 403 as const, body: { error: 'Forbidden', message: 'Finalized invoices can only be paid by Head Office' } };
