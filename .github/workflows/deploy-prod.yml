@@ -41,7 +41,12 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Was 15 — two consecutive clean deploys (2026-10-01) both got killed by
+    # this ceiling mid-build with no prior history of running anywhere near
+    # it (historical range: 1m18s-4m15s). Raised to give a run room to
+    # actually finish so the real completion time / failure can be seen,
+    # pending investigation into why the box got this much slower.
+    timeout-minutes: 30
     # Deploy when run manually, OR when the triggering CI run succeeded.
     # (workflow_run already filters to the "CI" workflow on the main branch.)
     if: >-
