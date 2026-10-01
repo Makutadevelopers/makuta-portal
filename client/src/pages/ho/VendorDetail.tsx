@@ -410,7 +410,7 @@ export default function VendorDetail() {
                       View
                     </a>
                     <a
-                      href={`${att.url}${att.url.includes('?') ? '&' : '?'}download=1`}
+                      href={att.downloadUrl}
                       className="px-2 py-1 text-xs text-green-600 hover:bg-green-50 rounded"
                     >
                       Download

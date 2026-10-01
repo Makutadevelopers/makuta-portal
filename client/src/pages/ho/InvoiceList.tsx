@@ -2060,7 +2060,7 @@ function HOInvoiceForm({ vendors, editInvoice, onCancel, onSaved }: {
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <a href={fullUrl} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 rounded" title="View">View</a>
-                      <a href={`${fullUrl}${fullUrl.includes('?') ? '&' : '?'}download=1`} className="px-2 py-1 text-xs text-green-600 hover:bg-green-50 rounded" title="Download">Download</a>
+                      <a href={att.downloadUrl} className="px-2 py-1 text-xs text-green-600 hover:bg-green-50 rounded" title="Download">Download</a>
                       <button type="button" onClick={() => { navigator.clipboard.writeText(fullUrl); alert('Link copied to clipboard'); }} className="px-2 py-1 text-xs text-purple-600 hover:bg-purple-50 rounded" title="Copy share link">Share</button>
                       <button type="button" onClick={async () => {
                         const ok = await confirm({

@@ -16,6 +16,7 @@ export interface VendorDetailAttachment {
   file_size: number | null;
   mime_type: string | null;
   url: string;
+  downloadUrl: string;
   uploaded_at: string;
 }
 

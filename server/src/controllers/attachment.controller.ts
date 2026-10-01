@@ -117,16 +117,32 @@ export async function getAttachments(req: Request, res: Response, next: NextFunc
     const withUrls = await Promise.all(
       attachments.map(async (att) => {
         let url: string;
+        let downloadUrl: string;
         if (att.s3_bucket === 'local') {
           url = `/api/invoices/${invoiceId}/attachments/${att.id}/download`;
+          downloadUrl = `${url}?download=1`;
         } else {
+          // Two separate presigned URLs, not one URL with a query param bolted
+          // on — S3 signs over the exact query string, so appending anything
+          // (e.g. `?download=1`) after signing invalidates the signature and
+          // the request comes back as SignatureDoesNotMatch. The disposition
+          // has to be part of what gets signed.
           url = await getSignedUrl(
             s3!,
             new GetObjectCommand({ Bucket: att.s3_bucket, Key: att.s3_key }),
             { expiresIn: 900 }
           );
+          downloadUrl = await getSignedUrl(
+            s3!,
+            new GetObjectCommand({
+              Bucket: att.s3_bucket,
+              Key: att.s3_key,
+              ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(att.file_name)}`,
+            }),
+            { expiresIn: 900 }
+          );
         }
-        return { ...att, url };
+        return { ...att, url, downloadUrl };
       })
     );
 

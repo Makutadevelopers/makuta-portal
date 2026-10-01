@@ -189,6 +189,7 @@ export interface VendorDetailAttachment {
   file_size: number | null;
   mime_type: string | null;
   url: string;
+  downloadUrl: string;
   uploaded_at: string;
 }
 
@@ -318,12 +319,26 @@ export async function getVendorDetail(
   const attachmentsByInvoice = new Map<string, VendorDetailAttachment[]>();
   await Promise.all(attachmentRows.map(async (att) => {
     let url: string;
+    let downloadUrl: string;
     if (att.s3_bucket === 'local') {
       url = `/api/invoices/${att.invoice_id}/attachments/${att.id}/download`;
+      downloadUrl = `${url}?download=1`;
     } else {
+      // Two separate presigned URLs — S3 signs over the exact query string, so
+      // tacking `?download=1` onto an already-signed URL breaks the signature
+      // (SignatureDoesNotMatch). The disposition has to be signed in up front.
       url = await getSignedUrl(
         s3!,
         new GetObjectCommand({ Bucket: att.s3_bucket, Key: att.s3_key }),
+        { expiresIn: 900 }
+      );
+      downloadUrl = await getSignedUrl(
+        s3!,
+        new GetObjectCommand({
+          Bucket: att.s3_bucket,
+          Key: att.s3_key,
+          ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(att.file_name)}`,
+        }),
         { expiresIn: 900 }
       );
     }
@@ -334,6 +349,7 @@ export async function getVendorDetail(
       file_size: att.file_size,
       mime_type: att.mime_type,
       url,
+      downloadUrl,
       uploaded_at: att.uploaded_at,
     };
     const list = attachmentsByInvoice.get(att.invoice_id) ?? [];
