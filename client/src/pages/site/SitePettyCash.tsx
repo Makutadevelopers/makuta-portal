@@ -143,11 +143,19 @@ export default function SitePettyCash() {
     );
   }, [payableInvoices, pInvoiceSearch]);
 
+  function outstandingOf(i: typeof payableInvoices[number]) {
+    return Number(i.balance ?? i.invoice_amount);
+  }
+  function isSettled(i: typeof payableInvoices[number]) {
+    return outstandingOf(i) <= 0;
+  }
+
   function invoiceLabel(i: typeof payableInvoices[number]) {
     return `${i.vendor_name} · ${i.invoice_no} · ${formatINR(Number(i.invoice_amount))}`;
   }
 
   function selectPayableInvoice(i: typeof payableInvoices[number]) {
+    if (isSettled(i)) return;
     setPInvoiceId(i.id);
     setPInvoiceSearch(invoiceLabel(i));
     setPAmount(String(i.invoice_amount));
@@ -290,10 +298,12 @@ export default function SitePettyCash() {
                         ref={invoiceKbd.itemRef(idx)}
                         onMouseDown={e => e.preventDefault()}
                         onClick={() => selectPayableInvoice(i)}
-                        className={`px-3 py-2 cursor-pointer flex items-center justify-between gap-2 ${invoiceKbd.isActive(idx) ? 'bg-blue-50' : 'hover:bg-blue-50'}`}
+                        className={`px-3 py-2 flex items-center justify-between gap-2 ${isSettled(i) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${invoiceKbd.isActive(idx) ? 'bg-blue-50' : 'hover:bg-blue-50'}`}
                       >
                         <span className="text-sm text-gray-900 truncate">{i.vendor_name} · {i.invoice_no}</span>
-                        <span className="text-xs text-gray-400 whitespace-nowrap">{formatINR(Number(i.invoice_amount))}</span>
+                        <span className="text-xs text-gray-400 whitespace-nowrap">
+                          {isSettled(i) ? 'Paid' : `Due ${formatINR(outstandingOf(i))} of ${formatINR(Number(i.invoice_amount))}`}
+                        </span>
                       </div>
                     ))}
                     {invoiceMatches.length === 0 && (
